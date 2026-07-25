@@ -146,6 +146,9 @@ downloads/
 blast_db/
 blastdb/
 
+# Generated docs / reports (temporary — track later if needed)
+docs/
+
 # Hugging Face / model caches
 .cache/huggingface/
 huggingface/

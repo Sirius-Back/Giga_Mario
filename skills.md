@@ -26,7 +26,7 @@ Discovery at runtime is owned by `@prompt-orchestrator` ([skills-map.md](.cursor
 | Skill | Brief |
 |-------|-------|
 | `do` | Multi-step parent execution engine (auditor → verify-todo → READY waves → orchestrator → review → monitor → sync). |
-| `do-fast` | Same cycle as `@do`, but one orchestration prompt to a single subagent. |
+| `do-fast` | One orchestrator; lean gates: full audit start+end, `@task-gate` mid-loop, code-review at end. |
 | `prepare` | Sync todos, assign skills/rules, order from verify-todo graph; write prepare-report. |
 | `prepare-prompt` | Create/update `./todo/*.md` from request or `todo.md`; validate via verify-todo. |
 | `generate-todo` | Build hierarchical `todo.md` from architecture/specs (not `./todo/*.md`). |
@@ -82,7 +82,9 @@ Discovery at runtime is owned by `@prompt-orchestrator` ([skills-map.md](.cursor
 | Skill | Brief |
 |-------|-------|
 | `caduceus` | Caduceus DNA LM facts (HF, Hydra, RC/Ph/PS); folds via `@split`; pipelines via `@do-fast`. |
-| `split` | Build train/val/test/(zero-shot) from `splits/*.md`; execute via `@do-fast`. |
+| `split` | Build train/val/test/(zero-shot) from `splits/*.md`; execute via lean `@do-fast`. |
+| `task-gate` | Brief post-task output/AC smoke check (not full audit or code-review). |
+| `genome-fna-gtf-reformat` | Index paired `.fna`/`.gtf` genomes; optional distinct-species subsample; manifests for `@split`. |
 | `benchmark-designer` | Design rigorous benchmarking experiments. |
 
 ### Manuscript & QA
