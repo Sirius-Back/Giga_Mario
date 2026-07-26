@@ -17,10 +17,19 @@ credentials*
 .env.*
 
 # --- Editor / IDE / tooling caches ---
-# Track project Agent Skills; ignore the rest of .cursor
+# Track project Agent Skills only; ignore Cursor IDE state
+# (nested .cursor/.gitignore un-ignores plugins/projects/rules — re-block here)
 .cursor/*
 !.cursor/skills/
 !.cursor/skills/**
+.cursor/plugins/
+.cursor/projects/
+.cursor/skills-cursor/
+.cursor/rules/
+.cursor/hooks/
+.cursor/debug-logs/
+.cursor/ide_state.json
+.cursor/hooks.json
 .cursor-server/
 .vscode/
 .idea/
