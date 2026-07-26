@@ -1,0 +1,5 @@
+# Local skill runtime junk (keep skill sources trackable)
+__pycache__/
+*.py[cod]
+*.log
+.ipynb_checkpoints/

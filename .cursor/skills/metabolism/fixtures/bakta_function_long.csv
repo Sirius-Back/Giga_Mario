@@ -1,0 +1,32 @@
+sample,function_type,function_id,count,function_label
+S1,product,product:NAD-specific glutamate dehydrogenase,40,product|product:NAD-specific glutamate dehydrogenase
+S1,product,product:DNA gyrase subunit A,25,product|product:DNA gyrase subunit A
+S1,product,product:ATP synthase subunit beta,30,product|product:ATP synthase subunit beta
+S1,product,product:hypothetical protein,100,product|product:hypothetical protein
+S1,product,product:elongation factor Tu,18,product|product:elongation factor Tu
+S1,product,product:chaperone protein DnaK,22,product|product:chaperone protein DnaK
+S1,ko,ko:K00053,12,ko|ko:K00053
+S1,ko,ko:K00986,8,ko|ko:K00986
+S1,ec,ec:7.1.2.2,6,ec|ec:7.1.2.2
+S1,go,go:0005886,15,go|go:0005886
+S2,product,product:NAD-specific glutamate dehydrogenase,10,product|product:NAD-specific glutamate dehydrogenase
+S2,product,product:DNA gyrase subunit A,35,product|product:DNA gyrase subunit A
+S2,product,product:ATP synthase subunit beta,20,product|product:ATP synthase subunit beta
+S2,product,product:hypothetical protein,80,product|product:hypothetical protein
+S2,product,product:elongation factor Tu,28,product|product:elongation factor Tu
+S2,product,product:chaperone protein DnaK,12,product|product:chaperone protein DnaK
+S2,ko,ko:K00053,5,ko|ko:K00053
+S2,ko,ko:K00986,14,ko|ko:K00986
+S2,ec,ec:7.1.2.2,9,ec|ec:7.1.2.2
+S2,go,go:0005886,11,go|go:0005886
+S3,product,product:NAD-specific glutamate dehydrogenase,22,product|product:NAD-specific glutamate dehydrogenase
+S3,product,product:DNA gyrase subunit A,15,product|product:DNA gyrase subunit A
+S3,product,product:ATP synthase subunit beta,40,product|product:ATP synthase subunit beta
+S3,product,product:hypothetical protein,90,product|product:hypothetical protein
+S3,product,product:elongation factor Tu,10,product|product:elongation factor Tu
+S3,product,product:chaperone protein DnaK,30,product|product:chaperone protein DnaK
+S3,product,product:RNA polymerase sigma factor,16,product|product:RNA polymerase sigma factor
+S3,ko,ko:K00053,9,ko|ko:K00053
+S3,ko,ko:K00986,4,ko|ko:K00986
+S3,ec,ec:7.1.2.2,3,ec|ec:7.1.2.2
+S3,go,go:0005737,7,go|go:0005737

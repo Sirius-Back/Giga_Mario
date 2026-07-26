@@ -1,0 +1,998 @@
+"sample","function_type","function_id","function_label","count"
+"A5","ec","ec:1.6.5.9","ec|ec:1.6.5.9",10
+"A5","ec","ec:2.1.1.-","ec|ec:2.1.1.-",1
+"A5","ec","ec:2.1.1.170","ec|ec:2.1.1.170",1
+"A5","ec","ec:2.4.2.9","ec|ec:2.4.2.9",2
+"A5","ec","ec:2.7.7.6","ec|ec:2.7.7.6",4
+"A5","ec","ec:2.7.7.7","ec|ec:2.7.7.7",8
+"A5","ec","ec:2.7.8.-","ec|ec:2.7.8.-",4
+"A5","ec","ec:3.1.-.-","ec|ec:3.1.-.-",5
+"A5","ec","ec:3.1.21.10","ec|ec:3.1.21.10",2
+"A5","ec","ec:3.4.24.-","ec|ec:3.4.24.-",2
+"A5","ec","ec:3.5.1.2","ec|ec:3.5.1.2",2
+"A5","ec","ec:3.5.1.88","ec|ec:3.5.1.88",1
+"A5","ec","ec:3.6.1.-","ec|ec:3.6.1.-",1
+"A5","ec","ec:3.6.4.-","ec|ec:3.6.4.-",1
+"A5","ec","ec:3.6.4.12","ec|ec:3.6.4.12",3
+"A5","ec","ec:3.6.5.-","ec|ec:3.6.5.-",2
+"A5","ec","ec:5.4.99.62","ec|ec:5.4.99.62",1
+"A5","ec","ec:5.6.2.3","ec|ec:5.6.2.3",2
+"A5","ec","ec:6.3.5.3","ec|ec:6.3.5.3",2
+"A5","ec","ec:7.1.2.2","ec|ec:7.1.2.2",8
+"A5","go","go:0000049","go|go:0000049",17
+"A5","go","go:0000105","go|go:0000105",10
+"A5","go","go:0000166","go|go:0000166",17
+"A5","go","go:0000287","go|go:0000287",28
+"A5","go","go:0000314","go|go:0000314",2
+"A5","go","go:0000428","go|go:0000428",4
+"A5","go","go:0000917","go|go:0000917",1
+"A5","go","go:0000976","go|go:0000976",2
+"A5","ko","ko:K00053","ko|ko:K00053",1
+"A5","ko","ko:K01126","ko|ko:K01126",2
+"A5","ko","ko:K01462","ko|ko:K01462",1
+"A5","ko","ko:K02314","ko|ko:K02314",1
+"A5","ko","ko:K02834","ko|ko:K02834",1
+"A5","ko","ko:K02864","ko|ko:K02864",1
+"A5","ko","ko:K02871","ko|ko:K02871",1
+"A5","ko","ko:K02874","ko|ko:K02874",1
+"A5","ko","ko:K02913","ko|ko:K02913",2
+"A5","ko","ko:K02948","ko|ko:K02948",1
+"A5","ko","ko:K02950","ko|ko:K02950",1
+"A5","ko","ko:K02954","ko|ko:K02954",2
+"A5","ko","ko:K02963","ko|ko:K02963",1
+"A5","ko","ko:K02968","ko|ko:K02968",1
+"A5","ko","ko:K02982","ko|ko:K02982",1
+"A5","ko","ko:K02990","ko|ko:K02990",1
+"A5","ko","ko:K02992","ko|ko:K02992",1
+"A5","ko","ko:K03100","ko|ko:K03100",1
+"A5","ko","ko:K03217","ko|ko:K03217",1
+"A5","ko","ko:K03282","ko|ko:K03282",1
+"A5","ko","ko:K03402","ko|ko:K03402",1
+"A5","ko","ko:K03424","ko|ko:K03424",1
+"A5","ko","ko:K03975","ko|ko:K03975",2
+"A5","ko","ko:K06726","ko|ko:K06726",1
+"A5","ko","ko:K06901","ko|ko:K06901",1
+"A5","product","product:16S rRNA (guanine(527)-N(7))-methyltransferase RsmG","product|product:16S rRNA (guanine(527)-N(7))-methyltransferase RsmG",1
+"A5","product","product:30S ribosomal protein S10","product|product:30S ribosomal protein S10",1
+"A5","product","product:30S ribosomal protein S11","product|product:30S ribosomal protein S11",1
+"A5","product","product:30S ribosomal protein S12","product|product:30S ribosomal protein S12",1
+"A5","product","product:30S ribosomal protein S18","product|product:30S ribosomal protein S18",1
+"A5","product","product:30S ribosomal protein S20","product|product:30S ribosomal protein S20",1
+"A5","product","product:30S ribosomal protein S3","product|product:30S ribosomal protein S3",1
+"A5","product","product:30S ribosomal protein S5","product|product:30S ribosomal protein S5",1
+"A5","product","product:50S ribosomal protein L10","product|product:50S ribosomal protein L10",1
+"A5","product","product:50S ribosomal protein L13","product|product:50S ribosomal protein L13",1
+"A5","product","product:50S ribosomal protein L15","product|product:50S ribosomal protein L15",1
+"A5","product","product:50S ribosomal protein L16","product|product:50S ribosomal protein L16",1
+"A5","product","product:50S ribosomal protein L23","product|product:50S ribosomal protein L23",1
+"A5","product","product:50S ribosomal protein L29","product|product:50S ribosomal protein L29",1
+"A5","product","product:50S ribosomal protein L3","product|product:50S ribosomal protein L3",1
+"A5","product","product:50S ribosomal protein L33","product|product:50S ribosomal protein L33",2
+"A5","product","product:6-phosphofructokinase","product|product:6-phosphofructokinase",1
+"A5","product","product:ABC transmembrane type-1 domain-containing protein","product|product:ABC transmembrane type-1 domain-containing protein",1
+"A5","product","product:ABC transporter ATP-binding protein","product|product:ABC transporter ATP-binding protein",19
+"A5","product","product:ABC transporter domain-containing protein","product|product:ABC transporter domain-containing protein",2
+"A5","product","product:ABC transporter permease","product|product:ABC transporter permease",29
+"A5","product","product:ABC transporter substrate-binding protein","product|product:ABC transporter substrate-binding protein",5
+"A5","product","product:ATP-binding cassette domain-containing protein","product|product:ATP-binding cassette domain-containing protein",2
+"A5","product","product:ATP-binding protein","product|product:ATP-binding protein",4
+"A5","product","product:Acetyltransferase","product|product:Acetyltransferase",1
+"A5","product","product:Alcohol dehydrogenase","product|product:Alcohol dehydrogenase",3
+"A5","product","product:Asp23/Gls24 family envelope stress response protein","product|product:Asp23/Gls24 family envelope stress response protein",4
+"A5","product","product:D-ribose pyranase","product|product:D-ribose pyranase",1
+"A5","product","product:DNA-binding protein","product|product:DNA-binding protein",3
+"A5","product","product:F0F1 ATP synthase subunit epsilon","product|product:F0F1 ATP synthase subunit epsilon",1
+"A5","product","product:GNAT family N-acetyltransferase","product|product:GNAT family N-acetyltransferase",3
+"A5","product","product:L-lactate permease","product|product:L-lactate permease",1
+"A5","product","product:Lipoprotein","product|product:Lipoprotein",21
+"A5","product","product:MFS transporter","product|product:MFS transporter",13
+"A5","product","product:Major facilitator superfamily (MFS) profile domain-containing protein","product|product:Major facilitator superfamily (MFS) profile domain-containing protein",1
+"A5","product","product:Membrane protein","product|product:Membrane protein",3
+"A5","product","product:Methyltransferase","product|product:Methyltransferase",5
+"A5","product","product:N-acetyltransferase","product|product:N-acetyltransferase",5
+"A5","product","product:N-acetyltransferase domain-containing protein","product|product:N-acetyltransferase domain-containing protein",5
+"A5","product","product:Peptidyl-prolyl cis-trans isomerase","product|product:Peptidyl-prolyl cis-trans isomerase",3
+"A5","product","product:Putative membrane protein","product|product:Putative membrane protein",5
+"A5","product","product:SDR family oxidoreductase","product|product:SDR family oxidoreductase",1
+"A5","product","product:Secreted protein","product|product:Secreted protein",12
+"A5","product","product:Transcriptional regulator","product|product:Transcriptional regulator",16
+"A5","product","product:Transporter","product|product:Transporter",5
+"A5","product","product:Transposase","product|product:Transposase",3
+"A5","product","product:dUTP diphosphatase","product|product:dUTP diphosphatase",1
+"A5","product","product:histidine kinase","product|product:histidine kinase",9
+"A5","product","product:phosphoribosylformylglycinamidine synthase subunit PurQ","product|product:phosphoribosylformylglycinamidine synthase subunit PurQ",1
+"B2","ec","ec:1.6.5.9","ec|ec:1.6.5.9",2
+"B2","ec","ec:2.1.1.-","ec|ec:2.1.1.-",1
+"B2","ec","ec:2.1.1.170","ec|ec:2.1.1.170",1
+"B2","ec","ec:2.4.2.9","ec|ec:2.4.2.9",3
+"B2","ec","ec:2.7.7.6","ec|ec:2.7.7.6",3
+"B2","ec","ec:2.7.7.7","ec|ec:2.7.7.7",1
+"B2","ec","ec:2.7.8.-","ec|ec:2.7.8.-",2
+"B2","ec","ec:3.1.-.-","ec|ec:3.1.-.-",4
+"B2","ec","ec:3.1.21.10","ec|ec:3.1.21.10",2
+"B2","ec","ec:3.4.24.-","ec|ec:3.4.24.-",1
+"B2","ec","ec:3.5.1.2","ec|ec:3.5.1.2",1
+"B2","ec","ec:3.5.1.88","ec|ec:3.5.1.88",1
+"B2","ec","ec:3.6.1.-","ec|ec:3.6.1.-",1
+"B2","ec","ec:3.6.4.-","ec|ec:3.6.4.-",1
+"B2","ec","ec:3.6.4.12","ec|ec:3.6.4.12",2
+"B2","ec","ec:3.6.5.-","ec|ec:3.6.5.-",2
+"B2","ec","ec:5.4.99.62","ec|ec:5.4.99.62",1
+"B2","ec","ec:5.6.2.3","ec|ec:5.6.2.3",1
+"B2","ec","ec:6.3.5.3","ec|ec:6.3.5.3",3
+"B2","ec","ec:7.1.2.2","ec|ec:7.1.2.2",4
+"B2","go","go:0000049","go|go:0000049",9
+"B2","go","go:0000105","go|go:0000105",5
+"B2","go","go:0000166","go|go:0000166",6
+"B2","go","go:0000287","go|go:0000287",18
+"B2","go","go:0000314","go|go:0000314",2
+"B2","go","go:0000428","go|go:0000428",3
+"B2","go","go:0000917","go|go:0000917",2
+"B2","go","go:0000976","go|go:0000976",2
+"B2","ko","ko:K01126","ko|ko:K01126",2
+"B2","ko","ko:K01462","ko|ko:K01462",1
+"B2","ko","ko:K02314","ko|ko:K02314",1
+"B2","ko","ko:K02834","ko|ko:K02834",2
+"B2","ko","ko:K02864","ko|ko:K02864",1
+"B2","ko","ko:K02874","ko|ko:K02874",1
+"B2","ko","ko:K02913","ko|ko:K02913",2
+"B2","ko","ko:K02948","ko|ko:K02948",1
+"B2","ko","ko:K02950","ko|ko:K02950",1
+"B2","ko","ko:K02954","ko|ko:K02954",1
+"B2","ko","ko:K02963","ko|ko:K02963",1
+"B2","ko","ko:K02968","ko|ko:K02968",1
+"B2","ko","ko:K02990","ko|ko:K02990",1
+"B2","ko","ko:K02992","ko|ko:K02992",1
+"B2","ko","ko:K03100","ko|ko:K03100",1
+"B2","ko","ko:K03217","ko|ko:K03217",2
+"B2","ko","ko:K03282","ko|ko:K03282",1
+"B2","ko","ko:K03402","ko|ko:K03402",1
+"B2","ko","ko:K03975","ko|ko:K03975",2
+"B2","ko","ko:K06726","ko|ko:K06726",1
+"B2","ko","ko:K06901","ko|ko:K06901",2
+"B2","product","product:16S rRNA (guanine(527)-N(7))-methyltransferase RsmG","product|product:16S rRNA (guanine(527)-N(7))-methyltransferase RsmG",1
+"B2","product","product:30S ribosomal protein S10","product|product:30S ribosomal protein S10",1
+"B2","product","product:30S ribosomal protein S11","product|product:30S ribosomal protein S11",1
+"B2","product","product:30S ribosomal protein S12","product|product:30S ribosomal protein S12",1
+"B2","product","product:30S ribosomal protein S18","product|product:30S ribosomal protein S18",1
+"B2","product","product:30S ribosomal protein S20","product|product:30S ribosomal protein S20",1
+"B2","product","product:30S ribosomal protein S3","product|product:30S ribosomal protein S3",1
+"B2","product","product:30S ribosomal protein S5","product|product:30S ribosomal protein S5",1
+"B2","product","product:50S ribosomal protein L10","product|product:50S ribosomal protein L10",1
+"B2","product","product:50S ribosomal protein L13","product|product:50S ribosomal protein L13",1
+"B2","product","product:50S ribosomal protein L15","product|product:50S ribosomal protein L15",1
+"B2","product","product:50S ribosomal protein L16","product|product:50S ribosomal protein L16",1
+"B2","product","product:50S ribosomal protein L23","product|product:50S ribosomal protein L23",1
+"B2","product","product:50S ribosomal protein L29","product|product:50S ribosomal protein L29",1
+"B2","product","product:50S ribosomal protein L3","product|product:50S ribosomal protein L3",1
+"B2","product","product:50S ribosomal protein L33","product|product:50S ribosomal protein L33",2
+"B2","product","product:6-phosphofructokinase","product|product:6-phosphofructokinase",1
+"B2","product","product:ABC transmembrane type-1 domain-containing protein","product|product:ABC transmembrane type-1 domain-containing protein",6
+"B2","product","product:ABC transporter ATP-binding protein","product|product:ABC transporter ATP-binding protein",4
+"B2","product","product:ABC transporter domain-containing protein","product|product:ABC transporter domain-containing protein",3
+"B2","product","product:ABC transporter permease","product|product:ABC transporter permease",5
+"B2","product","product:ABC transporter substrate-binding protein","product|product:ABC transporter substrate-binding protein",3
+"B2","product","product:ATP-binding cassette domain-containing protein","product|product:ATP-binding cassette domain-containing protein",3
+"B2","product","product:ATP-binding protein","product|product:ATP-binding protein",2
+"B2","product","product:Acetyltransferase","product|product:Acetyltransferase",3
+"B2","product","product:Alcohol dehydrogenase","product|product:Alcohol dehydrogenase",4
+"B2","product","product:Asp23/Gls24 family envelope stress response protein","product|product:Asp23/Gls24 family envelope stress response protein",1
+"B2","product","product:D-ribose pyranase","product|product:D-ribose pyranase",1
+"B2","product","product:DNA-binding protein","product|product:DNA-binding protein",2
+"B2","product","product:F0F1 ATP synthase subunit epsilon","product|product:F0F1 ATP synthase subunit epsilon",1
+"B2","product","product:GNAT family N-acetyltransferase","product|product:GNAT family N-acetyltransferase",2
+"B2","product","product:L-lactate permease","product|product:L-lactate permease",1
+"B2","product","product:Lipoprotein","product|product:Lipoprotein",9
+"B2","product","product:MFS transporter","product|product:MFS transporter",7
+"B2","product","product:Major facilitator superfamily (MFS) profile domain-containing protein","product|product:Major facilitator superfamily (MFS) profile domain-containing protein",5
+"B2","product","product:Membrane protein","product|product:Membrane protein",1
+"B2","product","product:N-acetyltransferase","product|product:N-acetyltransferase",5
+"B2","product","product:N-acetyltransferase domain-containing protein","product|product:N-acetyltransferase domain-containing protein",1
+"B2","product","product:Peptidyl-prolyl cis-trans isomerase","product|product:Peptidyl-prolyl cis-trans isomerase",1
+"B2","product","product:Putative membrane protein","product|product:Putative membrane protein",2
+"B2","product","product:SDR family oxidoreductase","product|product:SDR family oxidoreductase",2
+"B2","product","product:Secreted protein","product|product:Secreted protein",3
+"B2","product","product:Transcriptional regulator","product|product:Transcriptional regulator",6
+"B2","product","product:Transporter","product|product:Transporter",1
+"B2","product","product:Transposase","product|product:Transposase",11
+"B2","product","product:dUTP diphosphatase","product|product:dUTP diphosphatase",1
+"B2","product","product:helix-turn-helix domain-containing protein","product|product:helix-turn-helix domain-containing protein",3
+"B2","product","product:histidine kinase","product|product:histidine kinase",2
+"B2","product","product:phosphoribosylformylglycinamidine synthase subunit PurQ","product|product:phosphoribosylformylglycinamidine synthase subunit PurQ",1
+"B1","ec","ec:1.6.5.9","ec|ec:1.6.5.9",7
+"B1","ec","ec:2.1.1.-","ec|ec:2.1.1.-",1
+"B1","ec","ec:2.1.1.170","ec|ec:2.1.1.170",1
+"B1","ec","ec:2.4.2.9","ec|ec:2.4.2.9",2
+"B1","ec","ec:2.7.7.6","ec|ec:2.7.7.6",3
+"B1","ec","ec:2.7.7.7","ec|ec:2.7.7.7",2
+"B1","ec","ec:2.7.8.-","ec|ec:2.7.8.-",2
+"B1","ec","ec:3.1.-.-","ec|ec:3.1.-.-",6
+"B1","ec","ec:3.1.21.10","ec|ec:3.1.21.10",1
+"B1","ec","ec:3.4.24.-","ec|ec:3.4.24.-",1
+"B1","ec","ec:3.5.1.2","ec|ec:3.5.1.2",2
+"B1","ec","ec:3.5.1.88","ec|ec:3.5.1.88",1
+"B1","ec","ec:3.6.1.-","ec|ec:3.6.1.-",1
+"B1","ec","ec:3.6.4.-","ec|ec:3.6.4.-",1
+"B1","ec","ec:3.6.4.12","ec|ec:3.6.4.12",2
+"B1","ec","ec:3.6.5.-","ec|ec:3.6.5.-",2
+"B1","ec","ec:5.4.99.62","ec|ec:5.4.99.62",1
+"B1","ec","ec:5.6.2.3","ec|ec:5.6.2.3",1
+"B1","ec","ec:6.3.5.3","ec|ec:6.3.5.3",1
+"B1","ec","ec:7.1.2.2","ec|ec:7.1.2.2",6
+"B1","go","go:0000049","go|go:0000049",11
+"B1","go","go:0000105","go|go:0000105",8
+"B1","go","go:0000166","go|go:0000166",10
+"B1","go","go:0000287","go|go:0000287",18
+"B1","go","go:0000314","go|go:0000314",3
+"B1","go","go:0000428","go|go:0000428",3
+"B1","go","go:0000917","go|go:0000917",1
+"B1","go","go:0000976","go|go:0000976",1
+"B1","ko","ko:K00053","ko|ko:K00053",1
+"B1","ko","ko:K01126","ko|ko:K01126",1
+"B1","ko","ko:K01462","ko|ko:K01462",1
+"B1","ko","ko:K02314","ko|ko:K02314",1
+"B1","ko","ko:K02834","ko|ko:K02834",1
+"B1","ko","ko:K02864","ko|ko:K02864",1
+"B1","ko","ko:K02871","ko|ko:K02871",1
+"B1","ko","ko:K02913","ko|ko:K02913",2
+"B1","ko","ko:K02948","ko|ko:K02948",1
+"B1","ko","ko:K02950","ko|ko:K02950",1
+"B1","ko","ko:K02954","ko|ko:K02954",3
+"B1","ko","ko:K02963","ko|ko:K02963",2
+"B1","ko","ko:K02968","ko|ko:K02968",1
+"B1","ko","ko:K02982","ko|ko:K02982",1
+"B1","ko","ko:K02990","ko|ko:K02990",1
+"B1","ko","ko:K02992","ko|ko:K02992",1
+"B1","ko","ko:K03217","ko|ko:K03217",1
+"B1","ko","ko:K03282","ko|ko:K03282",1
+"B1","ko","ko:K03402","ko|ko:K03402",1
+"B1","ko","ko:K03424","ko|ko:K03424",1
+"B1","ko","ko:K03975","ko|ko:K03975",2
+"B1","ko","ko:K06726","ko|ko:K06726",1
+"B1","ko","ko:K06901","ko|ko:K06901",1
+"B1","product","product:16S rRNA (guanine(527)-N(7))-methyltransferase RsmG","product|product:16S rRNA (guanine(527)-N(7))-methyltransferase RsmG",1
+"B1","product","product:30S ribosomal protein S10","product|product:30S ribosomal protein S10",1
+"B1","product","product:30S ribosomal protein S11","product|product:30S ribosomal protein S11",1
+"B1","product","product:30S ribosomal protein S12","product|product:30S ribosomal protein S12",1
+"B1","product","product:30S ribosomal protein S18","product|product:30S ribosomal protein S18",2
+"B1","product","product:30S ribosomal protein S20","product|product:30S ribosomal protein S20",1
+"B1","product","product:30S ribosomal protein S3","product|product:30S ribosomal protein S3",1
+"B1","product","product:30S ribosomal protein S5","product|product:30S ribosomal protein S5",1
+"B1","product","product:50S ribosomal protein L10","product|product:50S ribosomal protein L10",1
+"B1","product","product:50S ribosomal protein L13","product|product:50S ribosomal protein L13",1
+"B1","product","product:50S ribosomal protein L15","product|product:50S ribosomal protein L15",1
+"B1","product","product:50S ribosomal protein L16","product|product:50S ribosomal protein L16",1
+"B1","product","product:50S ribosomal protein L23","product|product:50S ribosomal protein L23",1
+"B1","product","product:50S ribosomal protein L29","product|product:50S ribosomal protein L29",1
+"B1","product","product:50S ribosomal protein L3","product|product:50S ribosomal protein L3",1
+"B1","product","product:50S ribosomal protein L33","product|product:50S ribosomal protein L33",2
+"B1","product","product:6-phosphofructokinase","product|product:6-phosphofructokinase",1
+"B1","product","product:ABC transmembrane type-1 domain-containing protein","product|product:ABC transmembrane type-1 domain-containing protein",1
+"B1","product","product:ABC transporter ATP-binding protein","product|product:ABC transporter ATP-binding protein",10
+"B1","product","product:ABC transporter domain-containing protein","product|product:ABC transporter domain-containing protein",5
+"B1","product","product:ABC transporter permease","product|product:ABC transporter permease",17
+"B1","product","product:ABC transporter substrate-binding protein","product|product:ABC transporter substrate-binding protein",4
+"B1","product","product:ATP-binding cassette domain-containing protein","product|product:ATP-binding cassette domain-containing protein",1
+"B1","product","product:ATP-binding protein","product|product:ATP-binding protein",5
+"B1","product","product:Acetyltransferase","product|product:Acetyltransferase",1
+"B1","product","product:Alcohol dehydrogenase","product|product:Alcohol dehydrogenase",3
+"B1","product","product:Asp23/Gls24 family envelope stress response protein","product|product:Asp23/Gls24 family envelope stress response protein",3
+"B1","product","product:D-ribose pyranase","product|product:D-ribose pyranase",1
+"B1","product","product:DNA-binding protein","product|product:DNA-binding protein",2
+"B1","product","product:F0F1 ATP synthase subunit epsilon","product|product:F0F1 ATP synthase subunit epsilon",1
+"B1","product","product:GNAT family N-acetyltransferase","product|product:GNAT family N-acetyltransferase",3
+"B1","product","product:L-lactate permease","product|product:L-lactate permease",1
+"B1","product","product:Lipoprotein","product|product:Lipoprotein",15
+"B1","product","product:MFS transporter","product|product:MFS transporter",14
+"B1","product","product:Major facilitator superfamily (MFS) profile domain-containing protein","product|product:Major facilitator superfamily (MFS) profile domain-containing protein",3
+"B1","product","product:Membrane protein","product|product:Membrane protein",3
+"B1","product","product:Methyltransferase","product|product:Methyltransferase",2
+"B1","product","product:N-acetyltransferase","product|product:N-acetyltransferase",5
+"B1","product","product:N-acetyltransferase domain-containing protein","product|product:N-acetyltransferase domain-containing protein",2
+"B1","product","product:Peptidyl-prolyl cis-trans isomerase","product|product:Peptidyl-prolyl cis-trans isomerase",3
+"B1","product","product:Putative membrane protein","product|product:Putative membrane protein",3
+"B1","product","product:SDR family oxidoreductase","product|product:SDR family oxidoreductase",3
+"B1","product","product:Secreted protein","product|product:Secreted protein",9
+"B1","product","product:Transcriptional regulator","product|product:Transcriptional regulator",14
+"B1","product","product:Transporter","product|product:Transporter",3
+"B1","product","product:Transposase","product|product:Transposase",13
+"B1","product","product:dUTP diphosphatase","product|product:dUTP diphosphatase",2
+"B1","product","product:helix-turn-helix domain-containing protein","product|product:helix-turn-helix domain-containing protein",3
+"B1","product","product:histidine kinase","product|product:histidine kinase",6
+"B1","product","product:phosphoribosylformylglycinamidine synthase subunit PurQ","product|product:phosphoribosylformylglycinamidine synthase subunit PurQ",1
+"B3","ec","ec:1.6.5.9","ec|ec:1.6.5.9",5
+"B3","ec","ec:2.1.1.-","ec|ec:2.1.1.-",1
+"B3","ec","ec:2.1.1.170","ec|ec:2.1.1.170",1
+"B3","ec","ec:2.4.2.9","ec|ec:2.4.2.9",2
+"B3","ec","ec:2.7.7.6","ec|ec:2.7.7.6",2
+"B3","ec","ec:2.7.7.7","ec|ec:2.7.7.7",3
+"B3","ec","ec:2.7.8.-","ec|ec:2.7.8.-",2
+"B3","ec","ec:3.1.-.-","ec|ec:3.1.-.-",2
+"B3","ec","ec:3.1.21.10","ec|ec:3.1.21.10",1
+"B3","ec","ec:3.4.24.-","ec|ec:3.4.24.-",1
+"B3","ec","ec:3.5.1.2","ec|ec:3.5.1.2",2
+"B3","ec","ec:3.5.1.88","ec|ec:3.5.1.88",1
+"B3","ec","ec:3.6.1.-","ec|ec:3.6.1.-",1
+"B3","ec","ec:3.6.4.12","ec|ec:3.6.4.12",2
+"B3","ec","ec:3.6.5.-","ec|ec:3.6.5.-",1
+"B3","ec","ec:5.4.99.62","ec|ec:5.4.99.62",1
+"B3","ec","ec:5.6.2.3","ec|ec:5.6.2.3",2
+"B3","ec","ec:6.3.5.3","ec|ec:6.3.5.3",3
+"B3","ec","ec:7.1.2.2","ec|ec:7.1.2.2",7
+"B3","go","go:0000049","go|go:0000049",9
+"B3","go","go:0000105","go|go:0000105",5
+"B3","go","go:0000166","go|go:0000166",5
+"B3","go","go:0000287","go|go:0000287",14
+"B3","go","go:0000314","go|go:0000314",2
+"B3","go","go:0000428","go|go:0000428",2
+"B3","go","go:0000917","go|go:0000917",1
+"B3","go","go:0000976","go|go:0000976",1
+"B3","ko","ko:K00053","ko|ko:K00053",1
+"B3","ko","ko:K01126","ko|ko:K01126",2
+"B3","ko","ko:K01462","ko|ko:K01462",1
+"B3","ko","ko:K02314","ko|ko:K02314",1
+"B3","ko","ko:K02834","ko|ko:K02834",2
+"B3","ko","ko:K02864","ko|ko:K02864",1
+"B3","ko","ko:K02871","ko|ko:K02871",1
+"B3","ko","ko:K02874","ko|ko:K02874",2
+"B3","ko","ko:K02913","ko|ko:K02913",3
+"B3","ko","ko:K02948","ko|ko:K02948",2
+"B3","ko","ko:K02950","ko|ko:K02950",3
+"B3","ko","ko:K02954","ko|ko:K02954",2
+"B3","ko","ko:K02963","ko|ko:K02963",1
+"B3","ko","ko:K02968","ko|ko:K02968",1
+"B3","ko","ko:K02982","ko|ko:K02982",1
+"B3","ko","ko:K02990","ko|ko:K02990",1
+"B3","ko","ko:K02992","ko|ko:K02992",1
+"B3","ko","ko:K03100","ko|ko:K03100",1
+"B3","ko","ko:K03217","ko|ko:K03217",1
+"B3","ko","ko:K03282","ko|ko:K03282",1
+"B3","ko","ko:K03402","ko|ko:K03402",2
+"B3","ko","ko:K03424","ko|ko:K03424",1
+"B3","ko","ko:K03975","ko|ko:K03975",1
+"B3","ko","ko:K06726","ko|ko:K06726",1
+"B3","ko","ko:K06901","ko|ko:K06901",1
+"B3","product","product:16S rRNA (guanine(527)-N(7))-methyltransferase RsmG","product|product:16S rRNA (guanine(527)-N(7))-methyltransferase RsmG",1
+"B3","product","product:30S ribosomal protein S10","product|product:30S ribosomal protein S10",1
+"B3","product","product:30S ribosomal protein S11","product|product:30S ribosomal protein S11",2
+"B3","product","product:30S ribosomal protein S12","product|product:30S ribosomal protein S12",3
+"B3","product","product:30S ribosomal protein S18","product|product:30S ribosomal protein S18",1
+"B3","product","product:30S ribosomal protein S20","product|product:30S ribosomal protein S20",1
+"B3","product","product:30S ribosomal protein S3","product|product:30S ribosomal protein S3",1
+"B3","product","product:30S ribosomal protein S5","product|product:30S ribosomal protein S5",1
+"B3","product","product:50S ribosomal protein L10","product|product:50S ribosomal protein L10",1
+"B3","product","product:50S ribosomal protein L13","product|product:50S ribosomal protein L13",2
+"B3","product","product:50S ribosomal protein L15","product|product:50S ribosomal protein L15",1
+"B3","product","product:50S ribosomal protein L16","product|product:50S ribosomal protein L16",1
+"B3","product","product:50S ribosomal protein L23","product|product:50S ribosomal protein L23",2
+"B3","product","product:50S ribosomal protein L29","product|product:50S ribosomal protein L29",1
+"B3","product","product:50S ribosomal protein L3","product|product:50S ribosomal protein L3",1
+"B3","product","product:50S ribosomal protein L33","product|product:50S ribosomal protein L33",4
+"B3","product","product:6-phosphofructokinase","product|product:6-phosphofructokinase",1
+"B3","product","product:ABC transmembrane type-1 domain-containing protein","product|product:ABC transmembrane type-1 domain-containing protein",2
+"B3","product","product:ABC transporter ATP-binding protein","product|product:ABC transporter ATP-binding protein",8
+"B3","product","product:ABC transporter domain-containing protein","product|product:ABC transporter domain-containing protein",5
+"B3","product","product:ABC transporter permease","product|product:ABC transporter permease",13
+"B3","product","product:ABC transporter substrate-binding protein","product|product:ABC transporter substrate-binding protein",6
+"B3","product","product:ATP-binding cassette domain-containing protein","product|product:ATP-binding cassette domain-containing protein",6
+"B3","product","product:ATP-binding protein","product|product:ATP-binding protein",2
+"B3","product","product:Acetyltransferase","product|product:Acetyltransferase",1
+"B3","product","product:Alcohol dehydrogenase","product|product:Alcohol dehydrogenase",1
+"B3","product","product:Asp23/Gls24 family envelope stress response protein","product|product:Asp23/Gls24 family envelope stress response protein",3
+"B3","product","product:D-ribose pyranase","product|product:D-ribose pyranase",1
+"B3","product","product:DNA-binding protein","product|product:DNA-binding protein",3
+"B3","product","product:F0F1 ATP synthase subunit epsilon","product|product:F0F1 ATP synthase subunit epsilon",2
+"B3","product","product:GNAT family N-acetyltransferase","product|product:GNAT family N-acetyltransferase",4
+"B3","product","product:L-lactate permease","product|product:L-lactate permease",1
+"B3","product","product:Lipoprotein","product|product:Lipoprotein",14
+"B3","product","product:MFS transporter","product|product:MFS transporter",11
+"B3","product","product:Major facilitator superfamily (MFS) profile domain-containing protein","product|product:Major facilitator superfamily (MFS) profile domain-containing protein",6
+"B3","product","product:Membrane protein","product|product:Membrane protein",3
+"B3","product","product:Methyltransferase","product|product:Methyltransferase",2
+"B3","product","product:N-acetyltransferase","product|product:N-acetyltransferase",4
+"B3","product","product:N-acetyltransferase domain-containing protein","product|product:N-acetyltransferase domain-containing protein",2
+"B3","product","product:Peptidyl-prolyl cis-trans isomerase","product|product:Peptidyl-prolyl cis-trans isomerase",1
+"B3","product","product:Putative membrane protein","product|product:Putative membrane protein",2
+"B3","product","product:SDR family oxidoreductase","product|product:SDR family oxidoreductase",1
+"B3","product","product:Secreted protein","product|product:Secreted protein",12
+"B3","product","product:Transcriptional regulator","product|product:Transcriptional regulator",8
+"B3","product","product:Transporter","product|product:Transporter",1
+"B3","product","product:Transposase","product|product:Transposase",11
+"B3","product","product:dUTP diphosphatase","product|product:dUTP diphosphatase",1
+"B3","product","product:helix-turn-helix domain-containing protein","product|product:helix-turn-helix domain-containing protein",4
+"B3","product","product:histidine kinase","product|product:histidine kinase",4
+"B3","product","product:phosphoribosylformylglycinamidine synthase subunit PurQ","product|product:phosphoribosylformylglycinamidine synthase subunit PurQ",1
+"A3","ec","ec:1.6.5.9","ec|ec:1.6.5.9",19
+"A3","ec","ec:2.1.1.-","ec|ec:2.1.1.-",1
+"A3","ec","ec:2.1.1.170","ec|ec:2.1.1.170",2
+"A3","ec","ec:2.4.2.9","ec|ec:2.4.2.9",5
+"A3","ec","ec:2.7.7.6","ec|ec:2.7.7.6",8
+"A3","ec","ec:2.7.7.7","ec|ec:2.7.7.7",14
+"A3","ec","ec:2.7.8.-","ec|ec:2.7.8.-",6
+"A3","ec","ec:3.1.-.-","ec|ec:3.1.-.-",8
+"A3","ec","ec:3.1.21.10","ec|ec:3.1.21.10",4
+"A3","ec","ec:3.4.24.-","ec|ec:3.4.24.-",2
+"A3","ec","ec:3.5.1.2","ec|ec:3.5.1.2",4
+"A3","ec","ec:3.5.1.88","ec|ec:3.5.1.88",3
+"A3","ec","ec:3.6.1.-","ec|ec:3.6.1.-",2
+"A3","ec","ec:3.6.4.-","ec|ec:3.6.4.-",1
+"A3","ec","ec:3.6.4.12","ec|ec:3.6.4.12",7
+"A3","ec","ec:3.6.5.-","ec|ec:3.6.5.-",2
+"A3","ec","ec:5.4.99.62","ec|ec:5.4.99.62",1
+"A3","ec","ec:5.6.2.3","ec|ec:5.6.2.3",4
+"A3","ec","ec:6.3.5.3","ec|ec:6.3.5.3",6
+"A3","ec","ec:7.1.2.2","ec|ec:7.1.2.2",14
+"A3","go","go:0000049","go|go:0000049",22
+"A3","go","go:0000105","go|go:0000105",18
+"A3","go","go:0000166","go|go:0000166",32
+"A3","go","go:0000287","go|go:0000287",43
+"A3","go","go:0000314","go|go:0000314",4
+"A3","go","go:0000428","go|go:0000428",4
+"A3","go","go:0000917","go|go:0000917",1
+"A3","go","go:0000976","go|go:0000976",3
+"A3","ko","ko:K00053","ko|ko:K00053",2
+"A3","ko","ko:K01126","ko|ko:K01126",4
+"A3","ko","ko:K01462","ko|ko:K01462",3
+"A3","ko","ko:K02314","ko|ko:K02314",2
+"A3","ko","ko:K02834","ko|ko:K02834",2
+"A3","ko","ko:K02864","ko|ko:K02864",3
+"A3","ko","ko:K02871","ko|ko:K02871",2
+"A3","ko","ko:K02874","ko|ko:K02874",2
+"A3","ko","ko:K02913","ko|ko:K02913",3
+"A3","ko","ko:K02948","ko|ko:K02948",2
+"A3","ko","ko:K02950","ko|ko:K02950",2
+"A3","ko","ko:K02954","ko|ko:K02954",3
+"A3","ko","ko:K02963","ko|ko:K02963",2
+"A3","ko","ko:K02968","ko|ko:K02968",2
+"A3","ko","ko:K02982","ko|ko:K02982",2
+"A3","ko","ko:K02990","ko|ko:K02990",1
+"A3","ko","ko:K02992","ko|ko:K02992",2
+"A3","ko","ko:K03100","ko|ko:K03100",2
+"A3","ko","ko:K03217","ko|ko:K03217",2
+"A3","ko","ko:K03282","ko|ko:K03282",1
+"A3","ko","ko:K03402","ko|ko:K03402",2
+"A3","ko","ko:K03424","ko|ko:K03424",2
+"A3","ko","ko:K03975","ko|ko:K03975",3
+"A3","ko","ko:K06726","ko|ko:K06726",1
+"A3","ko","ko:K06901","ko|ko:K06901",1
+"A3","product","product:16S rRNA (guanine(527)-N(7))-methyltransferase RsmG","product|product:16S rRNA (guanine(527)-N(7))-methyltransferase RsmG",2
+"A3","product","product:30S ribosomal protein S10","product|product:30S ribosomal protein S10",2
+"A3","product","product:30S ribosomal protein S11","product|product:30S ribosomal protein S11",2
+"A3","product","product:30S ribosomal protein S12","product|product:30S ribosomal protein S12",2
+"A3","product","product:30S ribosomal protein S18","product|product:30S ribosomal protein S18",2
+"A3","product","product:30S ribosomal protein S20","product|product:30S ribosomal protein S20",2
+"A3","product","product:30S ribosomal protein S3","product|product:30S ribosomal protein S3",2
+"A3","product","product:30S ribosomal protein S5","product|product:30S ribosomal protein S5",2
+"A3","product","product:50S ribosomal protein L10","product|product:50S ribosomal protein L10",3
+"A3","product","product:50S ribosomal protein L13","product|product:50S ribosomal protein L13",2
+"A3","product","product:50S ribosomal protein L15","product|product:50S ribosomal protein L15",2
+"A3","product","product:50S ribosomal protein L16","product|product:50S ribosomal protein L16",2
+"A3","product","product:50S ribosomal protein L23","product|product:50S ribosomal protein L23",2
+"A3","product","product:50S ribosomal protein L29","product|product:50S ribosomal protein L29",3
+"A3","product","product:50S ribosomal protein L3","product|product:50S ribosomal protein L3",2
+"A3","product","product:50S ribosomal protein L33","product|product:50S ribosomal protein L33",3
+"A3","product","product:6-phosphofructokinase","product|product:6-phosphofructokinase",1
+"A3","product","product:ABC transmembrane type-1 domain-containing protein","product|product:ABC transmembrane type-1 domain-containing protein",3
+"A3","product","product:ABC transporter ATP-binding protein","product|product:ABC transporter ATP-binding protein",27
+"A3","product","product:ABC transporter domain-containing protein","product|product:ABC transporter domain-containing protein",3
+"A3","product","product:ABC transporter permease","product|product:ABC transporter permease",31
+"A3","product","product:ABC transporter substrate-binding protein","product|product:ABC transporter substrate-binding protein",9
+"A3","product","product:ATP-binding cassette domain-containing protein","product|product:ATP-binding cassette domain-containing protein",3
+"A3","product","product:ATP-binding protein","product|product:ATP-binding protein",5
+"A3","product","product:Acetyltransferase","product|product:Acetyltransferase",2
+"A3","product","product:Alcohol dehydrogenase","product|product:Alcohol dehydrogenase",3
+"A3","product","product:Asp23/Gls24 family envelope stress response protein","product|product:Asp23/Gls24 family envelope stress response protein",7
+"A3","product","product:D-ribose pyranase","product|product:D-ribose pyranase",1
+"A3","product","product:DNA-binding protein","product|product:DNA-binding protein",4
+"A3","product","product:F0F1 ATP synthase subunit epsilon","product|product:F0F1 ATP synthase subunit epsilon",1
+"A3","product","product:GNAT family N-acetyltransferase","product|product:GNAT family N-acetyltransferase",8
+"A3","product","product:L-lactate permease","product|product:L-lactate permease",1
+"A3","product","product:Lipoprotein","product|product:Lipoprotein",22
+"A3","product","product:MFS transporter","product|product:MFS transporter",21
+"A3","product","product:Major facilitator superfamily (MFS) profile domain-containing protein","product|product:Major facilitator superfamily (MFS) profile domain-containing protein",5
+"A3","product","product:Membrane protein","product|product:Membrane protein",4
+"A3","product","product:Methyltransferase","product|product:Methyltransferase",6
+"A3","product","product:N-acetyltransferase","product|product:N-acetyltransferase",4
+"A3","product","product:N-acetyltransferase domain-containing protein","product|product:N-acetyltransferase domain-containing protein",8
+"A3","product","product:Peptidyl-prolyl cis-trans isomerase","product|product:Peptidyl-prolyl cis-trans isomerase",4
+"A3","product","product:Putative membrane protein","product|product:Putative membrane protein",5
+"A3","product","product:SDR family oxidoreductase","product|product:SDR family oxidoreductase",2
+"A3","product","product:Secreted protein","product|product:Secreted protein",14
+"A3","product","product:Transcriptional regulator","product|product:Transcriptional regulator",20
+"A3","product","product:Transporter","product|product:Transporter",8
+"A3","product","product:Transposase","product|product:Transposase",12
+"A3","product","product:dUTP diphosphatase","product|product:dUTP diphosphatase",2
+"A3","product","product:helix-turn-helix domain-containing protein","product|product:helix-turn-helix domain-containing protein",3
+"A3","product","product:histidine kinase","product|product:histidine kinase",9
+"A3","product","product:phosphoribosylformylglycinamidine synthase subunit PurQ","product|product:phosphoribosylformylglycinamidine synthase subunit PurQ",2
+"B4","ec","ec:1.6.5.9","ec|ec:1.6.5.9",1
+"B4","ec","ec:2.1.1.170","ec|ec:2.1.1.170",1
+"B4","ec","ec:2.4.2.9","ec|ec:2.4.2.9",2
+"B4","ec","ec:2.7.7.6","ec|ec:2.7.7.6",3
+"B4","ec","ec:2.7.7.7","ec|ec:2.7.7.7",3
+"B4","ec","ec:2.7.8.-","ec|ec:2.7.8.-",2
+"B4","ec","ec:3.1.-.-","ec|ec:3.1.-.-",4
+"B4","ec","ec:3.1.21.10","ec|ec:3.1.21.10",1
+"B4","ec","ec:3.5.1.2","ec|ec:3.5.1.2",2
+"B4","ec","ec:3.5.1.88","ec|ec:3.5.1.88",1
+"B4","ec","ec:3.6.1.-","ec|ec:3.6.1.-",1
+"B4","ec","ec:3.6.4.-","ec|ec:3.6.4.-",1
+"B4","ec","ec:3.6.5.-","ec|ec:3.6.5.-",1
+"B4","ec","ec:5.4.99.62","ec|ec:5.4.99.62",2
+"B4","ec","ec:5.6.2.3","ec|ec:5.6.2.3",3
+"B4","ec","ec:6.3.5.3","ec|ec:6.3.5.3",1
+"B4","ec","ec:7.1.2.2","ec|ec:7.1.2.2",7
+"B4","go","go:0000049","go|go:0000049",6
+"B4","go","go:0000105","go|go:0000105",3
+"B4","go","go:0000166","go|go:0000166",4
+"B4","go","go:0000287","go|go:0000287",6
+"B4","go","go:0000314","go|go:0000314",5
+"B4","go","go:0000428","go|go:0000428",2
+"B4","go","go:0000917","go|go:0000917",1
+"B4","go","go:0000976","go|go:0000976",2
+"B4","ko","ko:K00053","ko|ko:K00053",1
+"B4","ko","ko:K01126","ko|ko:K01126",1
+"B4","ko","ko:K01462","ko|ko:K01462",1
+"B4","ko","ko:K02314","ko|ko:K02314",2
+"B4","ko","ko:K02834","ko|ko:K02834",1
+"B4","ko","ko:K02864","ko|ko:K02864",1
+"B4","ko","ko:K02871","ko|ko:K02871",1
+"B4","ko","ko:K02874","ko|ko:K02874",2
+"B4","ko","ko:K02913","ko|ko:K02913",3
+"B4","ko","ko:K02948","ko|ko:K02948",2
+"B4","ko","ko:K02950","ko|ko:K02950",2
+"B4","ko","ko:K02954","ko|ko:K02954",4
+"B4","ko","ko:K02963","ko|ko:K02963",2
+"B4","ko","ko:K02968","ko|ko:K02968",2
+"B4","ko","ko:K02982","ko|ko:K02982",1
+"B4","ko","ko:K02990","ko|ko:K02990",2
+"B4","ko","ko:K03100","ko|ko:K03100",1
+"B4","ko","ko:K03282","ko|ko:K03282",1
+"B4","ko","ko:K03402","ko|ko:K03402",2
+"B4","ko","ko:K03424","ko|ko:K03424",1
+"B4","ko","ko:K03975","ko|ko:K03975",2
+"B4","ko","ko:K06726","ko|ko:K06726",2
+"B4","ko","ko:K06901","ko|ko:K06901",1
+"B4","product","product:16S rRNA (guanine(527)-N(7))-methyltransferase RsmG","product|product:16S rRNA (guanine(527)-N(7))-methyltransferase RsmG",1
+"B4","product","product:30S ribosomal protein S10","product|product:30S ribosomal protein S10",3
+"B4","product","product:30S ribosomal protein S11","product|product:30S ribosomal protein S11",2
+"B4","product","product:30S ribosomal protein S12","product|product:30S ribosomal protein S12",2
+"B4","product","product:30S ribosomal protein S18","product|product:30S ribosomal protein S18",2
+"B4","product","product:30S ribosomal protein S20","product|product:30S ribosomal protein S20",2
+"B4","product","product:30S ribosomal protein S3","product|product:30S ribosomal protein S3",1
+"B4","product","product:30S ribosomal protein S5","product|product:30S ribosomal protein S5",1
+"B4","product","product:50S ribosomal protein L10","product|product:50S ribosomal protein L10",1
+"B4","product","product:50S ribosomal protein L13","product|product:50S ribosomal protein L13",2
+"B4","product","product:50S ribosomal protein L15","product|product:50S ribosomal protein L15",1
+"B4","product","product:50S ribosomal protein L16","product|product:50S ribosomal protein L16",2
+"B4","product","product:50S ribosomal protein L23","product|product:50S ribosomal protein L23",3
+"B4","product","product:50S ribosomal protein L29","product|product:50S ribosomal protein L29",3
+"B4","product","product:50S ribosomal protein L3","product|product:50S ribosomal protein L3",1
+"B4","product","product:50S ribosomal protein L33","product|product:50S ribosomal protein L33",3
+"B4","product","product:6-phosphofructokinase","product|product:6-phosphofructokinase",1
+"B4","product","product:ABC transmembrane type-1 domain-containing protein","product|product:ABC transmembrane type-1 domain-containing protein",6
+"B4","product","product:ABC transporter ATP-binding protein","product|product:ABC transporter ATP-binding protein",13
+"B4","product","product:ABC transporter domain-containing protein","product|product:ABC transporter domain-containing protein",4
+"B4","product","product:ABC transporter permease","product|product:ABC transporter permease",18
+"B4","product","product:ABC transporter substrate-binding protein","product|product:ABC transporter substrate-binding protein",6
+"B4","product","product:ATP-binding cassette domain-containing protein","product|product:ATP-binding cassette domain-containing protein",9
+"B4","product","product:ATP-binding protein","product|product:ATP-binding protein",1
+"B4","product","product:Acetyltransferase","product|product:Acetyltransferase",1
+"B4","product","product:Alcohol dehydrogenase","product|product:Alcohol dehydrogenase",4
+"B4","product","product:Asp23/Gls24 family envelope stress response protein","product|product:Asp23/Gls24 family envelope stress response protein",3
+"B4","product","product:D-ribose pyranase","product|product:D-ribose pyranase",2
+"B4","product","product:DNA-binding protein","product|product:DNA-binding protein",5
+"B4","product","product:F0F1 ATP synthase subunit epsilon","product|product:F0F1 ATP synthase subunit epsilon",1
+"B4","product","product:GNAT family N-acetyltransferase","product|product:GNAT family N-acetyltransferase",2
+"B4","product","product:L-lactate permease","product|product:L-lactate permease",1
+"B4","product","product:Lipoprotein","product|product:Lipoprotein",11
+"B4","product","product:MFS transporter","product|product:MFS transporter",8
+"B4","product","product:Major facilitator superfamily (MFS) profile domain-containing protein","product|product:Major facilitator superfamily (MFS) profile domain-containing protein",3
+"B4","product","product:Membrane protein","product|product:Membrane protein",1
+"B4","product","product:Methyltransferase","product|product:Methyltransferase",2
+"B4","product","product:N-acetyltransferase","product|product:N-acetyltransferase",5
+"B4","product","product:N-acetyltransferase domain-containing protein","product|product:N-acetyltransferase domain-containing protein",2
+"B4","product","product:Peptidyl-prolyl cis-trans isomerase","product|product:Peptidyl-prolyl cis-trans isomerase",1
+"B4","product","product:Putative membrane protein","product|product:Putative membrane protein",1
+"B4","product","product:SDR family oxidoreductase","product|product:SDR family oxidoreductase",2
+"B4","product","product:Secreted protein","product|product:Secreted protein",12
+"B4","product","product:Transcriptional regulator","product|product:Transcriptional regulator",9
+"B4","product","product:Transporter","product|product:Transporter",1
+"B4","product","product:Transposase","product|product:Transposase",15
+"B4","product","product:dUTP diphosphatase","product|product:dUTP diphosphatase",1
+"B4","product","product:helix-turn-helix domain-containing protein","product|product:helix-turn-helix domain-containing protein",5
+"B4","product","product:histidine kinase","product|product:histidine kinase",4
+"B4","product","product:phosphoribosylformylglycinamidine synthase subunit PurQ","product|product:phosphoribosylformylglycinamidine synthase subunit PurQ",1
+"A2","ec","ec:1.6.5.9","ec|ec:1.6.5.9",13
+"A2","ec","ec:2.1.1.-","ec|ec:2.1.1.-",4
+"A2","ec","ec:2.1.1.170","ec|ec:2.1.1.170",3
+"A2","ec","ec:2.4.2.9","ec|ec:2.4.2.9",4
+"A2","ec","ec:2.7.7.6","ec|ec:2.7.7.6",12
+"A2","ec","ec:2.7.7.7","ec|ec:2.7.7.7",14
+"A2","ec","ec:2.7.8.-","ec|ec:2.7.8.-",10
+"A2","ec","ec:3.1.-.-","ec|ec:3.1.-.-",16
+"A2","ec","ec:3.1.21.10","ec|ec:3.1.21.10",4
+"A2","ec","ec:3.4.24.-","ec|ec:3.4.24.-",3
+"A2","ec","ec:3.5.1.2","ec|ec:3.5.1.2",4
+"A2","ec","ec:3.5.1.88","ec|ec:3.5.1.88",4
+"A2","ec","ec:3.6.1.-","ec|ec:3.6.1.-",1
+"A2","ec","ec:3.6.4.-","ec|ec:3.6.4.-",3
+"A2","ec","ec:3.6.4.12","ec|ec:3.6.4.12",9
+"A2","ec","ec:3.6.5.-","ec|ec:3.6.5.-",4
+"A2","ec","ec:5.4.99.62","ec|ec:5.4.99.62",3
+"A2","ec","ec:5.6.2.3","ec|ec:5.6.2.3",3
+"A2","ec","ec:6.3.5.3","ec|ec:6.3.5.3",5
+"A2","ec","ec:7.1.2.2","ec|ec:7.1.2.2",15
+"A2","go","go:0000049","go|go:0000049",38
+"A2","go","go:0000105","go|go:0000105",19
+"A2","go","go:0000166","go|go:0000166",35
+"A2","go","go:0000287","go|go:0000287",73
+"A2","go","go:0000314","go|go:0000314",8
+"A2","go","go:0000428","go|go:0000428",10
+"A2","go","go:0000917","go|go:0000917",7
+"A2","go","go:0000976","go|go:0000976",11
+"A2","ko","ko:K00053","ko|ko:K00053",3
+"A2","ko","ko:K01126","ko|ko:K01126",4
+"A2","ko","ko:K01462","ko|ko:K01462",4
+"A2","ko","ko:K02314","ko|ko:K02314",2
+"A2","ko","ko:K02834","ko|ko:K02834",2
+"A2","ko","ko:K02864","ko|ko:K02864",3
+"A2","ko","ko:K02871","ko|ko:K02871",3
+"A2","ko","ko:K02874","ko|ko:K02874",1
+"A2","ko","ko:K02913","ko|ko:K02913",4
+"A2","ko","ko:K02948","ko|ko:K02948",3
+"A2","ko","ko:K02950","ko|ko:K02950",4
+"A2","ko","ko:K02954","ko|ko:K02954",5
+"A2","ko","ko:K02963","ko|ko:K02963",3
+"A2","ko","ko:K02968","ko|ko:K02968",4
+"A2","ko","ko:K02982","ko|ko:K02982",1
+"A2","ko","ko:K02990","ko|ko:K02990",4
+"A2","ko","ko:K02992","ko|ko:K02992",2
+"A2","ko","ko:K03100","ko|ko:K03100",3
+"A2","ko","ko:K03217","ko|ko:K03217",3
+"A2","ko","ko:K03282","ko|ko:K03282",3
+"A2","ko","ko:K03402","ko|ko:K03402",4
+"A2","ko","ko:K03424","ko|ko:K03424",3
+"A2","ko","ko:K03975","ko|ko:K03975",3
+"A2","ko","ko:K06726","ko|ko:K06726",3
+"A2","ko","ko:K06901","ko|ko:K06901",4
+"A2","product","product:16S rRNA (guanine(527)-N(7))-methyltransferase RsmG","product|product:16S rRNA (guanine(527)-N(7))-methyltransferase RsmG",3
+"A2","product","product:30S ribosomal protein S10","product|product:30S ribosomal protein S10",3
+"A2","product","product:30S ribosomal protein S11","product|product:30S ribosomal protein S11",3
+"A2","product","product:30S ribosomal protein S12","product|product:30S ribosomal protein S12",5
+"A2","product","product:30S ribosomal protein S18","product|product:30S ribosomal protein S18",3
+"A2","product","product:30S ribosomal protein S20","product|product:30S ribosomal protein S20",4
+"A2","product","product:30S ribosomal protein S3","product|product:30S ribosomal protein S3",1
+"A2","product","product:30S ribosomal protein S5","product|product:30S ribosomal protein S5",2
+"A2","product","product:50S ribosomal protein L10","product|product:50S ribosomal protein L10",3
+"A2","product","product:50S ribosomal protein L13","product|product:50S ribosomal protein L13",3
+"A2","product","product:50S ribosomal protein L15","product|product:50S ribosomal protein L15",2
+"A2","product","product:50S ribosomal protein L16","product|product:50S ribosomal protein L16",3
+"A2","product","product:50S ribosomal protein L23","product|product:50S ribosomal protein L23",2
+"A2","product","product:50S ribosomal protein L29","product|product:50S ribosomal protein L29",3
+"A2","product","product:50S ribosomal protein L3","product|product:50S ribosomal protein L3",3
+"A2","product","product:50S ribosomal protein L33","product|product:50S ribosomal protein L33",5
+"A2","product","product:6-phosphofructokinase","product|product:6-phosphofructokinase",2
+"A2","product","product:ABC transmembrane type-1 domain-containing protein","product|product:ABC transmembrane type-1 domain-containing protein",5
+"A2","product","product:ABC transporter ATP-binding protein","product|product:ABC transporter ATP-binding protein",29
+"A2","product","product:ABC transporter domain-containing protein","product|product:ABC transporter domain-containing protein",7
+"A2","product","product:ABC transporter permease","product|product:ABC transporter permease",35
+"A2","product","product:ABC transporter substrate-binding protein","product|product:ABC transporter substrate-binding protein",10
+"A2","product","product:ATP-binding cassette domain-containing protein","product|product:ATP-binding cassette domain-containing protein",8
+"A2","product","product:ATP-binding protein","product|product:ATP-binding protein",10
+"A2","product","product:Acetyltransferase","product|product:Acetyltransferase",2
+"A2","product","product:Alcohol dehydrogenase","product|product:Alcohol dehydrogenase",9
+"A2","product","product:Asp23/Gls24 family envelope stress response protein","product|product:Asp23/Gls24 family envelope stress response protein",5
+"A2","product","product:D-ribose pyranase","product|product:D-ribose pyranase",4
+"A2","product","product:DNA-binding protein","product|product:DNA-binding protein",8
+"A2","product","product:F0F1 ATP synthase subunit epsilon","product|product:F0F1 ATP synthase subunit epsilon",2
+"A2","product","product:GNAT family N-acetyltransferase","product|product:GNAT family N-acetyltransferase",8
+"A2","product","product:L-lactate permease","product|product:L-lactate permease",2
+"A2","product","product:Lipoprotein","product|product:Lipoprotein",40
+"A2","product","product:MFS transporter","product|product:MFS transporter",20
+"A2","product","product:Major facilitator superfamily (MFS) profile domain-containing protein","product|product:Major facilitator superfamily (MFS) profile domain-containing protein",4
+"A2","product","product:Membrane protein","product|product:Membrane protein",15
+"A2","product","product:Methyltransferase","product|product:Methyltransferase",7
+"A2","product","product:N-acetyltransferase","product|product:N-acetyltransferase",5
+"A2","product","product:N-acetyltransferase domain-containing protein","product|product:N-acetyltransferase domain-containing protein",9
+"A2","product","product:Peptidyl-prolyl cis-trans isomerase","product|product:Peptidyl-prolyl cis-trans isomerase",7
+"A2","product","product:Putative membrane protein","product|product:Putative membrane protein",5
+"A2","product","product:SDR family oxidoreductase","product|product:SDR family oxidoreductase",8
+"A2","product","product:Secreted protein","product|product:Secreted protein",22
+"A2","product","product:Transcriptional regulator","product|product:Transcriptional regulator",29
+"A2","product","product:Transporter","product|product:Transporter",9
+"A2","product","product:Transposase","product|product:Transposase",25
+"A2","product","product:dUTP diphosphatase","product|product:dUTP diphosphatase",3
+"A2","product","product:helix-turn-helix domain-containing protein","product|product:helix-turn-helix domain-containing protein",7
+"A2","product","product:histidine kinase","product|product:histidine kinase",14
+"A2","product","product:phosphoribosylformylglycinamidine synthase subunit PurQ","product|product:phosphoribosylformylglycinamidine synthase subunit PurQ",1
+"A1","ec","ec:1.6.5.9","ec|ec:1.6.5.9",6
+"A1","ec","ec:2.1.1.-","ec|ec:2.1.1.-",10
+"A1","ec","ec:2.1.1.170","ec|ec:2.1.1.170",1
+"A1","ec","ec:2.4.2.9","ec|ec:2.4.2.9",1
+"A1","ec","ec:2.7.7.6","ec|ec:2.7.7.6",8
+"A1","ec","ec:2.7.7.7","ec|ec:2.7.7.7",10
+"A1","ec","ec:2.7.8.-","ec|ec:2.7.8.-",1
+"A1","ec","ec:3.1.-.-","ec|ec:3.1.-.-",18
+"A1","ec","ec:3.1.21.10","ec|ec:3.1.21.10",5
+"A1","ec","ec:3.4.24.-","ec|ec:3.4.24.-",13
+"A1","ec","ec:3.5.1.2","ec|ec:3.5.1.2",1
+"A1","ec","ec:3.5.1.88","ec|ec:3.5.1.88",1
+"A1","ec","ec:3.6.1.-","ec|ec:3.6.1.-",14
+"A1","ec","ec:3.6.4.-","ec|ec:3.6.4.-",7
+"A1","ec","ec:3.6.4.12","ec|ec:3.6.4.12",10
+"A1","ec","ec:3.6.5.-","ec|ec:3.6.5.-",9
+"A1","ec","ec:5.4.99.62","ec|ec:5.4.99.62",1
+"A1","ec","ec:5.6.2.3","ec|ec:5.6.2.3",5
+"A1","ec","ec:6.3.5.3","ec|ec:6.3.5.3",2
+"A1","ec","ec:7.1.2.2","ec|ec:7.1.2.2",10
+"A1","go","go:0000049","go|go:0000049",41
+"A1","go","go:0000105","go|go:0000105",6
+"A1","go","go:0000166","go|go:0000166",42
+"A1","go","go:0000287","go|go:0000287",109
+"A1","go","go:0000314","go|go:0000314",6
+"A1","go","go:0000428","go|go:0000428",9
+"A1","go","go:0000917","go|go:0000917",13
+"A1","go","go:0000976","go|go:0000976",42
+"A1","ko","ko:K00053","ko|ko:K00053",1
+"A1","ko","ko:K01126","ko|ko:K01126",2
+"A1","ko","ko:K01462","ko|ko:K01462",1
+"A1","ko","ko:K02314","ko|ko:K02314",3
+"A1","ko","ko:K02834","ko|ko:K02834",1
+"A1","ko","ko:K02864","ko|ko:K02864",1
+"A1","ko","ko:K02871","ko|ko:K02871",1
+"A1","ko","ko:K02874","ko|ko:K02874",2
+"A1","ko","ko:K02913","ko|ko:K02913",1
+"A1","ko","ko:K02948","ko|ko:K02948",2
+"A1","ko","ko:K02950","ko|ko:K02950",3
+"A1","ko","ko:K02954","ko|ko:K02954",2
+"A1","ko","ko:K02963","ko|ko:K02963",2
+"A1","ko","ko:K02968","ko|ko:K02968",1
+"A1","ko","ko:K02982","ko|ko:K02982",2
+"A1","ko","ko:K02990","ko|ko:K02990",2
+"A1","ko","ko:K02992","ko|ko:K02992",2
+"A1","ko","ko:K03100","ko|ko:K03100",2
+"A1","ko","ko:K03217","ko|ko:K03217",1
+"A1","ko","ko:K03282","ko|ko:K03282",2
+"A1","ko","ko:K03402","ko|ko:K03402",1
+"A1","ko","ko:K03424","ko|ko:K03424",3
+"A1","ko","ko:K03975","ko|ko:K03975",3
+"A1","ko","ko:K06726","ko|ko:K06726",1
+"A1","ko","ko:K06901","ko|ko:K06901",3
+"A1","product","product:16S rRNA (guanine(527)-N(7))-methyltransferase RsmG","product|product:16S rRNA (guanine(527)-N(7))-methyltransferase RsmG",1
+"A1","product","product:30S ribosomal protein S10","product|product:30S ribosomal protein S10",3
+"A1","product","product:30S ribosomal protein S11","product|product:30S ribosomal protein S11",2
+"A1","product","product:30S ribosomal protein S12","product|product:30S ribosomal protein S12",1
+"A1","product","product:30S ribosomal protein S18","product|product:30S ribosomal protein S18",2
+"A1","product","product:30S ribosomal protein S20","product|product:30S ribosomal protein S20",1
+"A1","product","product:30S ribosomal protein S3","product|product:30S ribosomal protein S3",2
+"A1","product","product:30S ribosomal protein S5","product|product:30S ribosomal protein S5",2
+"A1","product","product:50S ribosomal protein L10","product|product:50S ribosomal protein L10",2
+"A1","product","product:50S ribosomal protein L13","product|product:50S ribosomal protein L13",2
+"A1","product","product:50S ribosomal protein L15","product|product:50S ribosomal protein L15",2
+"A1","product","product:50S ribosomal protein L16","product|product:50S ribosomal protein L16",2
+"A1","product","product:50S ribosomal protein L23","product|product:50S ribosomal protein L23",2
+"A1","product","product:50S ribosomal protein L29","product|product:50S ribosomal protein L29",2
+"A1","product","product:50S ribosomal protein L3","product|product:50S ribosomal protein L3",2
+"A1","product","product:50S ribosomal protein L33","product|product:50S ribosomal protein L33",1
+"A1","product","product:6-phosphofructokinase","product|product:6-phosphofructokinase",1
+"A1","product","product:ABC transmembrane type-1 domain-containing protein","product|product:ABC transmembrane type-1 domain-containing protein",2
+"A1","product","product:ABC transporter ATP-binding protein","product|product:ABC transporter ATP-binding protein",5
+"A1","product","product:ABC transporter domain-containing protein","product|product:ABC transporter domain-containing protein",2
+"A1","product","product:ABC transporter permease","product|product:ABC transporter permease",5
+"A1","product","product:ABC transporter substrate-binding protein","product|product:ABC transporter substrate-binding protein",1
+"A1","product","product:ATP-binding cassette domain-containing protein","product|product:ATP-binding cassette domain-containing protein",5
+"A1","product","product:ATP-binding protein","product|product:ATP-binding protein",5
+"A1","product","product:Acetyltransferase","product|product:Acetyltransferase",3
+"A1","product","product:Alcohol dehydrogenase","product|product:Alcohol dehydrogenase",3
+"A1","product","product:Asp23/Gls24 family envelope stress response protein","product|product:Asp23/Gls24 family envelope stress response protein",1
+"A1","product","product:D-ribose pyranase","product|product:D-ribose pyranase",1
+"A1","product","product:DNA-binding protein","product|product:DNA-binding protein",6
+"A1","product","product:F0F1 ATP synthase subunit epsilon","product|product:F0F1 ATP synthase subunit epsilon",1
+"A1","product","product:GNAT family N-acetyltransferase","product|product:GNAT family N-acetyltransferase",4
+"A1","product","product:L-lactate permease","product|product:L-lactate permease",2
+"A1","product","product:Lipoprotein","product|product:Lipoprotein",8
+"A1","product","product:MFS transporter","product|product:MFS transporter",7
+"A1","product","product:Major facilitator superfamily (MFS) profile domain-containing protein","product|product:Major facilitator superfamily (MFS) profile domain-containing protein",2
+"A1","product","product:Membrane protein","product|product:Membrane protein",5
+"A1","product","product:Methyltransferase","product|product:Methyltransferase",1
+"A1","product","product:N-acetyltransferase","product|product:N-acetyltransferase",2
+"A1","product","product:N-acetyltransferase domain-containing protein","product|product:N-acetyltransferase domain-containing protein",5
+"A1","product","product:Peptidyl-prolyl cis-trans isomerase","product|product:Peptidyl-prolyl cis-trans isomerase",2
+"A1","product","product:Putative membrane protein","product|product:Putative membrane protein",1
+"A1","product","product:SDR family oxidoreductase","product|product:SDR family oxidoreductase",3
+"A1","product","product:Secreted protein","product|product:Secreted protein",7
+"A1","product","product:Transcriptional regulator","product|product:Transcriptional regulator",13
+"A1","product","product:Transporter","product|product:Transporter",5
+"A1","product","product:Transposase","product|product:Transposase",9
+"A1","product","product:dUTP diphosphatase","product|product:dUTP diphosphatase",3
+"A1","product","product:helix-turn-helix domain-containing protein","product|product:helix-turn-helix domain-containing protein",1
+"A1","product","product:histidine kinase","product|product:histidine kinase",4
+"A1","product","product:phosphoribosylformylglycinamidine synthase subunit PurQ","product|product:phosphoribosylformylglycinamidine synthase subunit PurQ",1
+"A4","ec","ec:1.6.5.9","ec|ec:1.6.5.9",1
+"A4","ec","ec:2.1.1.-","ec|ec:2.1.1.-",4
+"A4","ec","ec:2.1.1.170","ec|ec:2.1.1.170",1
+"A4","ec","ec:2.4.2.9","ec|ec:2.4.2.9",1
+"A4","ec","ec:2.7.7.6","ec|ec:2.7.7.6",4
+"A4","ec","ec:2.7.7.7","ec|ec:2.7.7.7",5
+"A4","ec","ec:2.7.8.-","ec|ec:2.7.8.-",2
+"A4","ec","ec:3.1.-.-","ec|ec:3.1.-.-",8
+"A4","ec","ec:3.1.21.10","ec|ec:3.1.21.10",2
+"A4","ec","ec:3.4.24.-","ec|ec:3.4.24.-",4
+"A4","ec","ec:3.5.1.2","ec|ec:3.5.1.2",1
+"A4","ec","ec:3.5.1.88","ec|ec:3.5.1.88",1
+"A4","ec","ec:3.6.1.-","ec|ec:3.6.1.-",4
+"A4","ec","ec:3.6.4.-","ec|ec:3.6.4.-",4
+"A4","ec","ec:3.6.4.12","ec|ec:3.6.4.12",3
+"A4","ec","ec:3.6.5.-","ec|ec:3.6.5.-",4
+"A4","ec","ec:5.4.99.62","ec|ec:5.4.99.62",1
+"A4","ec","ec:6.3.5.3","ec|ec:6.3.5.3",2
+"A4","ec","ec:7.1.2.2","ec|ec:7.1.2.2",9
+"A4","go","go:0000049","go|go:0000049",17
+"A4","go","go:0000105","go|go:0000105",2
+"A4","go","go:0000166","go|go:0000166",11
+"A4","go","go:0000287","go|go:0000287",28
+"A4","go","go:0000314","go|go:0000314",3
+"A4","go","go:0000428","go|go:0000428",4
+"A4","go","go:0000917","go|go:0000917",6
+"A4","go","go:0000976","go|go:0000976",10
+"A4","ko","ko:K00053","ko|ko:K00053",1
+"A4","ko","ko:K01126","ko|ko:K01126",1
+"A4","ko","ko:K01462","ko|ko:K01462",1
+"A4","ko","ko:K02834","ko|ko:K02834",1
+"A4","ko","ko:K02864","ko|ko:K02864",1
+"A4","ko","ko:K02871","ko|ko:K02871",1
+"A4","ko","ko:K02874","ko|ko:K02874",2
+"A4","ko","ko:K02913","ko|ko:K02913",1
+"A4","ko","ko:K02948","ko|ko:K02948",2
+"A4","ko","ko:K02950","ko|ko:K02950",2
+"A4","ko","ko:K02954","ko|ko:K02954",1
+"A4","ko","ko:K02963","ko|ko:K02963",1
+"A4","ko","ko:K02968","ko|ko:K02968",1
+"A4","ko","ko:K02982","ko|ko:K02982",2
+"A4","ko","ko:K02990","ko|ko:K02990",2
+"A4","ko","ko:K02992","ko|ko:K02992",2
+"A4","ko","ko:K03100","ko|ko:K03100",1
+"A4","ko","ko:K03217","ko|ko:K03217",1
+"A4","ko","ko:K03282","ko|ko:K03282",1
+"A4","ko","ko:K03424","ko|ko:K03424",2
+"A4","ko","ko:K03975","ko|ko:K03975",2
+"A4","ko","ko:K06726","ko|ko:K06726",1
+"A4","ko","ko:K06901","ko|ko:K06901",2
+"A4","product","product:16S rRNA (guanine(527)-N(7))-methyltransferase RsmG","product|product:16S rRNA (guanine(527)-N(7))-methyltransferase RsmG",1
+"A4","product","product:30S ribosomal protein S10","product|product:30S ribosomal protein S10",2
+"A4","product","product:30S ribosomal protein S11","product|product:30S ribosomal protein S11",2
+"A4","product","product:30S ribosomal protein S12","product|product:30S ribosomal protein S12",1
+"A4","product","product:30S ribosomal protein S18","product|product:30S ribosomal protein S18",1
+"A4","product","product:30S ribosomal protein S20","product|product:30S ribosomal protein S20",1
+"A4","product","product:30S ribosomal protein S3","product|product:30S ribosomal protein S3",2
+"A4","product","product:30S ribosomal protein S5","product|product:30S ribosomal protein S5",1
+"A4","product","product:50S ribosomal protein L10","product|product:50S ribosomal protein L10",1
+"A4","product","product:50S ribosomal protein L13","product|product:50S ribosomal protein L13",2
+"A4","product","product:50S ribosomal protein L15","product|product:50S ribosomal protein L15",2
+"A4","product","product:50S ribosomal protein L16","product|product:50S ribosomal protein L16",1
+"A4","product","product:50S ribosomal protein L23","product|product:50S ribosomal protein L23",1
+"A4","product","product:50S ribosomal protein L29","product|product:50S ribosomal protein L29",1
+"A4","product","product:50S ribosomal protein L3","product|product:50S ribosomal protein L3",1
+"A4","product","product:50S ribosomal protein L33","product|product:50S ribosomal protein L33",2
+"A4","product","product:6-phosphofructokinase","product|product:6-phosphofructokinase",1
+"A4","product","product:ABC transmembrane type-1 domain-containing protein","product|product:ABC transmembrane type-1 domain-containing protein",1
+"A4","product","product:ABC transporter ATP-binding protein","product|product:ABC transporter ATP-binding protein",2
+"A4","product","product:ABC transporter permease","product|product:ABC transporter permease",4
+"A4","product","product:ABC transporter substrate-binding protein","product|product:ABC transporter substrate-binding protein",4
+"A4","product","product:ATP-binding cassette domain-containing protein","product|product:ATP-binding cassette domain-containing protein",6
+"A4","product","product:ATP-binding protein","product|product:ATP-binding protein",1
+"A4","product","product:Acetyltransferase","product|product:Acetyltransferase",2
+"A4","product","product:Alcohol dehydrogenase","product|product:Alcohol dehydrogenase",2
+"A4","product","product:Asp23/Gls24 family envelope stress response protein","product|product:Asp23/Gls24 family envelope stress response protein",1
+"A4","product","product:D-ribose pyranase","product|product:D-ribose pyranase",1
+"A4","product","product:DNA-binding protein","product|product:DNA-binding protein",2
+"A4","product","product:F0F1 ATP synthase subunit epsilon","product|product:F0F1 ATP synthase subunit epsilon",1
+"A4","product","product:GNAT family N-acetyltransferase","product|product:GNAT family N-acetyltransferase",2
+"A4","product","product:L-lactate permease","product|product:L-lactate permease",2
+"A4","product","product:Lipoprotein","product|product:Lipoprotein",6
+"A4","product","product:MFS transporter","product|product:MFS transporter",3
+"A4","product","product:Major facilitator superfamily (MFS) profile domain-containing protein","product|product:Major facilitator superfamily (MFS) profile domain-containing protein",2
+"A4","product","product:Membrane protein","product|product:Membrane protein",3
+"A4","product","product:Methyltransferase","product|product:Methyltransferase",1
+"A4","product","product:N-acetyltransferase","product|product:N-acetyltransferase",2
+"A4","product","product:N-acetyltransferase domain-containing protein","product|product:N-acetyltransferase domain-containing protein",3
+"A4","product","product:Peptidyl-prolyl cis-trans isomerase","product|product:Peptidyl-prolyl cis-trans isomerase",1
+"A4","product","product:Putative membrane protein","product|product:Putative membrane protein",1
+"A4","product","product:SDR family oxidoreductase","product|product:SDR family oxidoreductase",2
+"A4","product","product:Secreted protein","product|product:Secreted protein",5
+"A4","product","product:Transcriptional regulator","product|product:Transcriptional regulator",3
+"A4","product","product:Transporter","product|product:Transporter",1
+"A4","product","product:Transposase","product|product:Transposase",8
+"A4","product","product:dUTP diphosphatase","product|product:dUTP diphosphatase",3
+"A4","product","product:helix-turn-helix domain-containing protein","product|product:helix-turn-helix domain-containing protein",1
+"A4","product","product:histidine kinase","product|product:histidine kinase",2
+"A4","product","product:phosphoribosylformylglycinamidine synthase subunit PurQ","product|product:phosphoribosylformylglycinamidine synthase subunit PurQ",1
+"B5","ec","ec:1.6.5.9","ec|ec:1.6.5.9",2
+"B5","ec","ec:2.1.1.-","ec|ec:2.1.1.-",3
+"B5","ec","ec:2.1.1.170","ec|ec:2.1.1.170",1
+"B5","ec","ec:2.7.7.6","ec|ec:2.7.7.6",2
+"B5","ec","ec:2.7.7.7","ec|ec:2.7.7.7",1
+"B5","ec","ec:3.1.-.-","ec|ec:3.1.-.-",1
+"B5","ec","ec:3.4.24.-","ec|ec:3.4.24.-",4
+"B5","ec","ec:3.5.1.2","ec|ec:3.5.1.2",1
+"B5","ec","ec:3.5.1.88","ec|ec:3.5.1.88",1
+"B5","ec","ec:3.6.1.-","ec|ec:3.6.1.-",2
+"B5","ec","ec:3.6.4.-","ec|ec:3.6.4.-",3
+"B5","ec","ec:3.6.4.12","ec|ec:3.6.4.12",3
+"B5","ec","ec:5.4.99.62","ec|ec:5.4.99.62",1
+"B5","ec","ec:5.6.2.3","ec|ec:5.6.2.3",1
+"B5","ec","ec:6.3.5.3","ec|ec:6.3.5.3",1
+"B5","ec","ec:7.1.2.2","ec|ec:7.1.2.2",8
+"B5","go","go:0000049","go|go:0000049",9
+"B5","go","go:0000105","go|go:0000105",1
+"B5","go","go:0000166","go|go:0000166",4
+"B5","go","go:0000287","go|go:0000287",17
+"B5","go","go:0000314","go|go:0000314",2
+"B5","go","go:0000428","go|go:0000428",1
+"B5","go","go:0000917","go|go:0000917",2
+"B5","go","go:0000976","go|go:0000976",5
+"B5","ko","ko:K00053","ko|ko:K00053",1
+"B5","ko","ko:K01462","ko|ko:K01462",1
+"B5","ko","ko:K02314","ko|ko:K02314",1
+"B5","ko","ko:K02864","ko|ko:K02864",1
+"B5","ko","ko:K02871","ko|ko:K02871",1
+"B5","ko","ko:K02874","ko|ko:K02874",1
+"B5","ko","ko:K02913","ko|ko:K02913",1
+"B5","ko","ko:K02948","ko|ko:K02948",2
+"B5","ko","ko:K02950","ko|ko:K02950",1
+"B5","ko","ko:K02963","ko|ko:K02963",2
+"B5","ko","ko:K02968","ko|ko:K02968",1
+"B5","ko","ko:K02982","ko|ko:K02982",1
+"B5","ko","ko:K02992","ko|ko:K02992",1
+"B5","ko","ko:K03100","ko|ko:K03100",1
+"B5","ko","ko:K03217","ko|ko:K03217",1
+"B5","ko","ko:K03282","ko|ko:K03282",1
+"B5","ko","ko:K03402","ko|ko:K03402",1
+"B5","ko","ko:K03424","ko|ko:K03424",1
+"B5","ko","ko:K06726","ko|ko:K06726",1
+"B5","ko","ko:K06901","ko|ko:K06901",2
+"B5","product","product:16S rRNA (guanine(527)-N(7))-methyltransferase RsmG","product|product:16S rRNA (guanine(527)-N(7))-methyltransferase RsmG",1
+"B5","product","product:30S ribosomal protein S10","product|product:30S ribosomal protein S10",1
+"B5","product","product:30S ribosomal protein S11","product|product:30S ribosomal protein S11",2
+"B5","product","product:30S ribosomal protein S12","product|product:30S ribosomal protein S12",1
+"B5","product","product:30S ribosomal protein S18","product|product:30S ribosomal protein S18",2
+"B5","product","product:30S ribosomal protein S20","product|product:30S ribosomal protein S20",1
+"B5","product","product:30S ribosomal protein S3","product|product:30S ribosomal protein S3",1
+"B5","product","product:30S ribosomal protein S5","product|product:30S ribosomal protein S5",1
+"B5","product","product:50S ribosomal protein L10","product|product:50S ribosomal protein L10",1
+"B5","product","product:50S ribosomal protein L13","product|product:50S ribosomal protein L13",1
+"B5","product","product:50S ribosomal protein L15","product|product:50S ribosomal protein L15",1
+"B5","product","product:50S ribosomal protein L16","product|product:50S ribosomal protein L16",1
+"B5","product","product:50S ribosomal protein L23","product|product:50S ribosomal protein L23",1
+"B5","product","product:50S ribosomal protein L29","product|product:50S ribosomal protein L29",2
+"B5","product","product:50S ribosomal protein L3","product|product:50S ribosomal protein L3",1
+"B5","product","product:50S ribosomal protein L33","product|product:50S ribosomal protein L33",1
+"B5","product","product:6-phosphofructokinase","product|product:6-phosphofructokinase",1
+"B5","product","product:ABC transporter ATP-binding protein","product|product:ABC transporter ATP-binding protein",3
+"B5","product","product:ABC transporter domain-containing protein","product|product:ABC transporter domain-containing protein",1
+"B5","product","product:ABC transporter permease","product|product:ABC transporter permease",1
+"B5","product","product:ATP-binding cassette domain-containing protein","product|product:ATP-binding cassette domain-containing protein",3
+"B5","product","product:ATP-binding protein","product|product:ATP-binding protein",3
+"B5","product","product:Acetyltransferase","product|product:Acetyltransferase",1
+"B5","product","product:D-ribose pyranase","product|product:D-ribose pyranase",1
+"B5","product","product:F0F1 ATP synthase subunit epsilon","product|product:F0F1 ATP synthase subunit epsilon",1
+"B5","product","product:GNAT family N-acetyltransferase","product|product:GNAT family N-acetyltransferase",3
+"B5","product","product:L-lactate permease","product|product:L-lactate permease",2
+"B5","product","product:Lipoprotein","product|product:Lipoprotein",2
+"B5","product","product:MFS transporter","product|product:MFS transporter",4
+"B5","product","product:Major facilitator superfamily (MFS) profile domain-containing protein","product|product:Major facilitator superfamily (MFS) profile domain-containing protein",2
+"B5","product","product:Membrane protein","product|product:Membrane protein",3
+"B5","product","product:Methyltransferase","product|product:Methyltransferase",1
+"B5","product","product:N-acetyltransferase","product|product:N-acetyltransferase",1
+"B5","product","product:Peptidyl-prolyl cis-trans isomerase","product|product:Peptidyl-prolyl cis-trans isomerase",2
+"B5","product","product:Putative membrane protein","product|product:Putative membrane protein",1
+"B5","product","product:SDR family oxidoreductase","product|product:SDR family oxidoreductase",1
+"B5","product","product:Secreted protein","product|product:Secreted protein",2
+"B5","product","product:Transcriptional regulator","product|product:Transcriptional regulator",5
+"B5","product","product:Transporter","product|product:Transporter",1
+"B5","product","product:Transposase","product|product:Transposase",6
+"B5","product","product:dUTP diphosphatase","product|product:dUTP diphosphatase",1
+"B5","product","product:helix-turn-helix domain-containing protein","product|product:helix-turn-helix domain-containing protein",2
+"B5","product","product:histidine kinase","product|product:histidine kinase",4
+"B5","product","product:phosphoribosylformylglycinamidine synthase subunit PurQ","product|product:phosphoribosylformylglycinamidine synthase subunit PurQ",1

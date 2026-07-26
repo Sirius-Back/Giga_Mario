@@ -1,0 +1,34 @@
+# Default @adapt configuration — copied into adapt/config.yaml on each run
+flank_bp: 200
+window_size: 8192
+rc_export: false
+orientation_default: forward_only
+target: TPM
+target_type: continuous
+sequence_type: DNA
+window_strategy: gene_plus_flanks_v1
+long_gene_policy: reject
+seed: 42
+require_all_genomes: false
+
+# Auto-discovery roots (project-relative)
+paths:
+  prefer_split_root: data_splits/full
+  raw_genomes_root: data/raw/genomes
+  reformat_root: data/reformat/random_full
+  split_manifest: data_splits/full/fold_manifest.tsv
+
+# Expected filenames inside each genome directory
+files:
+  fasta_names: [genome.fna, genome.fa, genome.fasta]
+  genes_names: [genes.tsv]
+  tpm_names: [expression_tpm.csv, tpm.csv]
+  gtf_names: [annotation.gtf, annotation.gtf.gz, genomic.gtf]
+
+assumptions_documented:
+  - "Baseline v1: one window = one gene = 200 bp upstream + gene body + 200 bp downstream"
+  - "Genes with length > window_size - 400 are rejected (no chunking)"
+  - "Default export is genomic forward strand sequence (no RC); RC optional via --rc-export"
+  - "Coordinates in genes.tsv are 1-based TSS/TES; gene_start=min(TSS,TES), gene_end=max(TSS,TES)"
+  - "TPM joined by gene_name then gene_id"
+  - "@adapt never assigns train/val/test folds"

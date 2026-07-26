@@ -1,6 +1,6 @@
 # Skills catalog
 
-Project skills live in [`.cursor/skills/*/SKILL.md`](.cursor/skills/). **50** skills; all use `disable-model-invocation: true`. Shared templates: [`.cursor/skills/_shared/`](.cursor/skills/_shared/).
+Project skills live in [`.cursor/skills/*/SKILL.md`](.cursor/skills/). **56** skills; all use `disable-model-invocation: true`. Shared templates: [`.cursor/skills/_shared/`](.cursor/skills/_shared/).
 
 Discovery at runtime is owned by `@prompt-orchestrator` ([skills-map.md](.cursor/skills/prompt-orchestrator/skills-map.md)) — this file is a human summary, not a closed registry.
 
@@ -10,12 +10,12 @@ Discovery at runtime is owned by `@prompt-orchestrator` ([skills-map.md](.cursor
 
 | Check | Result |
 |-------|--------|
-| Skill root | `.cursor/skills/` — present |
-| Skill count | 50 directories with `SKILL.md` |
-| Orchestrators | `@do`, `@do-fast`, `@data`, `@metagenome-analysis`, `@caduceus` (+ `@prepare` / `@split`) |
+| Skill root | `.cursor/skills/` — present (git-tracked via `.gitignore` exception) |
+| Skill count | **56** directories with `SKILL.md` (includes `adapt`, `train-viz`, `caduceus-full`) |
+| Orchestrators | `@do`, `@do-fast`, `@data`, `@metagenome-analysis`, `@caduceus`, `@caduceus-full` (+ `@prepare` / `@split`) |
 | Metagenome pipeline | `metagenome-analysis/pipeline.md` — present |
-| Caduceus folds | `@split` + `splits/*.md` + `AGENTS.md` |
-| Gaps | No prior `skills.md`; no `artifact-registry.md` until this write |
+| Caduceus folds | `@split` + `splits/*.md` + `AGENTS.md`; end-to-end via `@caduceus-full` |
+| Gaps | None for catalog; runtime outs (`logs/`, `runs/`, `figures/`, `adapt/`, large `data_splits/`) gitignored |
 
 ---
 
@@ -81,11 +81,15 @@ Discovery at runtime is owned by `@prompt-orchestrator` ([skills-map.md](.cursor
 
 | Skill | Brief |
 |-------|-------|
-| `caduceus` | Caduceus DNA LM facts (HF, Hydra, RC/Ph/PS); folds via `@split`; pipelines via `@do-fast`. |
-| `split` | Build train/val/test/(zero-shot) from `splits/*.md`; execute via lean `@do-fast`. |
+| `adapt` | Gene±200bp DNA windows + continuous TPM → `adapt/` Caduceus-ready (no splitting). |
+| `caduceus` | Caduceus DNA LM; TPM epoch logs via `metrics.md` (TorchMetrics); `@split` + `@do-fast`. |
+| `caduceus-full` | End-to-end: convert → dual `@split` (TPM then predict-split1) → dual `@adapt` → dual train (10 ep / 4 GPU) + ZS + `@train-viz`. |
+| `split` | Region+TPM linked train/val/test per `splits/*.md`; `@adapt` first if Caduceus-like. |
 | `task-gate` | Brief post-task output/AC smoke check (not full audit or code-review). |
 | `genome-fna-gtf-reformat` | Index paired `.fna`/`.gtf` genomes; optional distinct-species subsample; manifests for `@split`. |
+| `genome-tpm-caduceus-reformat` | Pair genomes with TPM for fold-ready manifests (pre-split). |
 | `benchmark-designer` | Design rigorous benchmarking experiments. |
+| `train-viz` | Publication-quality train curves / finals / gap / summaries from logs (NMI/Methods). |
 
 ### Manuscript & QA
 
@@ -264,9 +268,15 @@ Orchestration spine (outside analysis DAG): input analysis → `@prepare` → `@
 ```mermaid
 flowchart TB
   cad["@caduceus"]
+  cfull["@caduceus-full"]
   cad --> facts[Caduceus facts: HF / Hydra / RC Ph-PS / env pins]
   cad --> split["@split required for folds"]
   cad --> dofast["@do-fast required for pipelines"]
+  cfull --> split
+  cfull --> adapt["@adapt"]
+  cfull --> cad
+  cfull --> tviz["@train-viz"]
+  cfull --> dofast
   split --> splitsmd["splits/*.md + AGENTS.md"]
   dofast --> cycle["do-fast cycle skills"]
   cad --> mtrain["model-train.mdc process"]
@@ -276,7 +286,9 @@ flowchart TB
 
 ```mermaid
 flowchart TD
-  need[Caduceus task] --> folds{needs train/val/test/zero-shot?}
+  need[Caduceus task] --> full{end-to-end dual-split?}
+  full -->|yes| cfull["@caduceus-full"]
+  full -->|no| folds{needs train/val/test/zero-shot?}
   folds -->|yes| dataok{data present?}
   dataok -->|no| data["@data / @get-data"]
   dataok -->|yes| split
@@ -284,8 +296,9 @@ flowchart TD
   folds -->|no one-shot HF| hf[Part 1 inference in-chat]
   split --> dofast["@do-fast + Caduceus overrides"]
   need -->|multi-step train/eval/VEP| dofast
+  cfull --> dofast
   dofast --> mon["@monitor via do-fast"]
   dofast --> out[checkpoints / embeddings / reports]
 ```
 
-Order: resolve data + split strategy → `@split` → `@do-fast` for Caduceus work beyond folds. Do not invent splits or bypass `@do-fast` for project pipelines.
+Order: resolve data + split strategy → `@split` → `@do-fast` for Caduceus work beyond folds. For dual-split TPM + predict-split1 + ZS, use `@caduceus-full`. Do not invent splits or bypass `@do-fast` for project pipelines.

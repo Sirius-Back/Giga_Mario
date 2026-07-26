@@ -9,6 +9,7 @@ bin/
 # --- Secrets & private shell state ---
 .ssh/
 .bash_history
+.lesshst
 *.pem
 *.key
 credentials*
@@ -16,7 +17,10 @@ credentials*
 .env.*
 
 # --- Editor / IDE / tooling caches ---
-.cursor/
+# Track project Agent Skills; ignore the rest of .cursor
+.cursor/*
+!.cursor/skills/
+!.cursor/skills/**
 .cursor-server/
 .vscode/
 .idea/
@@ -31,6 +35,20 @@ __pycache__/
 *.swp
 *.swo
 *~
+
+# --- Runtime logs / results / regenerable outputs ---
+logs/
+*.log
+results/
+runs/
+figures/
+adapt/
+monitoring-report.md
+
+# Large split / smoke panels (keep small smoke manifests if already tracked)
+data_splits/full/
+data_splits/caduceus_full/
+genomes_smoketest/
 
 # --- Large sequence / genome / omics data ---
 # Genomes & assemblies
@@ -146,8 +164,11 @@ downloads/
 blast_db/
 blastdb/
 
-# Generated docs / reports (temporary — track later if needed)
-docs/
+# Generated docs / reports — track skill overviews + registry only
+docs/*
+!docs/artifact-registry.md
+!docs/adapt.md
+!docs/caduceus_format.md
 
 # Hugging Face / model caches
 .cache/huggingface/
