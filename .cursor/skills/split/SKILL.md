@@ -1,9 +1,8 @@
 ---
 name: split
 description: >-
-  Split genomic REGIONS and linked prediction targets (TPM CSV by default) into
-  train/val/test per splits/*.md. Runs @adapt before split when input is
-  Caduceus-like; acquires/converts data otherwise. Use for /split or folds.
+  Write split strategy code under src/splits/, execute it on raw/+ready/, produce
+  train/val/test folds (M1 TPM + optional M2). Use for /split or region folds.
 disable-model-invocation: true
 ---
 
@@ -11,316 +10,126 @@ disable-model-invocation: true
 
 ## Purpose
 
-Produce reproducible **train / validation / test** (and optional zero-shot) folds for a **named dataset** and **named split strategy** (`splits/*.md`), then execute through **`@do-fast`** (lean verification by default).
+Produce reproducible **train / validation / test** folds for a **named split strategy** (`splits/*.md`) by:
 
-**Atomic split unit = genomic REGION** (interval / gene window / sequence sample) **plus** its **linked prediction** (default: continuous TPM from `*tpm*.csv` / `expression_tpm.csv`).
+1. **Writing** strategy code under `src/splits/<id>.py`
+2. **Executing** it via `python -m src.splits.main --strategy <id> …`
+3. **Only then** treating fold trees as ready for `@caduceus` / downstream
 
-It MUST NOT treat a whole-assembly FASTA file as one ML sample unless the user **explicitly** locks species/sample-grain folding (legacy exception). Default and Caduceus paths split **regions**, not full FNA-per-genome bags.
+**Atomic unit** = ready sample (DNA window + linked prediction). Default prediction = continuous **TPM**.
 
-do-fast in brief: one orchestrator subagent; **full `@project-auditor` only at start & end**; **brief `@task-gate` after each task**; **`@code-review` once at end**; `@verify-todo` each wave; monitor only for heavy jobs.
-
-This skill owns **split planning + handoff to `@do-fast`**. It does not reimplement `@do-fast`.
-
-Follow: **validation-first**, **missing-data-policy**, **reproducibility**, **method-decision-tracking**, **artifact-registry**, **slurm-execution-policy**, **task-status**. Model training extras: `AGENTS.md`, `.cursor/rules/model-train.mdc`.
+Do **not** re-convert `ready/` during split. If a strategy needs genomic metadata, read `raw/` to build assignment tables, then **apply** those assignments to ready files (hardlink/symlink sequences).
 
 ## Required inputs
 
-| Input | Meaning | Examples |
-|-------|---------|----------|
-| **данные** (data) | Dataset / path to split | `random/`, `data/raw/genomes`, `adapt/`, `data_splits/full`, Caduceus GB tree |
-| **сплит** (split) | Strategy under `splits/` | `random`, `splits/random.md` |
+| Input | Path | Role |
+|-------|------|------|
+| **raw** | `raw/` | FNA/GTF/TPM/mapping — for strategies that need genomic metadata |
+| **ready** | `ready/` (or `data_ready/`) | Already prepared windows + TPM — **do not prepare/adapt here** |
+| **сплит** | `splits/<id>.md` | Strategy caption |
 
-If either is missing → **stop**. Ask for both; do not guess.
+If raw or ready is missing → **stop**. Do not invent data. Do not run `@adapt` inside split when `ready/` already exists.
 
-Optional: seed, ratios / fold counts, `OUT`, prediction path/glob (default TPM CSV), whether zero-shot, implementation name from `# Implementations`.
+Optional: `--seed` (default 42), `--out` (default `splits/<id>`), `--max-samples` (smoke).
 
-## Analyze split caption (mandatory)
-
-Before any write, read `splits/<id>.md` and record:
-
-| Section | Extract |
-|---------|---------|
-| `# Description` | What is randomly (or otherwise) assigned — **samples / intervals / sequences** |
-| `# Split` | Roles of `train` / `validation` / `test` / `zero_shot` |
-| `# Implementations` | `url`, `split_location`, `run`, `notes`, fallbacks |
-| Input vs output | Expected on-disk **input** shape vs fold **output** shape for the chosen implementation |
-
-**`splits/random.md` (reference):** samples (genomic intervals, sequences or examples) are randomly assigned to train / validation / test without chromosome/gene/species blocking. Caduceus GB: train/test from dataset; validation = random 90/10 from train via `dataset.train_val_split_seed`.
-
-Map that caption onto **this project’s dual streams**:
-
-1. **Genomic stream** — regions derived from FNA + GTF/GFF/BED/genes (or already-adapted sequences)
-2. **Prediction stream** — TPM (default) or other label column, **row-aligned to the same region IDs**
-
-## Dual-stream contract (LOCKED for default path)
-
-| Stream | What is split | Default sources |
-|--------|---------------|-----------------|
-| Genomic regions | Intervals / windows / `.txt` sequences — **parts of genomes**, not whole FNA as one sample | FNA+GTF/genes → regions; or `adapt/samples.tsv` / `adapt/caduceus_ready/**/sequences` |
-| Predictions | One target per region | `*tpm*.csv`, `expression_tpm.csv`, or `adapt/labels.tsv` |
-
-**Linkage rule:** every genomic region has exactly one prediction row with the same `sample_id` / `region_id`.
-
-- If the region has an associated gene with TPM → use that TPM
-- If the region has **no gene** / no TPM join → prediction **`0`** (document in manifest; do not drop the region unless the split MD or user says so)
-- Never leave genomic and prediction folds misaligned
-
-## Input classification → routing
+## Code-first contract (LOCKED)
 
 ```
-Classify DATA:
-  A) Caduceus-like / adapt-compatible
-  B) Already region-split (folds or GB train/test trees)
-  C) Raw / other (assemblies, random/*, mixed)
+Split skill cycle:
+  1. Read splits/<id>.md caption
+  2. WRITE or UPDATE src/splits/<id>.py (+ register in src/splits/main.py)
+  3. EXEC: python -m src.splits.main --strategy <id> --raw raw --ready ready --seed 42
+  4. RUN complete only after exec succeeds (manifests + folds on disk)
 ```
 
-### A — Caduceus-like input → **`@adapt` before `@split`**
+**Never** invent fold membership in-chat. **Never** reimplement windowing in the split skill — that is `@adapt` / `src/preprocessing.py`.
 
-Treat as Caduceus-like when DATA looks like what Caduceus / `@adapt` consume, e.g.:
+New strategies: add `src/splits/<id>.py` with `run_<id>_split(...)`, register in `STRATEGY_RUNNERS` inside `src/splits/main.py`.
 
-- Per-genome `genome.fna` + `genes.tsv` / GTF + `expression_tpm.csv`
-- `adapt/` already present (reuse; do not re-adapt unless forced)
-- Sequence folders that match Caduceus / GB `.txt` trees **plus** a TPM or label table to build
+## Dual-stream (ready panel)
 
-**Action:**
+| Stream | Source | Notes |
+|--------|--------|-------|
+| Genomic | `ready/ready.csv` + `ready/caduceus_ready/**/sequences/*.txt` | Split IDs only; no reconversion |
+| Prediction M1 | TPM column | Continuous |
+| Prediction M2 (random) | M1 fold class `{train:0,val:1,test:2}` | Stratified by M1 |
 
-1. If `adapt/samples.tsv` (or user `ADAPT_OUT`) is missing/incomplete → invoke **`@adapt`** (`/adapt`) on DATA
-2. Then split **adapted region samples** (rows of `samples.tsv` / sequence files) into `train`/`val`/`test` per `splits/*.md` + seed
-3. Split **predictions** by copying/joining `TPM` (or labels) with the **same** region IDs into each fold
-4. Write Caduceus-ready fold trees under `OUT/` (see Outputs)
+Linkage: every sample_id has exactly one prediction. Non-coding / missing gene TPM already **0** from ready prep.
 
-Do **not** skip `@adapt` on Caduceus-like raw genomes and then fold whole FNA files.
-
-### B — Already split genomic data → **predict the split**
-
-When DATA already has `train`/`val`/`test` (or GB `train`/`test`) **at region or sample grain**:
-
-1. Verify genomic region files exist per fold
-2. Build or verify prediction tables **per fold** so each region ID keeps its label
-3. If predictions missing: join TPM CSV by gene/region; missing gene → **0**
-4. Do **not** randomly re-split unless the user asks for a new split run
-5. Run `@adapt` only if regions are still whole-genome assets that need windowing before Caduceus
-
-### C — Raw / different input → acquire → convert → regionize → split
-
-1. **Check necessary data** (genomes, annotations, TPM). List gaps; never invent.
-2. **Missing → `@data` / `@get-data`** (`/data`) for acquisition; stop if still critical-missing.
-3. **Convert** when layout ≠ split algorithm needs:
-   - Prefer existing skills: `@genome-fna-gtf-reformat`, `@genome-tpm-caduceus-reformat`, `@adapt`
-   - Else tools/scripts: GTF→BED, FASTA region extraction, interval join to TPM, etc.
-   - Record every conversion in `method-decision.md`
-4. Materialize **region table** + **prediction table** (linked)
-5. If the target model is Caduceus and regions are not yet Caduceus windows → **`@adapt`** then split adapted samples
-6. Run the split algorithm from `splits/*.md`
-
-## Workflow
-
-```
-Split:
-- [ ] 1. Parse DATA + SPLIT_MD; fail early if missing
-- [ ] 2. Read AGENTS.md; read splits/*.md caption (Description / Split / Implementations)
-- [ ] 3. Analyze input vs expected output; classify A / B / C
-- [ ] 4. Ensure genomic + prediction sources (TPM default); @data if missing
-- [ ] 5. Convert / regionize as needed; @adapt if Caduceus-like or windows required
-- [ ] 6. Link regions ↔ predictions (no gene → TPM 0)
-- [ ] 7. NEW run? archive old todos + reset do-fast checkpoint
-- [ ] 8. Materialize chunky todo.md + ./todo/*.md
-- [ ] 9. @verify-todo → @prepare if needed
-- [ ] 10. @do-fast with Split execution contract (VERIFY_PROFILE=lean unless strict)
-- [ ] 11. Surface Final Report + OUT paths
-```
-
-### New run vs resume
-
-| Situation | Action |
-|-----------|--------|
-| Resume same OUT / same todo IDs | Keep `docs/do-fast-checkpoint.md` |
-| New OUT or new task graph | Reset checkpoint; archive old `todo/T-*.md`; fresh `todo.md` |
-
-### Todo shaping
-
-| Prefer | Avoid |
-|--------|--------|
-| One task: caption analysis + input class A/B/C + pin implementation | Doc-only micro-tasks |
-| One task: acquire/convert/adapt as required by class | Silent whole-FNA fold assignment for Caduceus |
-| One task: region+TPM linked split + manifests + report | Genomic folds without prediction tables |
-
-**Proven Caduceus region path:**
-
-| Task | Scope |
-|------|-------|
-| T-1 | Read AGENTS + SPLIT_MD; classify input; lock seed/OUT/ratios |
-| T-2 | Ensure data (`@data` if needed) + convert; **`@adapt`** if Caduceus-like |
-| T-3 | Seeded region+TPM split → `OUT/{train,val,test}/` + manifests + `docs/split-report.md` |
-
-### Split execution contract (runs inside `@do-fast`)
-
-Pass **verbatim** into `@do-fast` `{{USER_OVERRIDES_OR_NONE}}` (plus `DATA=…`, `SPLIT_MD=…`, `OUT=…`, `SEED=…`, `PRED=TPM`):
-
-```
-* читает agents.md
-* читает соответствующий splits/*md
-* анализирует input vs output под caption сплита; классифицирует A/B/C
-* скачивает код реализации при необходимости
-* обеспечивает genomic + prediction (TPM по умолчанию): @data если нет; конвертеры/скилы если формат не подходит
-* если input Caduceus-like — сначала @adapt, затем split регионов
-* сплитует GENOMIC REGIONS (не целый FNA как один sample) по алгоритму splits/*.md
-* сплитует PREDICTIONS согласованно: raw → из TPM; already-split → prediction следует genomic fold
-* связка region↔prediction обязательна; нет гена → prediction=0
-* сохраняет фолды train/, val/, test/ (+ zero-shot только если указано)
-* репортит результаты
-```
-
-Also pass (unless user requested strict gates):
-
-```
-VERIFY_PROFILE=lean
-```
-
-| Step | Action |
-|------|--------|
-| agents.md | Pipeline, Main MDs, training-advance note |
-| splits/*md | Description / Split / Implementations; honor fallbacks |
-| анализ A/B/C | Caduceus-like → adapt-first; already-split → align preds; raw → data/convert |
-| код | Clone/fetch implementation `url` if needed; record commit; do not re-clone if present |
-| data | `@data`/`@get-data` when missing; never invent TPM/sequence |
-| convert | Skills/tools (GTF→BED, region extract, `@genome-tpm-caduceus-reformat`, …) |
-| `@adapt` | Required before region split when input is Caduceus-like / needs gene±flank windows |
-| region split | Assign **region IDs** to folds per caption (e.g. random). Fixed seed |
-| prediction split | Same IDs; TPM default; missing gene → **0** |
-| save | `OUT/train|val|test/` with genomic + prediction artifacts + manifests |
-| report | `docs/split-report.md` + artifact registry |
-
-## Outputs
-
-Under `OUT` (project-relative):
+## Random strategy outputs (`splits/random/`)
 
 | Path | Content |
 |------|---------|
-| `train/` `val/` `test/` | Per-fold **regions** + **predictions** |
-| `zero-shot/` | Only if MD/user requests |
-| `fold_manifest.tsv` | `region_id`, fold, genome, chrom, start, end, strand, gene_id, TPM, sequence_path, pred_path, seed, split_id |
-| `predictions/{fold}.tsv` or per-fold `labels.tsv` | Linked targets (TPM) |
-| `docs/split-report.md` | Always |
+| `M1/{train,val,test}/` | Sequences + `labels.tsv` (**TPM**); `ready.csv` subset |
+| `M2/{train,val,test}/` | Same sequences; labels = **M1 fold** (stratified assignment) |
+| `splits_log.csv` | `data_input\|M1\|M2` |
+| `M1/fold_manifest.tsv`, `M2/fold_manifest.tsv` | Membership + paths |
+| `metadata.json` | Seed, counts, encoding |
 
-### Caduceus-oriented fold layout (after adapt + region split)
+Ratios (Caduceus-aligned): ~10% test; of remainder ~10% val / ~90% train. Seeds: M1=`seed`, M2=`seed+1` (stratified by M1).
 
-Prefer:
+## Exact command
 
-```
-OUT/{train,val,test}/
-  sequences/<region_id>.txt    # DNA window
-  labels.tsv                   # region_id, TPM
-```
-
-Optional: retain source genome hardlinks for audit, but **ML samples are regions**.
-
-Legacy whole-sample FNA+GTF+TPM dirs are allowed **only** when the user explicitly locks species/sample-grain folding — record that Locked exception in `method-decision.md`.
-
-### Report template (`docs/split-report.md`)
-
-```markdown
-# Split Report
-
-**Date:** YYYY-MM-DD
-**Data:** …
-**Split:** splits/<id>.md (`id`)
-**Input class:** A Caduceus-like | B already-split | C raw/other
-**Implementation:** name + url @ commit
-**Seed / ratios:** …
-**Prediction:** TPM (default) | other: …
-
-## Caption analysis
-- Description unit: …
-- Train/val/test/zero_shot: …
-- Input → output mapping: …
-
-## Folds written
-| Fold | N regions | N preds | Path |
-|------|-----------|---------|------|
-| train | … | … | … |
-| val | … | … | … |
-| test | … | … | … |
-
-## Genomic ↔ prediction linkage
-- Join key: …
-- Regions with TPM: …
-- Regions with prediction=0 (no gene): …
-- Orphans / mismatches: … (must be 0 or explained)
-
-## Adaptation / conversion
-- @adapt: yes/no + out path
-- @data / converters / skills: …
-- Exclusions: …
-
-## Run
-- Command(s): …
-- Outcome: success | failed | partial
-- Manifest: …
-
-## Notes / blockers
-…
+```bash
+conda run -n caduceus_env python -m src.splits.main \
+  --strategy random \
+  --raw raw \
+  --ready ready \
+  --seed 42
 ```
 
-## Invoking `@do-fast`
+Smoke:
 
-1. Todos cover the contract; prefer chunky T-1…T-3.
-2. New run → reset checkpoint.
-3. Launch `@do-fast` exactly as that skill requires (one orchestration prompt).
-4. `USER_OVERRIDES` = verbatim Russian bullets + resolved paths + `VERIFY_PROFILE`.
-5. Wait for exit; do not micromanage; do not duplicate do-fast internals.
+```bash
+python -m src.splits.main --strategy random --max-samples 500 --out splits/random_smoke
+```
 
-## Lessons (finalize reference)
+Heavy panels → wrap in sbatch (even CPUs, mem, time, logs).
 
-### Region + TPM (current default)
+## Analyze split caption (mandatory before writing code)
 
-What to do:
+Read `splits/<id>.md`:
 
-- Read split caption first; unit = interval/sequence sample
-- Caduceus-like genomes → **`@adapt` then random-split region rows**
-- Link every region to TPM; **no gene → 0**
-- Acquire with `@data` when TPM/FNA/GTF missing; convert when schemas differ
+| Section | Extract |
+|---------|---------|
+| `# Description` | What is assigned |
+| `# Split` | train / validation / test / zero_shot roles |
+| `# Implementations` | urls / notes / fallbacks |
 
-What to avoid:
+Map caption → `src/splits/<id>.py` behavior. Record Locked choices in `method-decision.md`.
 
-- Folding whole mammalian FNA as one Caduceus training example by default
-- Genomic folds without prediction tables
-- Inventing TPM; silent adapt skip on Caduceus-like input
-- Re-using an old EXIT A checkpoint for a new OUT
+## Workflow checklist
 
-### Legacy species-grain panels (`data_splits/full`)
-
-Still valid **only** as a Locked user exception (coherent genome+transcriptome bags). Prefer region-level splits going forward for Caduceus training.
+```
+split:
+- [ ] Parse strategy id + confirm raw/ + ready/ present
+- [ ] Read splits/<id>.md caption
+- [ ] Write/update src/splits/<id>.py + main.py registry
+- [ ] Exec python -m src.splits.main --strategy <id> …
+- [ ] Verify M* folds + splits_log / manifests
+- [ ] docs/split-report.md + method-decision + artifact-registry
+```
 
 ## Rules
 
-- Never invent split semantics — only `splits/*.md` + user inputs.
-- Never invent data — acquire (`@data`) or stop.
-- Split **regions + predictions** together; keep IDs aligned.
-- Missing gene on a region → prediction **0** (documented).
-- Caduceus-like input → **`@adapt` before split** (unless adapt outputs already valid).
-- Fixed seeds for any randomness; relative project paths.
-- Zero-shot only when explicitly indicated.
-- CV / LOO / extras: implement in **both** `@split` and `@caduceus` when supported (`AGENTS.md`).
+- Write code in `src/splits/` **before** exec; exec **before** declaring done
+- Never invent TPM or fold labels
+- Never convert/adapt ready files during split
+- Use `raw/` only to build assignment tables when the strategy requires it
+- Fixed seeds; relative project paths
+- Zero-shot only when explicitly indicated in the split MD / user lock
 
 ## Coordination
 
-| Skill / doc | Role |
-|-------------|------|
-| `AGENTS.md` | Pipeline + split MD shape |
-| `splits/*.md` | Strategy caption + implementations |
-| `@do-fast` | Execution engine (required; lean default) |
-| `@adapt` | Caduceus windows + TPM **before** region split when class A |
-| `@data` / `@get-data` | Download when genomic or TPM assets missing |
-| `@genome-fna-gtf-reformat` | Paired FNA/GTF manifests |
-| `@genome-tpm-caduceus-reformat` | GCF + TPM coherent manifests (pre-regionize) |
-| `@caduceus` | Consumes region folds + labels after split |
-| `@prepare-prompt` / `@generate-todo` | Todo materialization |
+| Skill / path | Role |
+|--------------|------|
+| `src/splits/main.py` | Dispatcher |
+| `src/splits/random.py` | Random M1/M2 |
+| `src/preprocessing.py` / `@adapt` | Build `ready/` **before** split |
+| `splits/*.md` | Strategy captions |
+| `@caduceus` | Consumes fold `sequences/` + `labels.tsv` |
 
 ## Additional resources
 
-- Example strategy: `splits/random.md`
-- Adapt: `~/.cursor/skills/adapt/SKILL.md`
-- Data: `~/.cursor/skills/data/SKILL.md`
-- do-fast: `~/.cursor/skills/do-fast/SKILL.md`
-- Format notes: `docs/caduceus_format.md`
+- Caption: [`splits/random.md`](../../splits/random.md)
+- Ready prep: [`wiki/conversion.md`](../../wiki/conversion.md)

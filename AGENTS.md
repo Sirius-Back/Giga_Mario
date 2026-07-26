@@ -11,6 +11,13 @@
 | `docs/adapt.md` | `@adapt` Caduceus-prep overview |
 | `docs/caduceus_format.md` | Caduceus fine-tune format notes |
 | `metrics.md` | TorchMetrics suite for Caduceus/expression epoch logging |
+| `wiki/conversion.md` | raw → data_ready conversion |
+| `wiki/split.md` | raw+ready → `src/splits` folds |
+| `src/preprocessing.py` | `@adapt` entry (ready panel) |
+| `src/splits/main.py` | `@split` dispatcher (`python -m src.splits.main`) |
+| `src/caduceus.py` | `@caduceus` fine-tune (`python -m src.caduceus`) |
+| `src/train_viz/` | `@train-viz` figures (`python -m src.train_viz`) |
+| `src/runs/caduceus_full.py` | `@caduceus-full` orchestrator |
 
 Prefer `docs/artifact-registry.md` when `docs/` exists.
 
@@ -31,7 +38,7 @@ raw / reformat
 - **`@adapt`** builds gene±200 bp DNA windows + continuous TPM. Runs **before** `@split` when input is Caduceus-like; may also run on fold assets when windowing is still required.
 - **`@caduceus`** trains/evaluates on region folds + labels; epoch logs must follow **`metrics.md`**.
 - **Linkage:** every region has a prediction; region with no gene → prediction **0**.
-- **`@caduceus-full`** orchestrates convert → split1 (TPM, excl. ZS) → split2 (predict split1) → dual `@adapt` → dual `@caduceus` (10 ep / 4 GPU defaults) → optional parallel ZS adapt + TPM-model eval + `@train-viz`. See `.cursor/skills/caduceus-full/SKILL.md`.
+- **`@caduceus-full`** writes/executes `src/runs/caduceus_full.py`: **no adapt** (uses `ready/`); `/split` (M1 TPM + M2) → `/caduceus` ×2 → `/train-viz`. Re-runnable without subagents. See `.cursor/skills/caduceus-full/SKILL.md`.
 
 ## `splits/{}.md`
 

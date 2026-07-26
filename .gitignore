@@ -47,9 +47,18 @@ __pycache__/
 
 # --- Runtime logs / results / regenerable outputs ---
 logs/
+ready/
+data_ready/
+data_ready_smoke/
+raw/
+todo*
+method_decision*
+question*
 *.log
 results/
-runs/
+/runs/
+!src/runs/
+!src/runs/**
 figures/
 adapt/
 monitoring-report.md
@@ -178,6 +187,8 @@ docs/*
 !docs/artifact-registry.md
 !docs/adapt.md
 !docs/caduceus_format.md
+!docs/split-report.md
+!docs/caduceus-full-report.md
 
 # Hugging Face / model caches
 .cache/huggingface/

@@ -2,15 +2,15 @@
 
 ## What
 
-Prepare a **Caduceus-ready** dataset of DNA sequence windows labeled with **continuous TPM**.
+Prepare a **Caduceus-ready** dataset of DNA sequence windows labeled with **continuous TPM**, including matched **non-coding** regions.
 
 ## What not
 
 - No train/validation/test / zero-shot splitting (that is `@split`)
-- No model training (that is `@caduceus` + `@do-fast`)
+- No model training (that is `@caduceus`)
 - No RNA/protein sequences
-- No gene chunking / multi-window genes / partial genes (baseline v1)
+- No inventing missing TPM files
 
 ## When
 
-Use `/adapt` after genomes+TPM are available (raw or already under `data_splits/`), and **before** Caduceus fine-tuning on transcript abundance.
+Use `/adapt` on `raw/{fna,gtf,tpm}` before Caduceus fine-tuning. Entry: `src/preprocessing.py` → `data_ready/`.

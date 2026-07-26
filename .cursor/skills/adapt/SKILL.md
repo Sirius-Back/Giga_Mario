@@ -1,9 +1,9 @@
 ---
 name: adapt
 description: >-
-  Mandatory stage between raw or split genomic data and Caduceus: audit repo,
-  build gene±200bp DNA windows with continuous TPM labels, write adapt/
-  Caduceus-ready dataset. Never splits folds. Use for /adapt or Caduceus prep.
+  Mandatory stage between raw genomic data and Caduceus: CDS±10kb DNA windows
+  with neighbour trim, large-gene crop, matched non-coding, continuous TPM;
+  write data_ready/ Caduceus-ready dataset via src/preprocessing.py. Never splits folds.
 disable-model-invocation: true
 ---
 
@@ -11,357 +11,72 @@ disable-model-invocation: true
 
 ## Goal
 
-`adapt` is the mandatory intermediate stage between raw genomic data (or already split data) and Caduceus training.
-
-Pipeline:
+`adapt` prepares Caduceus-ready DNA windows + continuous TPM from raw FNA/GTF/TPM.
 
 ```
-Raw data
-      │
-      ├─ Caduceus-like ──► adapt ──► split (regions + TPM) ──► caduceus
-      │
-      └─ other / already-split ──► (data/convert as needed)
-                                    │
-                                    └─ adapt if windows still needed
-                                         │
-                                         └─ split or align predictions ──► caduceus
+raw/{fna,gtf,tpm}  ──►  src/preprocessing.py  ──►  data_ready/
+                                                      ├── ready.fna / ready.csv
+                                                      ├── non_coding.csv, neighbours.csv, large_genes.csv
+                                                      └── caduceus_ready/all/{sequences/*.txt, labels.tsv}
 ```
 
 `@split` owns folds. This skill MUST NOT perform train/validation/test splitting.
-
-It MUST ONLY prepare a Caduceus-ready dataset (gene windows + TPM). When `/split` classifies input as Caduceus-like, it invokes **`@adapt` before** region splitting.
 
 --------------------------------------------------
 GENERAL PRINCIPLES
 --------------------------------------------------
 
-The skill follows the same philosophy as all existing project skills.
+Reproducible, deterministic (seed 42), restartable, idempotent, scientific, fully documented.
 
-Requirements:
-
-• reproducible
-• deterministic
-• restartable
-• idempotent
-• scientific
-• fully documented
-
-Never silently guess.
-
-Every assumption must be documented.
-
-Follow project rules: **validation-first**, **missing-data-policy**, **reproducibility**, **scientific-integrity**, **method-decision-tracking**, **artifact-registry**, **slurm-execution-policy**, **task-status**.
+Never silently guess. Follow: validation-first, missing-data-policy, reproducibility, scientific-integrity, method-decision-tracking, artifact-registry, slurm-execution-policy, task-status.
 
 --------------------------------------------------
 STAGE 1 — REPOSITORY AUDIT
 --------------------------------------------------
 
-Determine automatically:
+Expect:
 
-• raw repository
-or
-• already split repository
+```
+raw/fna/*.fna(.gz)
+raw/gtf/*.gtf(.gz)
+raw/tpm/*.csv
+raw/random_borzoi_expr_file_mappings.csv
+```
 
-Detect:
-
-genomes
-annotations
-expression tables
-metadata
-splits
-
-Verify consistency.
-
-Report missing files.
-
-Abort if critical files are missing.
+Pair by GCF accession. Skip genomes missing a local TPM (do not invent). Abort if no complete bundles.
 
 --------------------------------------------------
-SUPPORTED INPUTS
+STAGE 2 — CADUCEUS FORMAT
 --------------------------------------------------
 
-By default use ALL available genomes.
-
-Expected input may include:
-
-FASTA
-FNA
-GTF
-GFF3
-TPM tables
-gene expression matrices
-metadata
-
-Multiple genomes are expected.
-
-Each genome may be located inside a separate directory.
-
-Automatically pair
-
-genome
-annotation
-expression
-
-using filenames and metadata.
+See [docs/caduceus_format.md](../../docs/caduceus_format.md). Continuous TPM → `caduceus_ready/{fold}/sequences/*.txt` + `labels.tsv`.
 
 --------------------------------------------------
-CURRENT TASK
+STAGE 3 — WINDOW STRATEGY (LOCKED 2026-07-27)
 --------------------------------------------------
 
-Current prediction target:
+| Rule | Value |
+|------|-------|
+| Anchor | CDS span (min–max CDS from GTF) |
+| Flank | ±**10 000** bp |
+| Neighbours | If other CDS enter the window → trim at neighbour CDS corner; log `neighbours.csv` |
+| Large genes | CDS length > **130 000** → 10 kb before strand-aware start + **120 kb** of CDS; log `large_genes.csv` |
+| Orientation | Forward genomic sequence only |
+| Non-coding | Intergenic complement; match gene **length** & **GC** (greedy 1:1); TPM **0** |
+| Properties | Gene + non-coding Length/GC → `non_coding.csv` |
 
-continuous transcript abundance
-
-Target:
-
-TPM
-
-Prediction input:
-
-DNA sequence only
-
-Sequence generated from
-
-gene
-plus
-flanking regions
-
-No RNA sequence.
-
-No protein sequence.
+No multi-window genes. No RC by default.
 
 --------------------------------------------------
-STAGE 2 — VERIFY CADUCEUS FORMAT
+OUTPUT
 --------------------------------------------------
 
-Search online for the latest Caduceus fine-tuning format.
-
-Document:
-
-required file formats
-supported labels
-recommended sequence length
-recommended chunk sizes
-required metadata
-directory structure
-tokenization assumptions
-
-Save summary into
-
-docs/caduceus_format.md
-
-Document all references.
-
-Never hardcode assumptions if documentation changed.
-
-(Re-fetch / refresh this doc when Caduceus upstream changes; do not invent formats.)
-
---------------------------------------------------
-STAGE 3 — BUILD TRAINING WINDOWS
---------------------------------------------------
-
-Training sample = ONE genomic window.
-
-Current baseline strategy (LOCKED):
-
-One window corresponds to one gene.
-
-Window contains:
-
-200 bp upstream
-gene body
-200 bp downstream
-
-Total window size:
-
-configured by user.
-
-If gene does NOT completely fit inside
-
-window_size - 400 bp
-
-exclude this gene.
-
-No chunking.
-
-No overlapping windows.
-
-No multi-window genes.
-
-No partial genes.
-
-Future strategies may exist but are NOT implemented.
-
---------------------------------------------------
-LONG GENE POLICY
---------------------------------------------------
-
-Baseline v1:
-
-Reject genes longer than
-
-window_size - 2 × 200 bp
-
-Generate
-
-excluded_genes.tsv
-
-including
-
-gene_id
-length
-reason
-
-Produce summary:
-
-accepted
-rejected
-percentage
-per genome
-
---------------------------------------------------
-WINDOW EXTRACTION
---------------------------------------------------
-
-Automatically respect strand.
-
-Positive strand:
-
-200 bp upstream
-gene
-200 bp downstream
-
-Negative strand:
-
-extract identical biological region.
-
-Support optional reverse-complement export.
-
-Current default:
-
-export forward orientation only.
-
-Design implementation to allow future RC augmentation.
-
---------------------------------------------------
-TARGET TABLE
---------------------------------------------------
-
-Produce one record per accepted gene.
-
-Each sample contains
-
-sample_id
-genome
-chromosome
-gene_id
-coordinates
-strand
-sequence
-TPM
-window_length
-metadata
-
---------------------------------------------------
-OUTPUT FORMAT
---------------------------------------------------
-
-Generate Caduceus-ready dataset.
-
-Output directory:
-
-adapt/
-
-Include:
-
-manifest.tsv
-samples.tsv
-labels.tsv
-metadata.json
-config.yaml
-statistics.json
-excluded_genes.tsv
-README.md
-
-Also write `adapt/caduceus_ready/` (fold-preserving if splits exist) so `/caduceus` can consume sequences + continuous TPM without re-adapting. See [docs/caduceus_format.md](../../docs/caduceus_format.md).
-
---------------------------------------------------
-DOCUMENTATION
---------------------------------------------------
-
-Automatically document
-
-window strategy
-context size
-filter thresholds
-rejected genes
-Caduceus assumptions
-directory structure
-
-Store:
-
-METHOD_DECISIONS.md
-docs/adapt.md
-docs/caduceus_format.md
-
-(Also append Locked/Tentative entries to project-root `method-decision.md`.)
-
---------------------------------------------------
-QUALITY CONTROL
---------------------------------------------------
-
-Validate:
-
-matching chromosome names
-gene coordinates
-window boundaries
-duplicate genes
-missing TPM
-invalid strands
-missing FASTA entries
-empty sequences
-negative coordinates
-coordinates outside chromosome
-
-Produce complete QC report.
-
---------------------------------------------------
-FAILURE POLICY
---------------------------------------------------
-
-Never silently continue.
-
-Critical problems:
-
-abort.
-
-Recoverable problems:
-
-skip
-document
-continue.
-
---------------------------------------------------
-INTEGRATION
---------------------------------------------------
-
-Must integrate seamlessly with
-
-split
-and
-caduceus
-
-without modifying either skill.
-
-Input accepted from:
-
-raw repository
-or
-split repository
-
-Output must always be accepted directly by
-
-/caduceus
+Directory: **`data_ready/`** (see [wiki/conversion.md](../../wiki/conversion.md))
+
+- `ready.fna` — `>Genome|GeneOrID|Chr|Position_start|Position_end`
+- `ready.csv` — `Genome|GeneOrID|Chr|Position_start|Position_end|TPM`
+- `non_coding.csv`, `neighbours.csv`, `large_genes.csv`
+- `caduceus_ready/`, `statistics.json`, `metadata.json`
 
 --------------------------------------------------
 EXACT COMMAND
@@ -370,44 +85,45 @@ EXACT COMMAND
 **Do not reimplement windowing in-chat** — run the script.
 
 ```bash
-conda run -n caduceus_env python .cursor/skills/adapt/scripts/adapt.py \
-  --config .cursor/skills/adapt/scripts/config.default.yaml \
-  --input auto \
-  --out adapt \
-  --window-size 8192
+conda run -n caduceus_env python src/preprocessing.py \
+  --raw raw \
+  --out data_ready \
+  --flank 10000 \
+  --seed 42
 ```
 
 | Flag | Default | Notes |
 |------|---------|-------|
-| `--input` | `auto` | `auto` \| path to split root (`data_splits/full`) \| raw root |
-| `--out` | `adapt` | Output directory |
-| `--window-size` | from config | Max accepted window length (bp) |
-| `--flank` | `200` | Upstream/downstream flank (LOCKED baseline = 200) |
-| `--rc-export` | off | If set, also write RC sequences (default: forward only) |
-| `--seed` | `42` | Only for deterministic tie-breaks / sampling hooks (no split) |
+| `--raw` | `raw` | Root with `fna/`, `gtf/`, `tpm/` |
+| `--out` | `data_ready` | Output directory |
+| `--flank` | `10000` | Upstream/downstream flank (LOCKED) |
+| `--seed` | `42` | Deterministic non-coding placement |
+| `--genomes` | all | Optional GCF filter |
+| `--max-genes` | none | Smoke-test cap |
 
-Heavy panels → wrap in sbatch (even CPUs, mem, time, logs) per **slurm-execution-policy**.
+Skill wrapper (same entry):
+
+```bash
+conda run -n caduceus_env python .cursor/skills/adapt/scripts/adapt.py \
+  --raw raw --out data_ready
+```
+
+Heavy panels → `sbatch scripts/preprocess_raw.sbatch` (16 CPUs, 128G, 48h).
 
 ## Workflow checklist
 
 ```
 adapt:
-- [ ] Stage 1: Repository audit (raw vs split); abort on critical gaps
-- [ ] Stage 2: Refresh/verify docs/caduceus_format.md against upstream
-- [ ] Stage 3: Build gene±flank windows; exclude long genes
-- [ ] QC report; excluded_genes.tsv; statistics.json
-- [ ] Write adapt/* + adapt/caduceus_ready/*
-- [ ] METHOD_DECISIONS.md + docs/adapt.md + method-decision.md + artifact-registry
+- [ ] Stage 1: Audit raw/{fna,gtf,tpm} + mapping; skip incomplete; abort if empty
+- [ ] Stage 2: Confirm docs/caduceus_format.md + wiki/conversion.md
+- [ ] Stage 3: CDS±10kb; neighbour trim; large-gene crop; non-coding match
+- [ ] Write data_ready/* + caduceus_ready/*
+- [ ] Update method-decision.md + artifact-registry + wiki/conversion.md
 ```
 
 ## Additional resources
 
-- [README.md](README.md) — overview + commands
-- [description.md](description.md) — scope boundary
-- [examples.md](examples.md) — before/after split examples
-- [best-practices.md](best-practices.md)
-- [error-handling.md](error-handling.md)
-- [checklists.md](checklists.md)
-- [workflow.md](workflow.md) — Mermaid diagram
-- [scripts/adapt.py](scripts/adapt.py) — implementation
-- [scripts/config.default.yaml](scripts/config.default.yaml)
+- [wiki/conversion.md](../../wiki/conversion.md) — algo + I/O structures
+- [README.md](README.md)
+- [scripts/adapt.py](scripts/adapt.py) — thin wrapper → `src/preprocessing.py`
+- Project entry: [`src/preprocessing.py`](../../src/preprocessing.py)

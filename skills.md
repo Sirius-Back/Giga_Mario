@@ -14,8 +14,8 @@ Discovery at runtime is owned by `@prompt-orchestrator` ([skills-map.md](.cursor
 | Skill count | **56** directories with `SKILL.md` (includes `adapt`, `train-viz`, `caduceus-full`) |
 | Orchestrators | `@do`, `@do-fast`, `@data`, `@metagenome-analysis`, `@caduceus`, `@caduceus-full` (+ `@prepare` / `@split`) |
 | Metagenome pipeline | `metagenome-analysis/pipeline.md` — present |
-| Caduceus folds | `@split` + `splits/*.md` + `AGENTS.md`; end-to-end via `@caduceus-full` |
-| Gaps | None for catalog; runtime outs (`logs/`, `runs/`, `figures/`, `adapt/`, large `data_splits/`) gitignored |
+| Caduceus folds | `@split` + `src/splits/` + `splits/*.md`; end-to-end via `@caduceus-full` → `src/runs/caduceus_full.py` |
+| Gaps | None for catalog; runtime outs (`logs/`, `runs/`, `figures/`, `ready/`, `data_ready/`, large `splits/<id>/` fold trees) gitignored |
 
 ---
 
@@ -81,15 +81,15 @@ Discovery at runtime is owned by `@prompt-orchestrator` ([skills-map.md](.cursor
 
 | Skill | Brief |
 |-------|-------|
-| `adapt` | Gene±200bp DNA windows + continuous TPM → `adapt/` Caduceus-ready (no splitting). |
-| `caduceus` | Caduceus DNA LM; TPM epoch logs via `metrics.md` (TorchMetrics); `@split` + `@do-fast`. |
-| `caduceus-full` | End-to-end: convert → dual `@split` (TPM then predict-split1) → dual `@adapt` → dual train (10 ep / 4 GPU) + ZS + `@train-viz`. |
-| `split` | Region+TPM linked train/val/test per `splits/*.md`; `@adapt` first if Caduceus-like. |
+| `adapt` | `src/preprocessing.py`: CDS±10kb + non-coding match → `ready/` / `data_ready/` (no folding). |
+| `split` | Write/exec `src/splits/`: region folds from `raw/`+`ready/`; random → `splits/random/{M1,M2}` + `splits_log.csv`. |
+| `caduceus` | Write/exec `src/caduceus.py`: fine-tune on a splits dir; `logs/` + TensorBoard + `final_model/`; `metrics.md`. |
+| `train-viz` | Write/exec `src/train_viz/`: publication curves from run logs; `--models` one or compared. |
+| `caduceus-full` | Write/exec `src/runs/caduceus_full.py`: **no adapt**; split → caduceus(M1,M2) → train-viz (re-runnable without subagents). |
 | `task-gate` | Brief post-task output/AC smoke check (not full audit or code-review). |
 | `genome-fna-gtf-reformat` | Index paired `.fna`/`.gtf` genomes; optional distinct-species subsample; manifests for `@split`. |
 | `genome-tpm-caduceus-reformat` | Pair genomes with TPM for fold-ready manifests (pre-split). |
 | `benchmark-designer` | Design rigorous benchmarking experiments. |
-| `train-viz` | Publication-quality train curves / finals / gap / summaries from logs (NMI/Methods). |
 
 ### Manuscript & QA
 
@@ -267,38 +267,34 @@ Orchestration spine (outside analysis DAG): input analysis → `@prepare` → `@
 
 ```mermaid
 flowchart TB
-  cad["@caduceus"]
-  cfull["@caduceus-full"]
-  cad --> facts[Caduceus facts: HF / Hydra / RC Ph-PS / env pins]
-  cad --> split["@split required for folds"]
-  cad --> dofast["@do-fast required for pipelines"]
+  cad["@caduceus\nsrc/caduceus.py"]
+  cfull["@caduceus-full\nsrc/runs/caduceus_full.py"]
+  adapt["@adapt\nsrc/preprocessing.py"]
+  split["@split\nsrc/splits/"]
+  tviz["@train-viz\nsrc/train_viz/"]
+  adapt --> ready["ready/ already prepared"]
+  ready --> cfull
   cfull --> split
-  cfull --> adapt["@adapt"]
   cfull --> cad
-  cfull --> tviz["@train-viz"]
-  cfull --> dofast
+  cfull --> tviz
+  cad --> facts[HF / RC Ph-PS / metrics.md / TensorBoard]
   split --> splitsmd["splits/*.md + AGENTS.md"]
-  dofast --> cycle["do-fast cycle skills"]
-  cad --> mtrain["model-train.mdc process"]
 ```
 
 ### Dependencies
 
 ```mermaid
 flowchart TD
-  need[Caduceus task] --> full{end-to-end dual-split?}
-  full -->|yes| cfull["@caduceus-full"]
-  full -->|no| folds{needs train/val/test/zero-shot?}
-  folds -->|yes| dataok{data present?}
-  dataok -->|no| data["@data / @get-data"]
-  dataok -->|yes| split
-  data --> split["@split via @do-fast"]
-  folds -->|no one-shot HF| hf[Part 1 inference in-chat]
-  split --> dofast["@do-fast + Caduceus overrides"]
-  need -->|multi-step train/eval/VEP| dofast
-  cfull --> dofast
-  dofast --> mon["@monitor via do-fast"]
-  dofast --> out[checkpoints / embeddings / reports]
+  need[Caduceus task] --> full{end-to-end?}
+  full -->|yes| cfull["python -m src.runs.caduceus_full"]
+  cfull --> s["src.splits run"]
+  s --> t["src.caduceus run M1/M2"]
+  t --> v["src.train_viz"]
+  full -->|no| one{which skill?}
+  one -->|adapt raw| adapt["src/preprocessing.py"]
+  one -->|split only| split["python -m src.splits.main"]
+  one -->|train only| cad["python -m src.caduceus"]
+  one -->|viz only| tviz["python -m src.train_viz"]
 ```
 
-Order: resolve data + split strategy → `@split` → `@do-fast` for Caduceus work beyond folds. For dual-split TPM + predict-split1 + ZS, use `@caduceus-full`. Do not invent splits or bypass `@do-fast` for project pipelines.
+Order: ensure `ready/` (via `@adapt` / `src/preprocessing.py` if needed) → `@caduceus-full` or stage-wise `src.splits` → `src.caduceus` → `src.train_viz`. Re-run pipelines by exec of `src/` scripts (no subagents required for full). Do not invent splits or metrics.

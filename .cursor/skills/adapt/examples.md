@@ -1,39 +1,25 @@
 # Adapt — examples
 
-## After `@split` (typical)
+## Full raw panel
 
 ```bash
-# Folds already at data_splits/full/{train,val,test}/<GCF>/
-conda run -n caduceus_env python .cursor/skills/adapt/scripts/adapt.py \
-  --input data_splits/full \
-  --out adapt \
-  --window-size 8192
+conda run -n caduceus_env python src/preprocessing.py \
+  --raw raw --out data_ready --flank 10000 --seed 42
 ```
 
-Preserves fold labels in `samples.tsv` and writes:
+## Smoke (one genome, capped genes)
 
-```
-adapt/caduceus_ready/train/sequences/*.txt
-adapt/caduceus_ready/train/labels.tsv
-adapt/caduceus_ready/val/...
-adapt/caduceus_ready/test/...
+```bash
+conda run -n caduceus_env python src/preprocessing.py \
+  --raw raw --out data_ready_smoke \
+  --genomes GCF_000001405.40 --max-genes 80
 ```
 
-## Before `@split` (unsplit panel)
+## Via skill wrapper
 
 ```bash
 conda run -n caduceus_env python .cursor/skills/adapt/scripts/adapt.py \
-  --input data/reformat/random_full \
-  --out adapt \
-  --window-size 8192
+  --raw raw --out data_ready
 ```
 
-Emits a single unsplit Caduceus-ready tree; run `@split` afterward on genomes **or** on `adapt/` samples only if a future split strategy documents sample-level folds — baseline still expects genome-level `@split` first when folds are required.
-
-## Auto mode
-
-```bash
-python .cursor/skills/adapt/scripts/adapt.py --input auto --out adapt --window-size 8192
-```
-
-Prefers `data_splits/full` if present and non-empty; else searches configured raw/reformat roots.
+See `wiki/conversion.md` for I/O contracts.
