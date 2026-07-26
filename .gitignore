@@ -183,3 +183,9 @@ docs/*
 .cache/huggingface/
 huggingface/
 models--*/
+
+# Python packaging artifacts
+*.egg-info/
+.eggs/
+dist/
+build/

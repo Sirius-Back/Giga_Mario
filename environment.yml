@@ -1,0 +1,11 @@
+# Local conda install of GigaMario (editable) into the active env.
+# Prefer: conda activate <env> && conda env update -f environment.yml --prune
+# Or one-shot into current env: see README install section.
+name: base
+channels:
+  - defaults
+dependencies:
+  - python>=3.10
+  - pip
+  - pip:
+      - -e .
