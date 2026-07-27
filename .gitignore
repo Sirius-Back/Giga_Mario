@@ -48,10 +48,12 @@ __pycache__/
 # --- Runtime logs / results / regenerable outputs ---
 logs/
 ready/
+/ready
 data_ready/
-data_ready_smoke/
+data_ready_smoke*/
 raw/
 todo*
+tasks.md
 method_decision*
 question*
 *.log
@@ -59,6 +61,8 @@ results/
 /runs/
 !src/runs/
 !src/runs/**
+src/runs/**/__pycache__/
+src/runs/**/*.py[cod]
 figures/
 adapt/
 monitoring-report.md
@@ -182,13 +186,13 @@ downloads/
 blast_db/
 blastdb/
 
-# Generated docs / reports — track skill overviews + registry only
-docs/*
-!docs/artifact-registry.md
-!docs/adapt.md
-!docs/caduceus_format.md
-!docs/split-report.md
-!docs/caduceus-full-report.md
+# Split strategy docs (splits/*.md) stay tracked; materialized folds do not
+/splits/*/
+
+# Local docs / reports (not published with the repo)
+docs/
+.docs/
+output/
 
 # Hugging Face / model caches
 .cache/huggingface/

@@ -28,6 +28,7 @@ import json
 import os
 import sys
 import time
+from datetime import timedelta
 from pathlib import Path
 from typing import Any
 
@@ -198,7 +199,8 @@ def default_out_dir(splits_dir: Path, root: Path) -> Path:
 # ---------------------------------------------------------------------------
 def setup_distributed() -> tuple[int, int, int]:
     if "RANK" in os.environ:
-        dist.init_process_group(backend="nccl")
+        # Rank 0 may run long val/test (and capped train) eval while other ranks wait.
+        dist.init_process_group(backend="nccl", timeout=timedelta(hours=4))
         rank = int(os.environ["RANK"])
         world = int(os.environ["WORLD_SIZE"])
         local = int(os.environ["LOCAL_RANK"])
@@ -296,6 +298,17 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     p.add_argument("--num-workers", type=int, default=2)
     p.add_argument("--max-samples", type=int, default=None, help="Smoke-test cap per fold")
     p.add_argument(
+        "--train-eval-max-samples",
+        type=int,
+        default=None,
+        help="Cap train-split epoch eval (default: full on 1 GPU; 8192 under DDP)",
+    )
+    p.add_argument(
+        "--resume",
+        action="store_true",
+        help="Resume from out/best_model if best_meta.json exists",
+    )
+    p.add_argument(
         "--task",
         choices=("auto", "regression", "classification"),
         default="auto",
@@ -321,6 +334,10 @@ def run(args: argparse.Namespace) -> int:
     if torch.cuda.is_available():
         torch.cuda.manual_seed_all(args.seed + rank)
 
+    train_eval_cap = args.train_eval_max_samples
+    if train_eval_cap is None and world > 1:
+        train_eval_cap = 8192
+
     logs_dir = out / "logs"
     tb_dir = out / "tensorboard"
     final_dir = out / "final_model"
@@ -334,13 +351,37 @@ def run(args: argparse.Namespace) -> int:
     tokenizer = AutoTokenizer.from_pretrained(args.model_name, trust_remote_code=True)
     pad_id = tokenizer.pad_token_id if tokenizer.pad_token_id is not None else 4
 
+    best_meta_path = out / "best_model" / "best_meta.json"
+    start_epoch = 0
+    best_val = float("inf")
+    resume_dir: Path | None = None
+    if args.resume and best_meta_path.is_file():
+        resume_dir = out / "best_model"
+        meta_resume = json.loads(best_meta_path.read_text(encoding="utf-8"))
+        start_epoch = int(meta_resume.get("epoch", 0))
+        best_val = float(meta_resume.get("val_loss", float("inf")))
+        if rank == 0:
+            print(
+                json.dumps(
+                    {
+                        "resume": True,
+                        "checkpoint": str(resume_dir),
+                        "completed_epochs": start_epoch,
+                        "best_val_loss": best_val,
+                    },
+                    indent=2,
+                ),
+                flush=True,
+            )
+    load_from = str(resume_dir) if resume_dir is not None else args.model_name
+
     if task == "regression":
         model = AutoModelForSequenceClassification.from_pretrained(
-            args.model_name,
+            load_from,
             trust_remote_code=True,
             num_labels=1,
             problem_type="regression",
-            ignore_mismatched_sizes=True,
+            ignore_mismatched_sizes=resume_dir is None,
         )
         criterion = torch.nn.MSELoss()
         num_labels = 1
@@ -359,11 +400,11 @@ def run(args: argparse.Namespace) -> int:
                         break
             num_labels = max(ys) + 1 if ys else 3
         model = AutoModelForSequenceClassification.from_pretrained(
-            args.model_name,
+            load_from,
             trust_remote_code=True,
             num_labels=num_labels,
             problem_type="single_label_classification",
-            ignore_mismatched_sizes=True,
+            ignore_mismatched_sizes=resume_dir is None,
         )
         criterion = None
 
@@ -371,14 +412,22 @@ def run(args: argparse.Namespace) -> int:
     if world > 1:
         model = DDP(model, device_ids=[local], output_device=local)
 
-    def make_loader(split: str, batch_size: int, shuffle: bool, distributed: bool):
+    def make_loader(
+        split: str,
+        batch_size: int,
+        shuffle: bool,
+        distributed: bool,
+        *,
+        max_samples: int | None = None,
+    ):
+        cap = args.max_samples if max_samples is None else max_samples
         ds = SplitWindowDataset(
             splits_dir,
             split,
             tokenizer,
             args.max_length,
             task=task,
-            max_samples=args.max_samples,
+            max_samples=cap,
         )
         sampler = (
             DistributedSampler(ds, shuffle=shuffle, seed=args.seed)
@@ -402,7 +451,9 @@ def run(args: argparse.Namespace) -> int:
     val_loader = test_loader = train_eval_loader = None
     val_ds = test_ds = None
     if rank == 0:
-        train_eval_loader, _, _ = make_loader("train", args.eval_batch_size, False, False)
+        train_eval_loader, _, _ = make_loader(
+            "train", args.eval_batch_size, False, False, max_samples=train_eval_cap
+        )
         val_loader, val_ds, _ = make_loader("val", args.eval_batch_size, False, False)
         test_loader, test_ds, _ = make_loader("test", args.eval_batch_size, False, False)
 
@@ -422,13 +473,16 @@ def run(args: argparse.Namespace) -> int:
             "n_val": len(val_ds) if val_ds is not None else 0,
             "n_test": len(test_ds) if test_ds is not None else 0,
             "epochs": args.epochs,
+            "start_epoch": start_epoch,
             "batch_size": args.batch_size,
             "eval_batch_size": args.eval_batch_size,
+            "train_eval_max_samples": train_eval_cap,
             "world_size": world,
             "max_length": args.max_length,
             "lr": args.lr,
             "seed": args.seed,
             "max_samples": args.max_samples,
+            "resume": resume_dir is not None,
             "optimizer": "AdamW",
             "loss": "MSELoss" if task == "regression" else "CrossEntropy (model.loss)",
             "metrics": "metrics.md" if task == "regression" else "loss+accuracy",
@@ -437,16 +491,16 @@ def run(args: argparse.Namespace) -> int:
         }
         (logs_dir / "run_config.json").write_text(json.dumps(meta, indent=2), encoding="utf-8")
         (out / "run_config.json").write_text(json.dumps(meta, indent=2), encoding="utf-8")
-        with (logs_dir / "train_metrics.jsonl").open("w", encoding="utf-8") as fh:
+        metrics_mode = "a" if resume_dir is not None else "w"
+        with (logs_dir / "train_metrics.jsonl").open(metrics_mode, encoding="utf-8") as fh:
             fh.write(json.dumps(meta) + "\n")
         print(json.dumps(meta, indent=2), flush=True)
 
     t0 = time.perf_counter()
     global_step = 0
     raw_model = model.module if isinstance(model, DDP) else model
-    best_val = float("inf")
 
-    for epoch_idx in range(args.epochs):
+    for epoch_idx in range(start_epoch, args.epochs):
         epoch = epoch_idx + 1
         if train_sampler is not None:
             train_sampler.set_epoch(epoch_idx)
@@ -485,9 +539,6 @@ def run(args: argparse.Namespace) -> int:
                 train_metrics = evaluate_classification(raw_model, train_eval_loader, device)
                 val_metrics = evaluate_classification(raw_model, val_loader, device)
                 test_metrics = evaluate_classification(raw_model, test_loader, device)
-
-        if dist.is_initialized():
-            dist.barrier()
 
         elapsed = time.perf_counter() - t0
         if rank == 0:

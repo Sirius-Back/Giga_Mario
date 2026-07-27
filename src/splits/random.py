@@ -42,6 +42,7 @@ def run_random_split(
     out_dir: Path | None = None,
     seed: int = 42,
     max_samples: int | None = None,
+    holdout_genomes: list[str] | None = None,
 ) -> dict[str, Any]:
     root = root.resolve()
     raw = resolve_raw_dir(root, raw_dir)
@@ -52,12 +53,16 @@ def run_random_split(
     # raw is validated for presence; random assignment uses ready IDs only
     _ = raw
 
-    samples = load_ready_table(ready)
-    samples = sorted(samples, key=lambda r: r["sample_id"])
+    all_samples = load_ready_table(ready)
+    all_samples = sorted(all_samples, key=lambda r: r["sample_id"])
+    holdout = set(holdout_genomes or [])
+    zs_samples = [s for s in all_samples if s["Genome"] in holdout]
+    samples = [s for s in all_samples if s["Genome"] not in holdout]
     if max_samples is not None:
         samples = samples[:max_samples]
+        # keep ZS uncapped unless empty after filter
     if len(samples) < 3:
-        raise ValueError(f"need >=3 ready samples; got {len(samples)}")
+        raise ValueError(f"need >=3 non-holdout ready samples; got {len(samples)}")
 
     # --- M1: random fold assignment; target = TPM ---
     rng1 = random.Random(seed)
@@ -102,11 +107,64 @@ def run_random_split(
                 label_fields=label_fields,
             )
 
+    # Zero-shot holdout (e.g. human genome) — TPM labels; not used in M1/M2 folds
+    if zs_samples:
+        for s in zs_samples:
+            s["TPM"] = s["TPM"]
+            s["M1"] = "zero_shot"
+            s["M2"] = "zero_shot"
+        materialize_fold(
+            out / "zero_shot" / "all",
+            zs_samples,
+            label_field="TPM",
+            label_fields=["TPM"],
+        )
+        write_tsv(
+            out / "zero_shot" / "fold_manifest.tsv",
+            [
+                {
+                    "sample_id": s["sample_id"],
+                    "fold": "zero_shot",
+                    "genome": s["Genome"],
+                    "gene_id": s["GeneOrID"],
+                    "chrom": s["Chr"],
+                    "start": s["Position_start"],
+                    "end": s["Position_end"],
+                    "TPM": s["TPM"],
+                    "sequence_path": f"zero_shot/all/sequences/{s['sample_id']}.txt",
+                    "seed": seed,
+                    "split_id": SPLIT_ID,
+                }
+                for s in zs_samples
+            ],
+            [
+                "sample_id",
+                "fold",
+                "genome",
+                "gene_id",
+                "chrom",
+                "start",
+                "end",
+                "TPM",
+                "sequence_path",
+                "seed",
+                "split_id",
+            ],
+        )
+
     # splits_log.csv: data_input|M1|M2
     log_rows = [
         {"data_input": s["sample_id"], "M1": s["M1"], "M2": s["M2"]}
         for s in sorted(samples, key=lambda r: r["sample_id"])
     ]
+    log_rows.extend(
+        {
+            "data_input": s["sample_id"],
+            "M1": "zero_shot",
+            "M2": "zero_shot",
+        }
+        for s in sorted(zs_samples, key=lambda r: r["sample_id"])
+    )
     write_pipe_csv(out / "splits_log.csv", log_rows, ["data_input", "M1", "M2"])
 
     # manifests
@@ -167,6 +225,8 @@ def run_random_split(
         else str(ready),
         "out_dir": str(out.relative_to(root)) if out.is_relative_to(root) else str(out),
         "n_samples": len(samples),
+        "n_zero_shot": len(zs_samples),
+        "holdout_genomes": sorted(holdout),
         "counts": counts,
         "m1_target": "TPM",
         "m2_target": "M1_fold_class",
@@ -178,20 +238,28 @@ def run_random_split(
         },
         "note": "Ready files were not converted; sequences hardlinked/symlinked.",
     }
+    if zs_samples:
+        meta["counts"]["zero_shot"] = {"all": len(zs_samples)}
     (out / "metadata.json").write_text(json.dumps(meta, indent=2), encoding="utf-8")
+    zs_line = (
+        f"- **zero_shot** — holdout genomes {sorted(holdout)} (n={len(zs_samples)}); TPM eval only"
+        if zs_samples
+        else "- **zero_shot** — none"
+    )
     (out / "README.md").write_text(
         "\n".join(
             [
-                "# splits/random",
+                f"# {out.name}",
                 "",
                 "- **M1** — random train/val/test; prediction = **TPM**",
                 "- **M2** — stratified by M1 fold; prediction = **M1 fold class** "
                 f"({M1_FOLD_TO_CLASS})",
+                zs_line,
                 "- **splits_log.csv** — `data_input|M1|M2`",
                 "",
-                f"Seed: {seed}. Samples: {len(samples)}.",
+                f"Seed: {seed}. Train-pool samples: {len(samples)}.",
                 "",
-                "Produced by `src/splits/random.py` via `src/splits/main.py`.",
+                "Produced by `src/splits/random.py`.",
                 "",
             ]
         )

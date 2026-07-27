@@ -40,18 +40,39 @@ EPOCH_METRIC_KEYS = (
 )
 
 
+def _disable_metric_dist_sync(metrics: MetricCollection) -> MetricCollection:
+    """Disable TorchMetrics distributed sync (safe for rank-0 full-split CPU compute).
+
+    Under NCCL, sync_on_compute=True + .to("cpu") triggers all_gather on CPU tensors
+    → RuntimeError: No backend type associated with device type cpu.
+    evaluate_split already gathers full tensors on rank 0; no metric dist sync needed.
+    """
+    for met in metrics.values():
+        if hasattr(met, "sync_on_compute"):
+            met.sync_on_compute = False
+        if hasattr(met, "dist_sync_on_step"):
+            met.dist_sync_on_step = False
+    return metrics
+
+
 def build_regression_metrics(device: torch.device | str | None = None) -> MetricCollection:
-    """Recommended MetricCollection from metrics.md (+ r2)."""
+    """Recommended MetricCollection from metrics.md (+ r2).
+
+    Per-metric sync_on_compute=False (torchmetrics 1.2.x: MetricCollection has no
+    sync_on_compute kwarg). Callers compute once over full-split tensors on CPU /
+    rank-0; avoids NCCL all_gather on CPU under torchrun.
+    """
     metrics = MetricCollection(
         {
-            "pearson": PearsonCorrCoef(),
-            "spearman": SpearmanCorrCoef(),
-            "mse": MeanSquaredError(),
-            "rmse": MeanSquaredError(squared=False),
-            "mae": MeanAbsoluteError(),
-            "r2": R2Score(),
+            "pearson": PearsonCorrCoef(sync_on_compute=False),
+            "spearman": SpearmanCorrCoef(sync_on_compute=False),
+            "mse": MeanSquaredError(sync_on_compute=False),
+            "rmse": MeanSquaredError(squared=False, sync_on_compute=False),
+            "mae": MeanAbsoluteError(sync_on_compute=False),
+            "r2": R2Score(sync_on_compute=False),
         }
     )
+    metrics = _disable_metric_dist_sync(metrics)
     if device is not None:
         metrics = metrics.to(device)
     return metrics
@@ -109,6 +130,7 @@ def compute_epoch_regression_metrics(
     flat_target = target.reshape(-1)
     # TorchMetrics Pearson/etc. expect matching 1D for global metrics
     coll = metrics or build_regression_metrics(device="cpu")
+    coll = _disable_metric_dist_sync(coll)
     coll = coll.to("cpu")
     coll.reset()
     coll.update(flat_pred, flat_target)
