@@ -12,8 +12,12 @@
 | `docs/caduceus_format.md` | Caduceus fine-tune format notes |
 | `metrics.md` | TorchMetrics suite for Caduceus/expression epoch logging |
 | `wiki/conversion.md` | raw → data_ready conversion |
+| `wiki/legnet_conversion.md` | raw/BED → legnet_ready (230 bp human_legnet) |
 | `wiki/split.md` | raw+ready → `src/splits` folds |
 | `src/preprocessing.py` | `@adapt` entry (ready panel) |
+| `src/legnet_preprocess.py` | `@legnet-adapt` entry (promoters → 230 bp TSV) |
+| `src/legnet.py` | `@legnet` train (`python -m src.legnet`) |
+| `src/legnet_demo_metrics.py` | LegNet post-hoc test metrics summary |
 | `src/splits/main.py` | `@split` dispatcher (`python -m src.splits.main`) |
 | `src/caduceus.py` | `@caduceus` fine-tune (`python -m src.caduceus`) |
 | `src/metrics_logging.py` | `metrics.md` TorchMetrics helpers |
@@ -39,6 +43,8 @@ raw / reformat
 
 - **`@split`** assigns **genomic regions** and **linked predictions** (TPM by default) to train/val/test per `splits/*.md`. Does not invent data.
 - **`@adapt`** builds CDS±10 kb DNA windows + continuous TPM via `src/preprocessing.py` → `data_ready/` / `ready/`. Runs **before** `@split` when input is Caduceus-like.
+- **`@legnet-adapt`** builds TSS-centered 200 bp CRS + lentiMPRA adapter stitch (230 bp) + TPM via `src/legnet_preprocess.py` → `legnet_ready/` for human_legnet. Does not assign project folds.
+- **`@legnet`** trains human_legnet via `src/legnet.py` on `legnet_ready/*.tsv`; writes Caduceus-like `logs/` for `@train-viz`.
 - **`@caduceus`** trains/evaluates on region folds + labels; epoch logs must follow **`metrics.md`**.
 - **Linkage:** every region has a prediction; region with no gene → prediction **0**.
 - **`@caduceus-full`** writes/executes `src/runs/caduceus_full.py`: **no adapt** (uses `ready/`); `/split` (M1 TPM + M2) → `/caduceus` ×2 → `/train-viz`. Re-runnable without subagents. See `.cursor/skills/caduceus-full/SKILL.md`.

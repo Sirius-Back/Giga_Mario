@@ -1,6 +1,6 @@
 # Skills catalog
 
-Project skills live in [`.cursor/skills/*/SKILL.md`](.cursor/skills/). **58** skills; all use `disable-model-invocation: true`. Shared templates: [`.cursor/skills/_shared/`](.cursor/skills/_shared/).
+Project skills live in [`.cursor/skills/*/SKILL.md`](.cursor/skills/). **60** skills; all use `disable-model-invocation: true`. Shared templates: [`.cursor/skills/_shared/`](.cursor/skills/_shared/).
 
 Discovery at runtime is owned by `@prompt-orchestrator` ([skills-map.md](.cursor/skills/prompt-orchestrator/skills-map.md)) — this file is a human summary, not a closed registry.
 
@@ -11,8 +11,8 @@ Discovery at runtime is owned by `@prompt-orchestrator` ([skills-map.md](.cursor
 | Check | Result |
 |-------|--------|
 | Skill root | `.cursor/skills/` — present (git-tracked via `.gitignore` exception) |
-| Skill count | **57** directories with `SKILL.md` (includes `adapt`, `summarize_GEO`, `train-viz`, `caduceus-full`, `analyze-ready-data`) |
-| Orchestrators | `@do`, `@do-fast`, `@data`, `@metagenome-analysis`, `@caduceus`, `@caduceus-full` (+ `@prepare` / `@split`) |
+| Skill count | **60** directories with `SKILL.md` (includes `adapt`, `legnet-adapt`, `legnet`, `summarize_GEO`, `train-viz`, `caduceus-full`, `analyze-ready-data`) |
+| Orchestrators | `@do`, `@do-fast`, `@data`, `@metagenome-analysis`, `@caduceus`, `@caduceus-full`, `@legnet` (+ `@prepare` / `@split`) |
 | Metagenome pipeline | `metagenome-analysis/pipeline.md` — present |
 | Caduceus folds | `@split` + `src/splits/` + `splits/*.md`; end-to-end via `@caduceus-full` → `src/runs/caduceus_full.py` |
 | Gaps | None for catalog; runtime outs (`logs/`, `runs/`, `figures/`, `ready/`, `data_ready/`, large `splits/<id>/` fold trees) gitignored |
@@ -83,6 +83,8 @@ Discovery at runtime is owned by `@prompt-orchestrator` ([skills-map.md](.cursor
 | Skill | Brief |
 |-------|-------|
 | `adapt` | `src/preprocessing.py`: CDS±10kb + non-coding match → `ready/` / `data_ready/` (no folding). |
+| `legnet-adapt` | `src/legnet_preprocess.py`: TSS±100 CRS + lentiMPRA stitch → `legnet_ready/` human_legnet TSV/BED (no project folding). |
+| `legnet` | `src/legnet.py`: train human_legnet on `legnet_ready` TSV; Caduceus-like `logs/` for `@train-viz`; `best_model/` + metrics summary. |
 | `split` | Write/exec `src/splits/`: region folds from `raw/`+`ready/`; random → `splits/random/{M1,M2}` + `splits_log.csv`. |
 | `caduceus` | Write/exec `src/caduceus.py`: fine-tune on a splits dir; `logs/` + TensorBoard + `final_model/`; `metrics.md`. |
 | `train-viz` | Write/exec `src/train_viz/`: publication curves from run logs; `--models` one or compared. |
