@@ -35,7 +35,7 @@ zero_shot:
       experiment=hg38/genomic_benchmark \
       dataset.train_val_split_seed=1
   notes: |
-    GenomicBenchmarks provide only train/test. Validation is created by randomly splitting the training set (90/10) using `dataset.train_val_split_seed`. Experiments are repeated over multiple random seeds. :contentReference[oaicite:0]{index=0}
+    GenomicBenchmarks provide only train/test. Validation is created by randomly splitting the training set (90/10) using `dataset.train_val_split_seed`. Experiments are repeated over multiple random seeds.
 
 - name: GenomicBenchmarks (used by Caduceus)
   url: https://github.com/kuleshov-group/caduceus
@@ -44,9 +44,9 @@ zero_shot:
   run: |
     dataset.train_val_split_seed=<seed>
   notes: |
-    Random train/validation split is generated from the provided training set. :contentReference[oaicite:1]{index=1}
+    Random train/validation split is generated from the provided training set.
 
 # References
 
-- Caduceus repository: https://github.com/kuleshov-group/caduceus :contentReference[oaicite:2]{index=2}
-- Caduceus paper (Supplementary: pretraining dataset and splits): https://pmc.ncbi.nlm.nih.gov/articles/PMC12189541/ :contentReference[oaicite:3]{index=3}
+- Caduceus repository: https://github.com/kuleshov-group/caduceus
+- Caduceus paper (Supplementary: pretraining dataset and splits): https://pmc.ncbi.nlm.nih.gov/articles/PMC12189541/

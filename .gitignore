@@ -19,6 +19,7 @@ bin/
 credentials*
 .env
 .env.*
+.gitpush
 
 # --- Editor / IDE / tooling caches ---
 # Track project Agent Skills only; ignore Cursor IDE state
@@ -57,9 +58,13 @@ __pycache__/
 logs/
 ready/
 /ready
+ready_*/
 data_ready/
-data_ready_smoke*/
+data_ready_*/
+legnet_ready/
+legnet_ready_*/
 raw/
+raw_*/
 todo*
 tasks.md
 method_decision*
@@ -69,25 +74,40 @@ execute.md
 question*
 *.log
 results/
+result/
+processed/
+processing/
+intermediates/
+tmp/
+temp/
+checkpoints/
+wandb/
+mlruns/
+lightning_logs/
+tensorboard/
 /runs/
 !src/runs/
 !src/runs/**
 src/runs/**/__pycache__/
 src/runs/**/*.py[cod]
 figures/
+figure/
 adapt/
 monitoring-report.md
 
-# Large split / smoke panels (keep small smoke manifests if already tracked)
-data_splits/full/
-data_splits/caduceus_full/
-data_splits/small/
+# Materialized panels / splits / expression dumps (not strategy docs)
+data_splits/
+ready_splits/
+splits_small/
 genomes_smoketest/
+prokaryotes/
+/random/
+
+# Large split / smoke panels (legacy path aliases)
 ready_small*
 ready_small_v2/
-prokaryotes/
+ready_v2/
 ready_small/
-splits_small/
 
 # --- Large sequence / genome / omics data ---
 # Genomes & assemblies
@@ -202,8 +222,6 @@ raw_data/
 downloads/
 blast_db/
 blastdb/
-ready_v2/
-ready_small_v2/
 
 # Split strategy docs (splits/*.md) stay tracked; materialized folds do not
 /splits/*/
