@@ -153,8 +153,16 @@ def load_tpm_row(path: Path) -> dict[str, float]:
     return out
 
 
-def discover_raw(raw_dir: Path) -> tuple[list[GenomeBundle], list[str]]:
-    """Pair fna/gtf/tpm under raw/ using mapping CSV when present."""
+def discover_raw(
+    raw_dir: Path,
+    *,
+    tpm_merged_only: bool = False,
+) -> tuple[list[GenomeBundle], list[str]]:
+    """Pair fna/gtf/tpm under raw/ using mapping CSV when present.
+
+    If ``tpm_merged_only``, only ``*_merged.csv`` TPM files are eligible (and
+    mapping ids must resolve to those stems).
+    """
     notes: list[str] = []
     fna_dir = raw_dir / "fna"
     gtf_dir = raw_dir / "gtf"
@@ -173,7 +181,11 @@ def discover_raw(raw_dir: Path) -> tuple[list[GenomeBundle], list[str]]:
         for p in sorted(gtf_dir.iterdir())
         if ".gtf" in p.name
     }
-    tpms_by_id = {p.stem: p for p in sorted(tpm_dir.glob("*.csv"))}
+    tpm_paths = sorted(tpm_dir.glob("*.csv"))
+    if tpm_merged_only:
+        tpm_paths = [p for p in tpm_paths if p.stem.endswith("_merged")]
+        notes.append(f"tpm_merged_only: {len(tpm_paths)} *_merged.csv eligible")
+    tpms_by_id = {p.stem: p for p in tpm_paths}
 
     mapping_path = raw_dir / "random_borzoi_expr_file_mappings.csv"
     genome_to_tpm: dict[str, tuple[str, Path | None]] = {}
@@ -182,10 +194,22 @@ def discover_raw(raw_dir: Path) -> tuple[list[GenomeBundle], list[str]]:
             for row in csv.DictReader(fh):
                 gid = row["genome"].strip()
                 tid = row["id"].strip()
+                if tpm_merged_only and not tid.endswith("_merged"):
+                    notes.append(f"Skip mapping id {tid} for {gid}: not *_merged")
+                    continue
                 local = tpms_by_id.get(tid)
                 genome_to_tpm[gid] = (tid, local)
                 if local is None:
                     notes.append(f"TPM id {tid} mapped to {gid} but file missing under raw/tpm/")
+    elif tpm_merged_only:
+        # Pair GCF accession → {stem}_merged.csv when stem starts with that GCF
+        for stem, path in tpms_by_id.items():
+            gid = genome_prefix(stem)
+            if gid in genome_to_tpm:
+                notes.append(f"Duplicate merged TPM for {gid}: keeping {genome_to_tpm[gid][0]}, skip {stem}")
+                continue
+            genome_to_tpm[gid] = (stem, path)
+        notes.append("No mapping CSV — paired genomes to *_merged.csv by GCF prefix")
     else:
         notes.append("No random_borzoi_expr_file_mappings.csv — cannot auto-pair TPM")
 
@@ -212,7 +236,6 @@ def discover_raw(raw_dir: Path) -> tuple[list[GenomeBundle], list[str]]:
     if not bundles:
         raise FileNotFoundError("No complete genome bundles (fna+gtf+tpm) found under raw/")
     return bundles, notes
-
 
 # ---------------------------------------------------------------------------
 # GTF → CDS genes
@@ -797,17 +820,30 @@ def run(
     seed: int = SEED,
     genomes: list[str] | None = None,
     max_genes: int | None = None,
+    tpm_merged_only: bool = False,
 ) -> int:
     raw_dir = raw_dir.resolve()
     out_dir = out_dir.resolve()
     out_dir.mkdir(parents=True, exist_ok=True)
 
-    bundles, audit_notes = discover_raw(raw_dir)
+    bundles, audit_notes = discover_raw(raw_dir, tpm_merged_only=tpm_merged_only)
+    for note in audit_notes:
+        print(f"AUDIT: {note}", flush=True)
     if genomes:
         want = set(genomes)
         bundles = [b for b in bundles if b.genome_id in want]
         if not bundles:
             print(f"ERROR: no bundles match --genomes {genomes}", file=sys.stderr)
+            return 2
+
+    if tpm_merged_only:
+        bad = [b for b in bundles if not (b.tpm_id or "").endswith("_merged")]
+        if bad:
+            print(
+                "ERROR: --tpm-merged-only but non-merged TPM selected: "
+                + ", ".join(f"{b.genome_id}:{b.tpm_id}" for b in bad),
+                file=sys.stderr,
+            )
             return 2
 
     all_windows: list[Window] = []
@@ -1006,6 +1042,11 @@ def main(argv: list[str] | None = None) -> int:
         default=None,
         help="Cap CDS genes per genome (smoke tests)",
     )
+    ap.add_argument(
+        "--tpm-merged-only",
+        action="store_true",
+        help="Use only prokaryotes/tpm/{assembly}_merged.csv (ignore per-sample GEO CSVs)",
+    )
     args = ap.parse_args(argv)
     return run(
         raw_dir=args.raw,
@@ -1014,6 +1055,7 @@ def main(argv: list[str] | None = None) -> int:
         seed=args.seed,
         genomes=args.genomes,
         max_genes=args.max_genes,
+        tpm_merged_only=args.tpm_merged_only,
     )
 
 

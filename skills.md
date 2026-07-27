@@ -1,6 +1,6 @@
 # Skills catalog
 
-Project skills live in [`.cursor/skills/*/SKILL.md`](.cursor/skills/). **57** skills; all use `disable-model-invocation: true`. Shared templates: [`.cursor/skills/_shared/`](.cursor/skills/_shared/).
+Project skills live in [`.cursor/skills/*/SKILL.md`](.cursor/skills/). **58** skills; all use `disable-model-invocation: true`. Shared templates: [`.cursor/skills/_shared/`](.cursor/skills/_shared/).
 
 Discovery at runtime is owned by `@prompt-orchestrator` ([skills-map.md](.cursor/skills/prompt-orchestrator/skills-map.md)) — this file is a human summary, not a closed registry.
 
@@ -11,7 +11,7 @@ Discovery at runtime is owned by `@prompt-orchestrator` ([skills-map.md](.cursor
 | Check | Result |
 |-------|--------|
 | Skill root | `.cursor/skills/` — present (git-tracked via `.gitignore` exception) |
-| Skill count | **57** directories with `SKILL.md` (includes `adapt`, `train-viz`, `caduceus-full`, `analyze-ready-data`) |
+| Skill count | **57** directories with `SKILL.md` (includes `adapt`, `summarize_GEO`, `train-viz`, `caduceus-full`, `analyze-ready-data`) |
 | Orchestrators | `@do`, `@do-fast`, `@data`, `@metagenome-analysis`, `@caduceus`, `@caduceus-full` (+ `@prepare` / `@split`) |
 | Metagenome pipeline | `metagenome-analysis/pipeline.md` — present |
 | Caduceus folds | `@split` + `src/splits/` + `splits/*.md`; end-to-end via `@caduceus-full` → `src/runs/caduceus_full.py` |
@@ -44,6 +44,7 @@ Discovery at runtime is owned by `@prompt-orchestrator` ([skills-map.md](.cursor
 | Skill | Brief |
 |-------|-------|
 | `data` | Orchestrate data-ready: get-data → dataset-auditor → project-auditor. |
+| `summarize_GEO` | Mean-merge GEO-aligned wide TPM CSVs per assembly (`*_merged.csv`); gene↔transcript assess. |
 | `get-data` | Acquire public datasets (SRA/ENA/GEO/…) with manifests, checksums, logs. |
 | `dataset-auditor` | Dataset QC: metadata, IDs, balance, duplicates, batch, file consistency. |
 | `fix-metadata` | Align sample IDs; write `metadata_fixed.csv` when misaligned. |

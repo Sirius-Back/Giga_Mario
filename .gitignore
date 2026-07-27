@@ -83,6 +83,11 @@ data_splits/full/
 data_splits/caduceus_full/
 data_splits/small/
 genomes_smoketest/
+ready_small*
+ready_small_v2/
+prokaryotes/
+ready_small/
+splits_small/
 
 # --- Large sequence / genome / omics data ---
 # Genomes & assemblies
@@ -197,6 +202,8 @@ raw_data/
 downloads/
 blast_db/
 blastdb/
+ready_v2/
+ready_small_v2/
 
 # Split strategy docs (splits/*.md) stay tracked; materialized folds do not
 /splits/*/
@@ -205,6 +212,7 @@ blastdb/
 docs/
 .docs/
 output/
+outputs/
 
 # Hugging Face / model caches
 .cache/huggingface/

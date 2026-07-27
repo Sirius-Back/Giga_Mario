@@ -100,6 +100,7 @@ conda run -n caduceus_env python src/preprocessing.py \
 | `--seed` | `42` | Deterministic non-coding placement |
 | `--genomes` | all | Optional GCF filter |
 | `--max-genes` | none | Smoke-test cap |
+| `--tpm-merged-only` | off | Use only `tpm/{assembly}_merged.csv` (prokaryotes) |
 
 Heavy panels → `sbatch src/sbatch/preprocess_raw.sbatch` (16 CPUs, 128G, 48h; runs `src/preprocessing.py`).
 

@@ -13,6 +13,7 @@ Canonical project code for the Caduceus pipeline and future Python modules.
 | `train_viz/` | `@train-viz` — `python -m src.train_viz` |
 | `runs/` | `@caduceus-full` — `python -m src.runs.caduceus_full` |
 | `ready_analysis.py` | `@analyze-ready-data` — barplots + GC/length densities |
+| `summarize_geo.py` | `@summarize_GEO` — mean-merge GEO TPM per assembly |
 | `sbatch/` | SLURM wrappers that call `src/` modules |
 | `_archive/` | Superseded legacy scripts (audit only) |
 
@@ -24,6 +25,7 @@ python -m src.splits.main --strategy random --raw raw --ready ready
 python -m src.caduceus --splits-dir splits/random/M1
 python -m src.train_viz --models runs/caduceus/M1 -o figures/train-viz/M1
 python -m src.ready_analysis --ready-dir ready --outdir output/ready_analysis
+python src/summarize_geo.py --mappings prokaryotes/expr_file_mappings.csv
 python -m src.runs.caduceus_full --strategy random --ready ready --out-root output/random
 ```
 
