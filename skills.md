@@ -1,6 +1,6 @@
 # Skills catalog
 
-Project skills live in [`.cursor/skills/*/SKILL.md`](.cursor/skills/). **56** skills; all use `disable-model-invocation: true`. Shared templates: [`.cursor/skills/_shared/`](.cursor/skills/_shared/).
+Project skills live in [`.cursor/skills/*/SKILL.md`](.cursor/skills/). **57** skills; all use `disable-model-invocation: true`. Shared templates: [`.cursor/skills/_shared/`](.cursor/skills/_shared/).
 
 Discovery at runtime is owned by `@prompt-orchestrator` ([skills-map.md](.cursor/skills/prompt-orchestrator/skills-map.md)) — this file is a human summary, not a closed registry.
 
@@ -11,7 +11,7 @@ Discovery at runtime is owned by `@prompt-orchestrator` ([skills-map.md](.cursor
 | Check | Result |
 |-------|--------|
 | Skill root | `.cursor/skills/` — present (git-tracked via `.gitignore` exception) |
-| Skill count | **56** directories with `SKILL.md` (includes `adapt`, `train-viz`, `caduceus-full`) |
+| Skill count | **57** directories with `SKILL.md` (includes `adapt`, `train-viz`, `caduceus-full`, `analyze-ready-data`) |
 | Orchestrators | `@do`, `@do-fast`, `@data`, `@metagenome-analysis`, `@caduceus`, `@caduceus-full` (+ `@prepare` / `@split`) |
 | Metagenome pipeline | `metagenome-analysis/pipeline.md` — present |
 | Caduceus folds | `@split` + `src/splits/` + `splits/*.md`; end-to-end via `@caduceus-full` → `src/runs/caduceus_full.py` |
@@ -85,6 +85,7 @@ Discovery at runtime is owned by `@prompt-orchestrator` ([skills-map.md](.cursor
 | `split` | Write/exec `src/splits/`: region folds from `raw/`+`ready/`; random → `splits/random/{M1,M2}` + `splits_log.csv`. |
 | `caduceus` | Write/exec `src/caduceus.py`: fine-tune on a splits dir; `logs/` + TensorBoard + `final_model/`; `metrics.md`. |
 | `train-viz` | Write/exec `src/train_viz/`: publication curves from run logs; `--models` one or compared. |
+| `analyze-ready-data` | Write/exec `src/ready_analysis.py`: barplots + GC/length densities for non-coding / normal / large coding; reuse on any ready-like panel. |
 | `caduceus-full` | Write/exec `src/runs/caduceus_full.py`: **no adapt**; split → caduceus(M1,M2) → train-viz (re-runnable without subagents). |
 | `task-gate` | Brief post-task output/AC smoke check (not full audit or code-review). |
 | `genome-fna-gtf-reformat` | Index paired `.fna`/`.gtf` genomes; optional distinct-species subsample; manifests for `@split`. |

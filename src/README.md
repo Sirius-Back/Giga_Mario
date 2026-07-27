@@ -12,7 +12,7 @@ Canonical project code for the Caduceus pipeline and future Python modules.
 | `metrics_logging.py` | `metrics.md` TorchMetrics helpers |
 | `train_viz/` | `@train-viz` — `python -m src.train_viz` |
 | `runs/` | `@caduceus-full` — `python -m src.runs.caduceus_full` |
-| `ready_analysis.py` | Ready-panel EDA plots |
+| `ready_analysis.py` | `@analyze-ready-data` — barplots + GC/length densities |
 | `sbatch/` | SLURM wrappers that call `src/` modules |
 | `_archive/` | Superseded legacy scripts (audit only) |
 
@@ -23,6 +23,7 @@ python src/preprocessing.py --raw raw --out data_ready
 python -m src.splits.main --strategy random --raw raw --ready ready
 python -m src.caduceus --splits-dir splits/random/M1
 python -m src.train_viz --models runs/caduceus/M1 -o figures/train-viz/M1
+python -m src.ready_analysis --ready-dir ready --outdir output/ready_analysis
 python -m src.runs.caduceus_full --strategy random --ready ready --out-root output/random
 ```
 

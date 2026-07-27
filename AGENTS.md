@@ -18,6 +18,7 @@
 | `src/caduceus.py` | `@caduceus` fine-tune (`python -m src.caduceus`) |
 | `src/metrics_logging.py` | `metrics.md` TorchMetrics helpers |
 | `src/train_viz/` | `@train-viz` figures (`python -m src.train_viz`) |
+| `src/ready_analysis.py` | `@analyze-ready-data` EDA (`python -m src.ready_analysis`) |
 | `src/runs/caduceus_full.py` | `@caduceus-full` orchestrator |
 | `src/sbatch/` | SLURM wrappers → `src/` modules |
 
