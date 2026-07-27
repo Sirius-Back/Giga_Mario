@@ -9,6 +9,10 @@ bin/
 # --- Secrets & private shell state ---
 .ssh/
 .bash_history
+.bash_logout
+.bashrc
+.profile
+.condarc
 .lesshst
 *.pem
 *.key
@@ -32,6 +36,10 @@ credentials*
 .cursor/hooks.json
 .cursor-server/
 .vscode/
+.vscode-server/
+.copilot/
+.dotnet/
+.wget-hsts
 .idea/
 .cache/
 .config/
@@ -55,6 +63,9 @@ raw/
 todo*
 tasks.md
 method_decision*
+method-decision.md
+artifact-registry.md
+execute.md
 question*
 *.log
 results/
@@ -70,6 +81,7 @@ monitoring-report.md
 # Large split / smoke panels (keep small smoke manifests if already tracked)
 data_splits/full/
 data_splits/caduceus_full/
+data_splits/small/
 genomes_smoketest/
 
 # --- Large sequence / genome / omics data ---
@@ -204,3 +216,5 @@ models--*/
 .eggs/
 dist/
 build/
+
+.sudo_as_admin_successful
