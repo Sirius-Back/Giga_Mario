@@ -37,7 +37,7 @@ Append-only command log:
 [2026-07-15T08:30:00Z] datasets --version
 [2026-07-15T08:30:01Z] CMD: datasets summary sra accession SRR1234567 ...
 [2026-07-15T08:30:05Z] ESTIMATE: 4.2 GB compressed, ~8 GB decompressed
-[2026-07-15T08:30:10Z] CMD: sbatch scripts/sbatch/get_data_sra.sbatch
+[2026-07-15T08:30:10Z] CMD: sbatch src/sbatch/get_data_sra.sbatch
 [2026-07-15T10:15:00Z] CMD: sha256sum data/raw/SRR1234567_1.fastq.gz
 [2026-07-15T10:15:01Z] VALIDATE: samtools quickcheck — N/A (FASTQ)
 [2026-07-15T10:15:02Z] BIO: paired-end check PASS — R1 and R2 present
@@ -69,7 +69,7 @@ Present to user before large or multi-accession downloads:
 
 ## Execution mode
 - [ ] Local
-- [x] SLURM (`scripts/sbatch/get_data.sbatch`)
+- [x] SLURM (`src/sbatch/get_data.sbatch`)
 
 ## Warnings
 - Total > 50 GB — confirm disk space on /mnt/tank/...

@@ -35,7 +35,7 @@ Search the repository systematically:
 | Source type | Typical locations | What to extract |
 |-------------|-------------------|-----------------|
 | Workflows | `Snakefile`, `*.smk`, `nextflow.config`, `*.nf`, WDL/CWL | Step order, inputs/outputs, resource hints |
-| Scripts | `scripts/`, `bin/`, `*.sh`, `*.py`, `*.R` | Commands, flags, thresholds, file paths |
+| Scripts | `src/`, `bin/`, `*.sh`, `*.py`, `*.R` | Commands, flags, thresholds, file paths |
 | Notebooks | `*.ipynb`, `*.qmd` | Analysis steps, parameters, plots (not figures text) |
 | Config | `config/`, `*.yaml`, `*.yml`, `*.toml`, `*.json` | Parameters, reference paths, sample metadata rules |
 | Environments | `environment.yml`, `conda-lock.yml`, `Dockerfile`, `requirements.txt` | Package names and pinned versions |

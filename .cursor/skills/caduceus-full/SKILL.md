@@ -59,6 +59,9 @@ conda run -n caduceus_env python -m src.runs.caduceus_full \
 python -m src.runs.caduceus_full --max-samples 32 --epochs-m1 1 --epochs-m2 1 --no-m2 --nproc 1
 
 # Multi-GPU: --nproc N uses torch.distributed.run -m src.caduceus (same trainer code)
+
+# SLURM (full panel)
+sbatch src/sbatch/caduceus_full_random.sbatch
 ```
 
 | Flag | Default | Notes |

@@ -16,8 +16,10 @@
 | `src/preprocessing.py` | `@adapt` entry (ready panel) |
 | `src/splits/main.py` | `@split` dispatcher (`python -m src.splits.main`) |
 | `src/caduceus.py` | `@caduceus` fine-tune (`python -m src.caduceus`) |
+| `src/metrics_logging.py` | `metrics.md` TorchMetrics helpers |
 | `src/train_viz/` | `@train-viz` figures (`python -m src.train_viz`) |
 | `src/runs/caduceus_full.py` | `@caduceus-full` orchestrator |
+| `src/sbatch/` | SLURM wrappers → `src/` modules |
 
 Prefer `docs/artifact-registry.md` when `docs/` exists.
 
@@ -35,7 +37,7 @@ raw / reformat
 ```
 
 - **`@split`** assigns **genomic regions** and **linked predictions** (TPM by default) to train/val/test per `splits/*.md`. Does not invent data.
-- **`@adapt`** builds gene±200 bp DNA windows + continuous TPM. Runs **before** `@split` when input is Caduceus-like; may also run on fold assets when windowing is still required.
+- **`@adapt`** builds CDS±10 kb DNA windows + continuous TPM via `src/preprocessing.py` → `data_ready/` / `ready/`. Runs **before** `@split` when input is Caduceus-like.
 - **`@caduceus`** trains/evaluates on region folds + labels; epoch logs must follow **`metrics.md`**.
 - **Linkage:** every region has a prediction; region with no gene → prediction **0**.
 - **`@caduceus-full`** writes/executes `src/runs/caduceus_full.py`: **no adapt** (uses `ready/`); `/split` (M1 TPM + M2) → `/caduceus` ×2 → `/train-viz`. Re-runnable without subagents. See `.cursor/skills/caduceus-full/SKILL.md`.

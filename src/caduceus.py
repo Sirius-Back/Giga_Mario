@@ -40,12 +40,8 @@ from torch.utils.data import DataLoader, Dataset
 from torch.utils.data.distributed import DistributedSampler
 from transformers import AutoModelForSequenceClassification, AutoTokenizer
 
-# metrics.md helpers (skill scripts — reuse, do not fork)
-_ROOT = Path(__file__).resolve().parents[1]
-_SKILL_SCRIPTS = _ROOT / ".cursor" / "skills" / "caduceus" / "scripts"
-if _SKILL_SCRIPTS.is_dir():
-    sys.path.insert(0, str(_SKILL_SCRIPTS))
-from metrics_logging import (  # noqa: E402
+# metrics.md helpers live in src/ (canonical; skills re-export if needed)
+from src.metrics_logging import (
     compute_epoch_regression_metrics,
     format_epoch_log,
 )

@@ -101,14 +101,7 @@ conda run -n caduceus_env python src/preprocessing.py \
 | `--genomes` | all | Optional GCF filter |
 | `--max-genes` | none | Smoke-test cap |
 
-Skill wrapper (same entry):
-
-```bash
-conda run -n caduceus_env python .cursor/skills/adapt/scripts/adapt.py \
-  --raw raw --out data_ready
-```
-
-Heavy panels → `sbatch scripts/preprocess_raw.sbatch` (16 CPUs, 128G, 48h).
+Heavy panels → `sbatch src/sbatch/preprocess_raw.sbatch` (16 CPUs, 128G, 48h; runs `src/preprocessing.py`).
 
 ## Workflow checklist
 
@@ -125,5 +118,4 @@ adapt:
 
 - [wiki/conversion.md](../../wiki/conversion.md) — algo + I/O structures
 - [README.md](README.md)
-- [scripts/adapt.py](scripts/adapt.py) — thin wrapper → `src/preprocessing.py`
 - Project entry: [`src/preprocessing.py`](../../src/preprocessing.py)

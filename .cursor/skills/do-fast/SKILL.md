@@ -42,7 +42,7 @@ Parent rules:
 
 - **One sent prompt** — the block under [Single orchestration prompt](#single-orchestration-prompt) is the entire handoff.
 - Orchestrator delegates to listed skills (including `@task-gate`); do not invent substitute audits.
-- When a specialized skill is **instructions-only** (markdown workflow, no separate runtime agent), the executor may follow that `SKILL.md` and implement via project `scripts/` — still write `docs/execution/<task-id>.md` and apply task-gate. Do not reimplement other skills’ ownership (e.g. do not replace `@verify-todo` graph building).
+- When a specialized skill is **instructions-only** (markdown workflow, no separate runtime agent), the executor may follow that `SKILL.md` and implement via project `src/` — still write `docs/execution/<task-id>.md` and apply task-gate. Do not reimplement other skills’ ownership (e.g. do not replace `@verify-todo` graph building).
 - Run-until-done: continuous cycling + `@debug` recovery — not a one-wave shortcut.
 - Never bypass **start/end** full auditor, **end** code-review, **per-wave** verify-todo, or **per-task** task-gate (enforced inside the prompt).
 - Prefer **chunky** READY tasks (consumers like `@split` should not leave six doc-only micro-tasks).

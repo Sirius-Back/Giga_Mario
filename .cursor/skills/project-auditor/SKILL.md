@@ -52,7 +52,7 @@ Map top-level structure and purpose:
 
 | Area | Inspect |
 |------|---------|
-| Layout | `data/`, `scripts/`, `config/`, `results/`, `figures/`, `docs/`, `tests/` |
+| Layout | `data/`, `src/`, `config/`, `results/`, `figures/`, `docs/`, `tests/` |
 | Entry points | README, Snakefile, Makefile, main scripts |
 | Environment | `environment.yml`, Docker, `requirements.txt`, lockfiles |
 | Version control | `.gitignore`, large binaries tracked, secrets exposure |

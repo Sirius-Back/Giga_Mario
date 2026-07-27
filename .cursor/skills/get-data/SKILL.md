@@ -218,7 +218,7 @@ When dbGaP, controlled GDC, or EGA accessions are detected:
 | Checksums | `data/checksums/checksums.txt` |
 | Command log | `data/logs/download.log` |
 | Report | `data/manifests/acquisition_report.md` |
-| SLURM script (if large) | `scripts/sbatch/get-data_<jobid>.sbatch` |
+| SLURM script (if large) | `src/sbatch/get-data_<jobid>.sbatch` |
 
 ## Artifact registration
 

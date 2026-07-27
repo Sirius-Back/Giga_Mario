@@ -48,7 +48,7 @@ Systematically inspect:
 
 | Evidence type | Locations | Signals completion |
 |---------------|-----------|------------------|
-| Code / scripts | `scripts/`, `src/`, `*.py`, `*.R`, `*.sh` | Implemented functions, committed logic |
+| Code / scripts | `src/`, `*.py`, `*.R`, `*.sh` | Implemented functions, committed logic |
 | Workflows | `Snakefile`, `*.smk`, Nextflow, WDL | Rules/processes present and wired |
 | Config | `config/`, `*.yaml`, env files | Parameters defined |
 | Documentation | `docs/`, `README`, audit/methods drafts | File exists and non-empty |

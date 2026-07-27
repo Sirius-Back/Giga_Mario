@@ -11,12 +11,7 @@ conda run -n caduceus_env python src/preprocessing.py \
   --raw raw --out data_ready --flank 10000 --seed 42
 ```
 
-Or via skill wrapper:
-
-```bash
-conda run -n caduceus_env python .cursor/skills/adapt/scripts/adapt.py \
-  --raw raw --out data_ready
-```
+Heavy panels: `sbatch src/sbatch/preprocess_raw.sbatch`
 
 ## Outputs (`data_ready/`)
 
@@ -34,4 +29,4 @@ conda run -n caduceus_env python .cursor/skills/adapt/scripts/adapt.py \
 
 - `wiki/conversion.md` — algorithm + I/O
 - `docs/adapt.md`, `docs/caduceus_format.md`
-- Legacy ±200 bp path: `scripts/adapt_legacy.py` (`adapt.py --legacy`)
+- Canonical code: `src/preprocessing.py` (legacy ±200 bp archived under `src/_archive/`)

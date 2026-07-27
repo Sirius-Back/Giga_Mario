@@ -26,7 +26,7 @@ Caduceus (Schiff et al., 2024) — bi-directional RC-aware DNA LM (Mamba/SSM).
 
 **Never** invent a parallel trainer in-chat. Extend `src/caduceus.py` instead.
 
-Metrics helpers remain at `.cursor/skills/caduceus/scripts/metrics_logging.py` (imported by the script).
+Metrics helpers: `src/metrics_logging.py` (imported by `src/caduceus.py`; skill `scripts/metrics_logging.py` is a thin re-export).
 
 ## Input / output
 
@@ -75,7 +75,7 @@ tensorboard --logdir runs/caduceus/random_M1/tensorboard
 | `--task` | `auto` | `regression` \| `classification` |
 | `--max-samples` | none | smoke-test cap per fold |
 
-SLURM: `scripts/caduceus_train.sbatch`.
+SLURM: `src/sbatch/caduceus_train.sbatch` (runs `python -m src.caduceus`).
 
 ## Metrics (required for regression)
 

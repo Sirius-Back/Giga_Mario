@@ -84,7 +84,7 @@ Smoke:
 python -m src.splits.main --strategy random --max-samples 500 --out splits/random_smoke
 ```
 
-Heavy panels → wrap in sbatch (even CPUs, mem, time, logs).
+Heavy panels → `sbatch src/sbatch/split_random.sbatch` (even CPUs, mem, time, logs).
 
 ## Analyze split caption (mandatory before writing code)
 

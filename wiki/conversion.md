@@ -55,7 +55,7 @@ conda run -n caduceus_env python src/preprocessing.py \
 
 Smoke: add `--genomes GCF_000001405.40 --max-genes 80`.
 
-SLURM wrapper: `scripts/preprocess_raw.sbatch`.
+SLURM wrapper: `src/sbatch/preprocess_raw.sbatch`.
 
 ## Skill entry
 

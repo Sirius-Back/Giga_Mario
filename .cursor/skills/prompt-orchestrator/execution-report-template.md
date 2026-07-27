@@ -81,7 +81,7 @@ Register every written report in `artifact-registry.md` / `docs/artifact-registr
 
 | Step | Environment | Details |
 |------|-------------|---------|
-| Download | SLURM | sbatch scripts/sbatch/get_data.sbatch |
+| Download | SLURM | sbatch src/sbatch/get_data.sbatch |
 | Audit | Local | read-only inspection |
 | Snakemake QC | Snakemake | `snakemake qc -c 32` |
 

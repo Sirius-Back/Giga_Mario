@@ -15,11 +15,4 @@ conda run -n caduceus_env python src/preprocessing.py \
   --genomes GCF_000001405.40 --max-genes 80
 ```
 
-## Via skill wrapper
-
-```bash
-conda run -n caduceus_env python .cursor/skills/adapt/scripts/adapt.py \
-  --raw raw --out data_ready
-```
-
 See `wiki/conversion.md` for I/O contracts.
