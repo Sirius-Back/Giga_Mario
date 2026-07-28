@@ -265,5 +265,8 @@ build/
 !tests/fixtures/mini_raw/**/*.fai
 !tests/fixtures/mini_raw/**/*.fa
 
-# --- Archived run outputs (keep tree; ignore bulky results) ---
-archive/results/
+# --- Archived local trees (keep on disk; not in public repo) ---
+archive/
+
+# --- Local run scratch ---
+run0/
