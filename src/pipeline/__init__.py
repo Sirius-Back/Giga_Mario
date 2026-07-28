@@ -5,7 +5,8 @@ from importlib import import_module
 
 __all__ = (
     "id_gen", "id_rule", "parse_target", "adapt", "parse_data",
-    "split_predict", "split_materialize", "train", "train_viz", "adversarial",
+    "generate_fold", "generate_stratification", "split_predict",
+    "split_materialize", "train", "train_viz", "adversarial",
 )
 
 _MODULE_NAMES = {name: name for name in __all__}

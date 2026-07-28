@@ -42,6 +42,8 @@ def _resolve_stage_dir(path: Path, name: str) -> Path:
 
 
 def _validate_panel(split_csv: Path, parsed_target: Path, parsed_data: Path) -> None:
+    from .common import checkout_ids_before_split
+
     split_rows = read_csv(split_csv)
     if not split_rows:
         raise ValueError(f"split.csv is empty: {split_csv}")
@@ -49,20 +51,14 @@ def _validate_panel(split_csv: Path, parsed_target: Path, parsed_data: Path) -> 
     if required_split - set(split_rows[0]):
         raise ValueError(f"split.csv missing {sorted(required_split - set(split_rows[0]))}")
 
-    pred = parsed_target / "predict.csv"
-    rows = read_csv(pred)
-    if not rows or "id" not in rows[0] or "predict_var1" not in rows[0]:
-        raise ValueError(f"Invalid prediction manifest: {pred}")
-    pred_ids = {row["id"] for row in rows}
-    split_ids = {row["ID"] for row in split_rows}
-    missing = split_ids - pred_ids
-    if missing:
-        raise ValueError(f"split.csv IDs missing from predict.csv (first: {sorted(missing)[:3]})")
-    for rid in split_ids:
-        if not (parsed_target / f"{rid}.ext").is_file():
-            raise FileNotFoundError(f"Missing prediction artifact: {parsed_target / f'{rid}.ext'}")
-        if not (parsed_data / f"{rid}.ext").is_file():
-            raise FileNotFoundError(f"Missing parsed artifact: {parsed_data / f'{rid}.ext'}")
+    split_ids = [row["ID"].strip() for row in split_rows]
+    # Pre-split style checkout: allows mapped source; enforces region presence.
+    checkout_ids_before_split(
+        predict_root=parsed_target,
+        parsed_root=parsed_data,
+        split_ids=split_ids,
+        intersect_allow=False,
+    )
 
 
 def run_adversarial(

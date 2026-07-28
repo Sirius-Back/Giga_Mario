@@ -21,6 +21,7 @@ from src.pipeline import (
     parse_target,
     adapt,
     parse_data,
+    generate_stratification,
     split_predict,
     split_materialize,
     train,
@@ -159,6 +160,38 @@ def test_id_rule_real_prokaryote_mappings_and_cli(capsys):
         id_rule.run_id_rule(raw_ids, id_csv, id_col_1="missing", id_col_2="also_missing")
 
 
+def test_generate_stratification_stub_warns_not_implemented(tmp_path):
+    """MJ-003: stub warns 'Not implemented' and does not invent stratification.csv."""
+    id_csv = tmp_path / "ID.csv"
+    prepare = tmp_path / "prepare_strat.csv"
+    id_csv.write_text(
+        "genome|chr|pos1|pos2|gene_nameORnon_coding_ID|raw_target_ID|ID\n",
+        encoding="utf-8",
+    )
+    prepare.write_text("identificator|column|strat\n", encoding="utf-8")
+    outdir = tmp_path / "out"
+
+    with pytest.warns(UserWarning, match=r"^Not implemented$"):
+        with pytest.raises(NotImplementedError, match=r"^Not implemented$"):
+            generate_stratification.run_generate_stratification(
+                id_csv, prepare, outdir=outdir
+            )
+
+    assert not (outdir / "stratification.csv").exists()
+    with pytest.warns(UserWarning, match=r"^Not implemented$"):
+        assert generate_stratification.main(
+            [
+                "--id-csv",
+                str(id_csv),
+                "--prepare-strat",
+                str(prepare),
+                "--outdir",
+                str(outdir),
+            ]
+        ) == 2
+    assert not (outdir / "stratification.csv").exists()
+
+
 @pytest.mark.parametrize("to_type", ["caduceus", "legnet"])
 def test_parse_target_predict_schema(mini_raw, id_csv, tmp_path, to_type):
     outdir = tmp_path / f"pt_{to_type}"
@@ -242,6 +275,72 @@ def test_parse_target_mapping_uses_sample_subtrees_and_mpra_basenames(tmp_path):
     ext = paths["predict_dir"] / mapping_row["id"] / f"{first['id']}.ext"
     assert ext.is_file()
     assert float(ext.read_text().strip()) == float(first["predict_var1"])
+
+
+def test_parse_target_calls_id_rule_for_header_remaps(mini_raw, id_csv, tmp_path, monkeypatch):
+    """parse_target resolves TARGET headers through run_id_rule (MJ-001)."""
+    calls: list[tuple[list[str], str, str]] = []
+    real = parse_target.run_id_rule
+
+    def spy(id_list, path, *, id_col_1, id_col_2):
+        calls.append((list(id_list), id_col_1, id_col_2))
+        return real(id_list, path, id_col_1=id_col_1, id_col_2=id_col_2)
+
+    monkeypatch.setattr(parse_target, "run_id_rule", spy)
+    paths = parse_target.run_parse_target(
+        mini_raw / "tpm", outdir=tmp_path / "pt_id_rule", id_csv=id_csv, to_type="caduceus"
+    )
+    assert calls
+    assert all(c[2] == "ID" for c in calls)
+    cols = {c[1] for c in calls}
+    assert "raw_target_ID" in cols
+    # Mini TPM headers are display names (GENEA…), so gene_name fallback is exercised.
+    assert "gene_nameORnon_coding_ID" in cols
+    by_id = {r["id"]: float(r["predict_var1"]) for r in read_csv(paths["predict_csv"])}
+    assert by_id == {"1": 1.5, "2": 2.5, "3": 3.5}
+
+
+def test_parse_target_gene_name_remap_via_id_rule_absent_zero(tmp_path):
+    """gene_name TARGET headers map via id_rule; unmatched panel IDs stay 0."""
+    id_csv = tmp_path / "ID.csv"
+    id_csv.write_text(
+        "genome|chr|pos1|pos2|gene_nameORnon_coding_ID|raw_target_ID|ID\n"
+        "GCF_X.1|chr1|1|10|thrL|b0001|1\n"
+        "GCF_X.1|chr1|20|30|thrA|b0002|2\n"
+        "GCF_X.1|chr1|40|50|orphan|b0099|3\n",
+        encoding="utf-8",
+    )
+    target_dir = tmp_path / "tpm"
+    target_dir.mkdir()
+    # Headers use gene_name (not locus tags); orphan gene absent → prediction 0.
+    (target_dir / "GCF_X.1.csv").write_text("thrL,thrA\n1.25,2.5\n", encoding="utf-8")
+
+    paths = parse_target.run_parse_target(
+        target_dir, outdir=tmp_path / "out", id_csv=id_csv, to_type="caduceus"
+    )
+    by_id = {r["id"]: float(r["predict_var1"]) for r in read_csv(paths["predict_csv"])}
+    assert by_id == {"1": 1.25, "2": 2.5, "3": 0.0}
+    assert float((paths["predict_dir"] / "3.ext").read_text().strip()) == 0.0
+
+
+def test_parse_target_prefers_raw_target_id_remap_via_id_rule(tmp_path):
+    """When both raw and gene keys exist, raw_target_ID remap wins (same as prior join)."""
+    id_csv = tmp_path / "ID.csv"
+    id_csv.write_text(
+        "genome|chr|pos1|pos2|gene_nameORnon_coding_ID|raw_target_ID|ID\n"
+        "GCF_X.1|chr1|1|10|thrL|b0001|1\n",
+        encoding="utf-8",
+    )
+    target_dir = tmp_path / "tpm"
+    target_dir.mkdir()
+    (target_dir / "GCF_X.1.csv").write_text("b0001,thrL\n9.0,1.0\n", encoding="utf-8")
+
+    paths = parse_target.run_parse_target(
+        target_dir, outdir=tmp_path / "out", id_csv=id_csv, to_type="caduceus"
+    )
+    rows = read_csv(paths["predict_csv"])
+    assert len(rows) == 1
+    assert float(rows[0]["predict_var1"]) == 9.0
 
 
 def test_adapt_marked_and_intersect(mini_raw, id_csv, tmp_path):

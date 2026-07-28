@@ -1,12 +1,22 @@
-"""Assign IDs to train/test/val (+ fold) → split.csv."""
+"""Assign IDs to train/test/val (+ fold) → split.csv.
+
+Random assignment imports Caduceus-aligned fold ratios from
+``src.splits.common`` (same helpers used by ``src.splits.random``).
+Only ``type=random`` is implemented.
+"""
 from __future__ import annotations
 
 import argparse
 import random
+import warnings
 from pathlib import Path
 from typing import Any
 
+# Import fold assignment from the random split implementation (re-exported helpers).
+from src.splits.random import assign_folds_random, assign_folds_stratified
+
 from .common import SPLIT_CSV_COLUMNS, ensure_dir, read_csv, write_csv
+from .generate_fold import is_zsv_fold, normalize_fold_label
 
 
 def _load_optional_table(
@@ -52,9 +62,60 @@ def _load_ids(path: Path) -> list[str]:
     return ids
 
 
-def _validate_fraction(name: str, value: float) -> None:
-    if not 0.0 < value < 1.0:
-        raise ValueError(f"{name} must be strictly between 0 and 1; got {value}")
+def _strat_columns(sample_row: dict[str, str]) -> list[str]:
+    """All stratification columns: every column except ID (and optional meta)."""
+    skip = {"ID", "id"}
+    cols = [c for c in sample_row if c not in skip]
+    # Prefer explicit strat* columns when present; otherwise use all non-ID cols
+    strat_star = [c for c in cols if c.lower().startswith("strat")]
+    return strat_star if strat_star else cols
+
+
+def _composite_stratum(row: dict[str, str], columns: list[str]) -> str:
+    return "||".join(str(row.get(c, "")) for c in columns)
+
+
+def _assign_random_train_test(
+    ids: list[str],
+    *,
+    seed: int,
+    strat_map: dict[str, dict[str, str]],
+) -> dict[str, str]:
+    """
+    Assign train/val/test using ``assign_folds_random`` / stratified helpers
+    from ``src.splits.common`` (same ratios as ``src.splits.random``).
+    """
+    if not ids:
+        return {}
+    if len(ids) < 3:
+        raise ValueError(f"need >=3 non-ZSV IDs for train/val/test; got {len(ids)}")
+
+    rng = random.Random(seed)
+
+    if strat_map:
+        sample_row = next(iter(strat_map.values()))
+        strat_cols = _strat_columns(sample_row)
+        if not strat_cols:
+            raise ValueError("stratification.csv has no stratification columns")
+        missing_strat = [i for i in ids if i not in strat_map]
+        if missing_strat:
+            raise ValueError(
+                f"stratification.csv missing ID {missing_strat[0]!r} "
+                f"(required when --stratification is set)"
+            )
+        strata = [_composite_stratum(strat_map[i], strat_cols) for i in ids]
+        labels = assign_folds_stratified(ids, strata, rng)
+        return dict(zip(ids, labels))
+
+    # Unstratified: shuffle index order, then zip with fixed-size fold labels
+    # (matches src.splits.random M1 pairing).
+    order = list(range(len(ids)))
+    rng.shuffle(order)
+    folds = assign_folds_random(len(ids))
+    out: dict[str, str] = {}
+    for idx, fold in zip(order, folds):
+        out[ids[idx]] = fold
+    return out
 
 
 def run_split_predict(
@@ -65,30 +126,49 @@ def run_split_predict(
     id_csv: Path | None = None,
     fold_csv: Path | None = None,
     stratification_csv: Path | None = None,
-    stratification_column: str = "strat1",
+    stratification_column: str | None = None,
     intersect_csv: Path | None = None,
     fna: Path | None = None,
     gtf: Path | None = None,
     marked_fasta: Path | None = None,
-    test_fraction: float = 0.10,
-    val_fraction_of_rest: float = 0.10,
 ) -> Path:
     """
     Write `{outdir}/split.csv` with columns ID|train_test|fold.
 
-    For type=random, FNA/GTF/marked_FASTA may be omitted.
+    Only ``type=random`` is implemented (imports assignment from
+    ``src.splits.common``, shared with ``src.splits.random``).
+
+    When ``fold.csv`` is present:
+      - folds labeled zsv / zeroshotvalidation → train_test=zsv (excluded from
+        random assignment; materialize moves them to zero-shot-validation/)
+      - other IDs get train/test/val via random/stratified import; fold column
+        keeps the fold.csv value (or ``0``)
+
+    When ``fold.csv`` is omitted, emits:
+      ``Warning: folds are not included``
     """
-    _ = (fna, gtf, marked_fasta, intersect_csv)  # reserved for non-random strategies
+    _ = (fna, gtf, marked_fasta, intersect_csv, stratification_column)
     if type != "random":
-        raise ValueError(f"split-predict type={type!r} not implemented yet (use random)")
-    _validate_fraction("test_fraction", test_fraction)
-    _validate_fraction("val_fraction_of_rest", val_fraction_of_rest)
+        raise ValueError(
+            f"split-predict type={type!r} not implemented yet "
+            "(only random is available; other strategies removed for now)"
+        )
     outdir = ensure_dir(Path(outdir))
 
     fold_map = _load_optional_table(fold_csv, min_cols=["ID", "fold"], label="fold.csv")
     strat_map = _load_optional_table(
-        stratification_csv, min_cols=["ID", stratification_column], label="strat.csv"
+        stratification_csv, min_cols=["ID"], label="strat.csv"
     )
+    if stratification_csv is not None and strat_map:
+        # Ensure at least one strat column exists
+        sample = next(iter(strat_map.values()))
+        if not _strat_columns(sample):
+            raise ValueError(
+                "stratification.csv must include at least one non-ID column"
+            )
+
+    if fold_csv is None:
+        warnings.warn("Warning: folds are not included", UserWarning, stacklevel=2)
 
     if id_csv is not None:
         ids = _load_ids(Path(id_csv))
@@ -106,27 +186,34 @@ def run_split_predict(
             example = sorted(unknown_ids)[0]
             raise ValueError(f"{label} contains ID absent from split IDs: {example!r}")
 
-    rng = random.Random(seed)
-    ids_shuffled = ids[:]
-    rng.shuffle(ids_shuffled)
-
-    n = len(ids_shuffled)
-    n_test = max(1, int(round(n * test_fraction))) if n >= 3 else max(0, n // 3)
-    rest = ids_shuffled[n_test:]
-    n_val = max(1, int(round(len(rest) * val_fraction_of_rest))) if len(rest) >= 2 else 0
-    test_ids = set(ids_shuffled[:n_test])
-    val_ids = set(rest[:n_val])
-    # If fold.csv provided, prefer its fold; else fold=0
-    rows: list[dict[str, Any]] = []
-    for i in ids_shuffled:
-        if i in test_ids:
-            split = "test"
-        elif i in val_ids:
-            split = "val"
+    zsv_ids: list[str] = []
+    assignable: list[str] = []
+    fold_values: dict[str, str] = {}
+    for i in ids:
+        raw_fold = fold_map[i]["fold"] if i in fold_map else "0"
+        fold_values[i] = normalize_fold_label(raw_fold)
+        if is_zsv_fold(fold_values[i]):
+            zsv_ids.append(i)
+            fold_values[i] = "zsv"
         else:
-            split = "train"
-        fold = fold_map[i]["fold"] if i in fold_map else "0"
-        rows.append({"ID": i, "train_test": split, "fold": fold})
+            assignable.append(i)
+
+    train_test_map = _assign_random_train_test(
+        assignable, seed=seed, strat_map=strat_map
+    )
+
+    rows: list[dict[str, Any]] = []
+    for i in ids:
+        if i in zsv_ids:
+            rows.append({"ID": i, "train_test": "zsv", "fold": "zsv"})
+        else:
+            rows.append(
+                {
+                    "ID": i,
+                    "train_test": train_test_map[i],
+                    "fold": fold_values[i],
+                }
+            )
 
     out = outdir / "split.csv"
     write_csv(out, rows, SPLIT_CSV_COLUMNS)
@@ -147,7 +234,11 @@ def main(argv: list[str] | None = None) -> int:
         type=Path,
         default=None,
     )
-    p.add_argument("--stratification-column", default="strat1")
+    p.add_argument(
+        "--stratification-column",
+        default=None,
+        help="Deprecated: all stratification columns are used",
+    )
     p.add_argument("--intersect", type=Path, default=None)
     p.add_argument("--fna", type=Path, default=None)
     p.add_argument("--gtf", type=Path, default=None)

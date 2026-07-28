@@ -30,6 +30,15 @@ from .common import (
     write_tsv,
 )
 
+# Re-export for pipeline split-predict (only random strategy is wired).
+__all__ = (
+    "run_random_split",
+    "assign_folds_random",
+    "assign_folds_stratified",
+    "SPLIT_ID",
+    "M1_FOLD_TO_CLASS",
+)
+
 SPLIT_ID = "random"
 M1_FOLD_TO_CLASS = {"train": 0, "val": 1, "test": 2}
 
@@ -107,31 +116,33 @@ def run_random_split(
                 label_fields=label_fields,
             )
 
-    # Zero-shot holdout (e.g. human genome) — TPM labels; not used in M1/M2 folds
+    # Zero-shot-validation holdout — TPM labels; not used in M1/M2 train/val/test
     if zs_samples:
         for s in zs_samples:
             s["TPM"] = s["TPM"]
-            s["M1"] = "zero_shot"
-            s["M2"] = "zero_shot"
+            s["M1"] = "zsv"
+            s["M2"] = "zsv"
         materialize_fold(
-            out / "zero_shot" / "all",
+            out / "zero-shot-validation" / "all",
             zs_samples,
             label_field="TPM",
             label_fields=["TPM"],
         )
         write_tsv(
-            out / "zero_shot" / "fold_manifest.tsv",
+            out / "zero-shot-validation" / "fold_manifest.tsv",
             [
                 {
                     "sample_id": s["sample_id"],
-                    "fold": "zero_shot",
+                    "fold": "zsv",
                     "genome": s["Genome"],
                     "gene_id": s["GeneOrID"],
                     "chrom": s["Chr"],
                     "start": s["Position_start"],
                     "end": s["Position_end"],
                     "TPM": s["TPM"],
-                    "sequence_path": f"zero_shot/all/sequences/{s['sample_id']}.txt",
+                    "sequence_path": (
+                        f"zero-shot-validation/all/sequences/{s['sample_id']}.txt"
+                    ),
                     "seed": seed,
                     "split_id": SPLIT_ID,
                 }
@@ -160,8 +171,8 @@ def run_random_split(
     log_rows.extend(
         {
             "data_input": s["sample_id"],
-            "M1": "zero_shot",
-            "M2": "zero_shot",
+            "M1": "zsv",
+            "M2": "zsv",
         }
         for s in sorted(zs_samples, key=lambda r: r["sample_id"])
     )
@@ -239,12 +250,13 @@ def run_random_split(
         "note": "Ready files were not converted; sequences hardlinked/symlinked.",
     }
     if zs_samples:
-        meta["counts"]["zero_shot"] = {"all": len(zs_samples)}
+        meta["counts"]["zero-shot-validation"] = {"all": len(zs_samples)}
     (out / "metadata.json").write_text(json.dumps(meta, indent=2), encoding="utf-8")
     zs_line = (
-        f"- **zero_shot** — holdout genomes {sorted(holdout)} (n={len(zs_samples)}); TPM eval only"
+        f"- **zero-shot-validation (zsv)** — holdout genomes {sorted(holdout)} "
+        f"(n={len(zs_samples)}); TPM eval only; not used in M1/M2"
         if zs_samples
-        else "- **zero_shot** — none"
+        else "- **zero-shot-validation** — none"
     )
     (out / "README.md").write_text(
         "\n".join(

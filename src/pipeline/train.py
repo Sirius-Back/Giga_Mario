@@ -9,7 +9,12 @@ import shutil
 from pathlib import Path
 from typing import Any
 
-from .common import ensure_dir
+from .common import (
+    assert_matching_artifact_ids,
+    ensure_dir,
+    index_unique_predict_rows,
+    read_csv,
+)
 
 
 FOLD_MAP = {"TRAIN": "train", "VAL": "val", "TEST": "test"}
@@ -25,18 +30,17 @@ def _link_or_copy(source: Path, destination: Path) -> None:
 
 
 def _read_predict(path: Path) -> dict[str, dict[str, str]]:
+    """Load predict.csv with a unique ``id`` column (required)."""
     if not path.is_file() or path.stat().st_size == 0:
         raise FileNotFoundError(f"Missing or empty prediction table: {path}")
-    with path.open(newline="", encoding="utf-8") as handle:
-        reader = csv.DictReader(handle, delimiter="|")
-        if not reader.fieldnames or "id" not in reader.fieldnames:
-            raise ValueError(f"{path} must contain an 'id' column")
-        if "predict_var1" not in reader.fieldnames:
-            raise ValueError(f"{path} must contain a 'predict_var1' column")
-        rows = {str(row["id"]).strip(): row for row in reader}
-    if not rows or "" in rows:
+    rows = read_csv(path)
+    if not rows:
         raise ValueError(f"{path} contains no usable prediction IDs")
-    return rows
+    if "id" not in rows[0]:
+        raise ValueError(f"{path} must contain an 'id' column")
+    if "predict_var1" not in rows[0]:
+        raise ValueError(f"{path} must contain a 'predict_var1' column")
+    return index_unique_predict_rows(rows, label=str(path))
 
 
 def _validate_legacy_caduceus_split(folder: Path) -> None:
@@ -54,9 +58,8 @@ def adapt_split_for_caduceus(
 ) -> tuple[Path, dict[str, int]]:
     """Convert a universal ``SPLIT`` tree into Caduceus's labels/sequences layout.
 
-    Sequence and scalar prediction files are not regenerated: source sequences are
-    hardlinked (or copied only across filesystems) and values are transferred
-    directly from each bucket's ``predict.csv``.
+    Requires unique matching IDs across ``FASTA/*.ext``, ``PREDICT/*.ext``, and
+    ``predict.csv`` ``id`` (merged region IDs or mapped composite IDs).
     """
     folders = Path(folders)
     if (folders / "train" / "labels.tsv").is_file():
@@ -79,7 +82,8 @@ def adapt_split_for_caduceus(
     counts: dict[str, int] = {}
     for source_fold, fold in FOLD_MAP.items():
         fasta_dir = folders / "FASTA" / source_fold
-        predict_path = folders / "PREDICT" / source_fold / "predict.csv"
+        predict_dir = folders / "PREDICT" / source_fold
+        predict_path = predict_dir / "predict.csv"
         if not fasta_dir.exists() and not predict_path.exists():
             predict_rows: dict[str, dict[str, str]] = {}
             sequence_files: list[Path] = []
@@ -89,30 +93,32 @@ def adapt_split_for_caduceus(
             )
         else:
             predict_rows = _read_predict(predict_path)
+            assert_matching_artifact_ids(
+                fasta_dir=fasta_dir,
+                predict_dir=predict_dir,
+                predict_by_id=predict_rows,
+                bucket=source_fold,
+            )
             sequence_files = sorted(fasta_dir.glob("*.ext"))
 
         labels: list[tuple[str, str]] = []
         for source in sequence_files:
-            sample_id = source.stem
-            row = predict_rows.get(sample_id)
-            if row is None:
-                raise ValueError(
-                    f"{source_fold} has sequence {sample_id} without predict.csv value"
-                )
+            uid = source.stem
+            row = predict_rows[uid]
             value = row["predict_var1"].strip()
             try:
                 float(value)
             except ValueError as exc:
                 raise ValueError(
-                    f"{source_fold} prediction for {sample_id} is not numeric: {value!r}"
+                    f"{source_fold} prediction for {uid} is not numeric: {value!r}"
                 ) from exc
             if task_type == "classification" and float(value) != int(float(value)):
                 raise ValueError(
                     "Classification requires integer predict_var1 labels; "
-                    f"{sample_id} has {value!r}"
+                    f"{uid} has {value!r}"
                 )
-            _link_or_copy(source, adapted / fold / "sequences" / f"{sample_id}.txt")
-            labels.append((sample_id, value))
+            _link_or_copy(source, adapted / fold / "sequences" / f"{uid}.txt")
+            labels.append((uid, value))
 
         labels_path = adapted / fold / "labels.tsv"
         labels_path.parent.mkdir(parents=True, exist_ok=True)
@@ -140,8 +146,15 @@ def materialize_tiny_split(
         if requested <= 0:
             raise ValueError(f"tiny subset count for {fold} must be positive")
         source_fasta = source_split / "FASTA" / source_fold
-        source_predict = source_split / "PREDICT" / source_fold / "predict.csv"
+        source_predict_dir = source_split / "PREDICT" / source_fold
+        source_predict = source_predict_dir / "predict.csv"
         predictions = _read_predict(source_predict)
+        assert_matching_artifact_ids(
+            fasta_dir=source_fasta,
+            predict_dir=source_predict_dir,
+            predict_by_id=predictions,
+            bucket=source_fold,
+        )
         files = sorted(source_fasta.glob("*.ext"))
         if len(files) < requested:
             raise ValueError(
@@ -149,20 +162,24 @@ def materialize_tiny_split(
             )
         selected = files[:requested]
         rows: list[dict[str, str]] = []
+        fieldnames = list(next(iter(predictions.values())).keys())
         for file in selected:
-            if file.stem not in predictions:
-                raise ValueError(f"{source_fold} {file.stem} lacks a prediction")
+            row = predictions[file.stem]
             _link_or_copy(file, destination / "FASTA" / source_fold / file.name)
-            source_prediction = source_split / "PREDICT" / source_fold / file.name
+            source_prediction = source_predict_dir / file.name
             if not source_prediction.is_file():
                 raise FileNotFoundError(source_prediction)
-            _link_or_copy(source_prediction, destination / "PREDICT" / source_fold / file.name)
-            rows.append(predictions[file.stem])
+            _link_or_copy(
+                source_prediction, destination / "PREDICT" / source_fold / file.name
+            )
+            rows.append(row)
+        index_unique_predict_rows(rows, label=f"tiny {source_fold} predict.csv")
         with (destination / "PREDICT" / source_fold / "predict.csv").open(
             "w", newline="", encoding="utf-8"
         ) as handle:
             writer = csv.DictWriter(
-                handle, fieldnames=["id", "predict_var1"], delimiter="|", lineterminator="\n"
+                handle, fieldnames=fieldnames, delimiter="|", lineterminator="\n",
+                extrasaction="ignore",
             )
             writer.writeheader()
             writer.writerows(rows)

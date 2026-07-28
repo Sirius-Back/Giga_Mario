@@ -8,6 +8,9 @@ from typing import Sequence
 
 from .common import read_csv
 
+# Cache id_col_1 → id_col_2 indexes so repeated per-key remaps (parse_target) stay O(1).
+_INDEX_CACHE: dict[tuple[str, int, int, str, str], dict[str, list[str]]] = {}
+
 
 def _id_csv_columns(id_csv: Path) -> list[str]:
     """Return the pipe-delimited ID.csv header, including for header-only files."""
@@ -16,6 +19,27 @@ def _id_csv_columns(id_csv: Path) -> list[str]:
     if header is None:
         raise ValueError(f"ID.csv is empty: {id_csv}")
     return header
+
+
+def _column_index(id_csv: Path, id_col_1: str, id_col_2: str) -> dict[str, list[str]]:
+    """Build or reuse a col1 → [col2, ...] index for ``id_csv``."""
+    id_csv = Path(id_csv)
+    columns = _id_csv_columns(id_csv)
+    missing = [col for col in (id_col_1, id_col_2) if col not in columns]
+    if missing:
+        raise ValueError(
+            f"ID.csv missing columns {missing}; have {columns}"
+        )
+    stat = id_csv.stat()
+    cache_key = (str(id_csv.resolve()), stat.st_mtime_ns, stat.st_size, id_col_1, id_col_2)
+    cached = _INDEX_CACHE.get(cache_key)
+    if cached is not None:
+        return cached
+    index: dict[str, list[str]] = {}
+    for row in read_csv(id_csv):
+        index.setdefault(str(row[id_col_1]), []).append(str(row[id_col_2]))
+    _INDEX_CACHE[cache_key] = index
+    return index
 
 
 def run_id_rule(
@@ -33,18 +57,7 @@ def run_id_rule(
     If an input key occurs in multiple ID.csv rows, every corresponding value is
     returned in ID.csv order.
     """
-    id_csv = Path(id_csv)
-    columns = _id_csv_columns(id_csv)
-    missing = [col for col in (id_col_1, id_col_2) if col not in columns]
-    if missing:
-        raise ValueError(
-            f"ID.csv missing columns {missing}; have {columns}"
-        )
-
-    index: dict[str, list[str]] = {}
-    for row in read_csv(id_csv):
-        index.setdefault(str(row[id_col_1]), []).append(str(row[id_col_2]))
-
+    index = _column_index(Path(id_csv), id_col_1, id_col_2)
     out: list[str] = []
     for item in id_list:
         out.extend(index.get(str(item), []))

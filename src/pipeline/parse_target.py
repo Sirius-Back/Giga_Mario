@@ -10,6 +10,7 @@ from src.get_mpra import read_wide_row
 from src.preprocessing import genome_prefix
 
 from .common import ensure_dir, read_csv, sanitize_filename, write_csv
+from .id_rule import run_id_rule
 
 
 def _load_wide_target(path: Path) -> dict[str, float]:
@@ -84,15 +85,34 @@ def _ids_for_genome(id_rows: list[dict[str, str]], genome: str) -> list[dict[str
     return [row for row in id_rows if genome_prefix(row["genome"]) == wanted]
 
 
-def _target_value(row: dict[str, str], target: dict[str, float]) -> float:
-    """Use stable raw target ID before display-name fallback; absent genes are zero."""
-    raw_id = (row.get("raw_target_ID") or "").strip()
-    gene_name = (row.get("gene_nameORnon_coding_ID") or "").strip()
-    if raw_id in target:
-        return float(target[raw_id])
-    if gene_name in target:
-        return float(target[gene_name])
-    return 0.0
+def _values_by_panel_id(target: dict[str, float], id_csv: Path) -> dict[str, float]:
+    """Resolve TARGET header keys → panel IDs via ``id_rule``; do not invent IDs.
+
+    For each distinct target key, map with
+    ``run_id_rule([key], id_csv, id_col_1="raw_target_ID", id_col_2="ID")``;
+    if empty, retry with ``id_col_1="gene_nameORnon_coding_ID"``. Multi-hit
+    expansion assigns the same scalar to every matched ID. First assignment
+    wins so raw_target_ID remaps take priority over gene-name remaps. Keys that
+    match no ID.csv row are ignored (callers use absent→0).
+    """
+    by_id: dict[str, float] = {}
+    pending: list[str] = []
+    for key, value in target.items():
+        ids = run_id_rule([key], id_csv, id_col_1="raw_target_ID", id_col_2="ID")
+        if ids:
+            scalar = float(value)
+            for rid in ids:
+                by_id.setdefault(str(rid), scalar)
+        else:
+            pending.append(key)
+    for key in pending:
+        ids = run_id_rule(
+            [key], id_csv, id_col_1="gene_nameORnon_coding_ID", id_col_2="ID"
+        )
+        scalar = float(target[key])
+        for rid in ids:
+            by_id.setdefault(str(rid), scalar)
+    return by_id
 
 
 def run_parse_target(
@@ -124,7 +144,8 @@ def run_parse_target(
     if not target_path.is_dir():
         raise FileNotFoundError(f"TARGET folder missing: {target_path}")
 
-    id_rows = read_csv(Path(id_csv))
+    id_csv = Path(id_csv)
+    id_rows = read_csv(id_csv)
     if not id_rows:
         raise ValueError(f"Empty ID.csv: {id_csv}")
 
@@ -134,11 +155,12 @@ def run_parse_target(
     if mappings is not None:
         for mapping in _read_mappings(Path(mappings)):
             target = _load_wide_target(_resolve_mapping_target(mapping, target_path))
+            by_id = _values_by_panel_id(target, id_csv)
             sample_id = mapping["id"]
             sample_dir = ensure_dir(predict_dir / sanitize_filename(sample_id))
             for row in _ids_for_genome(id_rows, mapping["genome"]):
-                value = _target_value(row, target)
                 rid = row["ID"]
+                value = float(by_id.get(str(rid), 0.0))
                 (sample_dir / f"{sanitize_filename(rid)}.ext").write_text(
                     f"{value}\n", encoding="utf-8"
                 )
@@ -153,14 +175,18 @@ def run_parse_target(
         targets_by_genome = {
             key: _load_wide_target(path) for key, path in csv_index.items()
         }
+        by_id_by_genome = {
+            key: _values_by_panel_id(target, id_csv)
+            for key, target in targets_by_genome.items()
+        }
         for row in id_rows:
             genome = row["genome"]
-            target = (
-                targets_by_genome.get(genome)
-                or targets_by_genome.get(genome_prefix(genome))
+            by_id = (
+                by_id_by_genome.get(genome)
+                or by_id_by_genome.get(genome_prefix(genome))
             )
-            value = _target_value(row, target) if target is not None else 0.0
             rid = row["ID"]
+            value = float(by_id.get(str(rid), 0.0)) if by_id is not None else 0.0
             (predict_dir / f"{sanitize_filename(rid)}.ext").write_text(
                 f"{value}\n", encoding="utf-8"
             )
