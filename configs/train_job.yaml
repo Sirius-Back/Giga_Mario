@@ -1,0 +1,38 @@
+# @package _global_
+# Standalone /train job (Hydra). Prefer this over ad-hoc argparse for new runs.
+#
+#   python -m src.hydra_train mode=direct train=legnet run_id=run0
+#   python -m src.hydra_train mode=adversarial train=caduceus run_id=run0
+
+defaults:
+  - train: legnet
+  - _self_
+
+run_id: run0
+# direct | adversarial
+mode: direct
+data: prokaryotes
+split: random
+task_type: regression
+adversarial_task_type: classification
+seed: 42
+epochs: 20
+n_devices: 1
+batch_size: 1024
+num_workers: 8
+smoke: false
+zsv: false
+legnet_demo: true
+
+# Paths (relative to project root)
+panel_root: run/${run_id}
+out_root: run/${run_id}
+# Optional overrides; empty → inferred from mode + train.name
+folders: null
+outdir: null
+
+hydra:
+  run:
+    dir: run/${run_id}/hydra_train/${now:%Y-%m-%d_%H-%M-%S}
+  job:
+    chdir: false

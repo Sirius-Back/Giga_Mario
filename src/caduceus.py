@@ -7,7 +7,7 @@ Input:
 
 Output (--out, default runs/caduceus/<splits_name>/):
   logs/            epoch metrics.json / metrics.log / train_metrics.jsonl
-  tensorboard/     TensorBoard event files
+  tensorboard/     Dual TB: summary/ (SummaryWriter) + lightning/ (TensorBoardLogger)
   final_model/     HF save_pretrained checkpoint + tokenizer
 
 Task auto-detect from labels.tsv:
@@ -264,13 +264,10 @@ def evaluate_classification(
 
 
 def tb_log_split(writer, split: str, metrics: dict[str, Any], epoch: int) -> None:
-    for k, v in metrics.items():
-        if k == "n":
-            continue
-        try:
-            writer.add_scalar(f"{split}/{k}", float(v), epoch)
-        except (TypeError, ValueError):
-            continue
+    """Backward-compatible SummaryWriter-only helper."""
+    from src.tb_logging import log_split_metrics
+
+    log_split_metrics(writer, None, split, metrics, epoch)
 
 
 # ---------------------------------------------------------------------------
@@ -468,10 +465,20 @@ def run(args: argparse.Namespace) -> int:
 
     optim = torch.optim.AdamW(model.parameters(), lr=args.lr)
     writer = None
+    tb_logger = None
     if rank == 0:
-        from torch.utils.tensorboard import SummaryWriter
+        from src.tb_logging import (
+            close_dual,
+            log_scalar_pair,
+            log_split_metrics,
+            open_summary_writer,
+            open_tensorboard_logger,
+            tensorboard_root,
+        )
 
-        writer = SummaryWriter(log_dir=str(tb_dir))
+        writer = open_summary_writer(out)
+        tb_logger = open_tensorboard_logger(out)
+        tb_dir = tensorboard_root(out)
         meta = {
             "model_name": args.model_name,
             "task": task,
@@ -497,6 +504,8 @@ def run(args: argparse.Namespace) -> int:
             "loss": "MSELoss" if task == "regression" else "CrossEntropy (model.loss)",
             "metrics": "metrics.md" if task == "regression" else "loss+accuracy",
             "tensorboard": str(tb_dir),
+            "tensorboard_summary": str(tb_dir / "summary"),
+            "tensorboard_lightning": str(tb_dir / "lightning"),
             "script": str(Path(__file__).resolve()),
         }
         (logs_dir / "run_config.json").write_text(json.dumps(meta, indent=2), encoding="utf-8")
@@ -536,7 +545,9 @@ def run(args: argparse.Namespace) -> int:
             seen += bs
             global_step += 1
             if rank == 0 and writer is not None and global_step % 50 == 0:
-                writer.add_scalar("train/batch_loss", float(loss.item()), global_step)
+                log_scalar_pair(
+                    writer, tb_logger, "train/batch_loss", float(loss.item()), global_step
+                )
 
         opt_loss = running_loss / max(seen, 1)
         if world > 1:
@@ -608,11 +619,13 @@ def run(args: argparse.Namespace) -> int:
                 fh.write("\n".join(log_lines) + "\n")
 
             if writer is not None:
-                writer.add_scalar("train/optim_loss", opt_loss, epoch)
-                tb_log_split(writer, "train", train_metrics, epoch)
-                tb_log_split(writer, "validation", val_metrics, epoch)
-                tb_log_split(writer, "test", test_metrics, epoch)
+                log_scalar_pair(writer, tb_logger, "train/optim_loss", opt_loss, epoch)
+                log_split_metrics(writer, tb_logger, "train", train_metrics, epoch)
+                log_split_metrics(writer, tb_logger, "validation", val_metrics, epoch)
+                log_split_metrics(writer, tb_logger, "test", test_metrics, epoch)
                 writer.flush()
+                if tb_logger is not None:
+                    tb_logger.save()
 
             # checkpoint best by val loss
             vloss = float(val_metrics["loss"])
@@ -647,8 +660,10 @@ def run(args: argparse.Namespace) -> int:
         }
         (logs_dir / "train_time.json").write_text(json.dumps(timing, indent=2), encoding="utf-8")
         (out / "train_time.json").write_text(json.dumps(timing, indent=2), encoding="utf-8")
-        if writer is not None:
-            writer.close()
+        if writer is not None or tb_logger is not None:
+            from src.tb_logging import close_dual
+
+            close_dual(writer, tb_logger)
         print("Saved final_model →", final_dir, flush=True)
         print("TensorBoard →", tb_dir, flush=True)
         print("Logs →", logs_dir, flush=True)

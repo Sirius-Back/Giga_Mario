@@ -1,10 +1,9 @@
 #!/usr/bin/env python3
-"""Write train/val(/test/ZSV) scalars to ``<run_dir>/tensorboard/``.
+"""Write train/val(/test/ZSV) scalars via dual TB layout.
 
-Caduceus already logs live via ``SummaryWriter``. LegNet/Lightning may log
-during fit when ``tensorboard`` is installed; this helper also backfills from
-``logs/train_metrics.jsonl`` (and ZSV JSON) so every train outdir has a
-Caduceus-shaped TB tree for ``tensorboard --logdir …/tensorboard``.
+Writes into ``<run_dir>/tensorboard/summary/`` (SummaryWriter) and
+``<run_dir>/tensorboard/lightning/`` (TensorBoardLogger API / stand-in).
+Does **not** purge the sibling logger directory.
 """
 from __future__ import annotations
 
@@ -12,6 +11,16 @@ import json
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
+
+from src.tb_logging import (
+    LIGHTNING_NAME,
+    SUMMARY_NAME,
+    close_dual,
+    log_split_metrics,
+    open_summary_writer,
+    open_tensorboard_logger,
+    tensorboard_root,
+)
 
 
 def _scalar_items(split: str, metrics: dict[str, Any]) -> list[tuple[str, float]]:
@@ -32,10 +41,7 @@ def write_tensorboard_from_jsonl(
     tb_dirname: str = "tensorboard",
     purge: bool = True,
 ) -> dict[str, Any]:
-    """Export epoch + final/ZSV metrics from jsonl into TensorBoard events.
-
-    Returns a small manifest dict (status, path, n_scalars).
-    """
+    """Export epoch + final/ZSV metrics from jsonl into dual TensorBoard trees."""
     run_dir = Path(run_dir)
     logs = run_dir / "logs"
     jsonl = logs / "train_metrics.jsonl"
@@ -43,6 +49,8 @@ def write_tensorboard_from_jsonl(
     manifest: dict[str, Any] = {
         "run_dir": str(run_dir),
         "tensorboard": str(tb_dir),
+        "tensorboard_summary": str(tb_dir / SUMMARY_NAME),
+        "tensorboard_lightning": str(tb_dir / LIGHTNING_NAME),
         "status": "ok",
         "n_scalars": 0,
         "written_at": datetime.now(timezone.utc).isoformat(),
@@ -53,19 +61,22 @@ def write_tensorboard_from_jsonl(
         return manifest
 
     try:
-        from torch.utils.tensorboard import SummaryWriter
+        from torch.utils.tensorboard import SummaryWriter  # noqa: F401
     except ImportError as exc:
         manifest["status"] = f"tensorboard_unavailable:{exc}"
         return manifest
 
-    if purge and tb_dir.exists():
-        # Keep directory but drop prior event files so re-sync is deterministic
-        for p in tb_dir.rglob("events.out.tfevents*"):
-            p.unlink(missing_ok=True)
+    if purge:
+        # Only purge summary backfill dir — keep live Lightning events.
+        summary = tb_dir / SUMMARY_NAME
+        if summary.exists():
+            for p in summary.rglob("events.out.tfevents*"):
+                p.unlink(missing_ok=True)
 
-    tb_dir.mkdir(parents=True, exist_ok=True)
+    writer = open_summary_writer(run_dir)
+    tb_logger = open_tensorboard_logger(run_dir)
     n = 0
-    with SummaryWriter(log_dir=str(tb_dir)) as writer:
+    try:
         for line in jsonl.read_text(encoding="utf-8").splitlines():
             if not line.strip():
                 continue
@@ -76,7 +87,6 @@ def write_tensorboard_from_jsonl(
             if not isinstance(rec, dict) or rec.get("smoke"):
                 continue
             ep = rec.get("epoch")
-            step: int | None
             if isinstance(ep, int):
                 step = ep
             elif ep == "final":
@@ -95,11 +105,9 @@ def write_tensorboard_from_jsonl(
                 block = rec.get(split_key)
                 if not isinstance(block, dict):
                     continue
-                for name, val in _scalar_items(tag, block):
-                    writer.add_scalar(name, val, step)
-                    n += 1
+                log_split_metrics(writer, tb_logger, tag, block, step)
+                n += len(_scalar_items(tag, block))
 
-        # Attach ZSV file if not already in jsonl
         zsv_path = logs / "zero_shot_metrics.json"
         if zsv_path.is_file():
             try:
@@ -108,15 +116,18 @@ def write_tensorboard_from_jsonl(
                 zsv = None
             metrics = zsv.get("metrics") if isinstance(zsv, dict) else None
             if isinstance(metrics, dict):
-                for name, val in _scalar_items("zero-shot-validation", metrics):
-                    writer.add_scalar(name, val, 10_000_000)
-                    n += 1
-
-        writer.flush()
+                log_split_metrics(
+                    writer, tb_logger, "zero-shot-validation", metrics, 10_000_000
+                )
+                n += len(_scalar_items("zero-shot-validation", metrics))
+    finally:
+        close_dual(writer, tb_logger)
 
     manifest["n_scalars"] = n
     if n == 0:
         manifest["status"] = "smoke_only_or_empty"
+    # Keep root alias for older consumers
+    _ = tensorboard_root(run_dir)
     (logs / "tensorboard_export.json").write_text(
         json.dumps(manifest, indent=2) + "\n", encoding="utf-8"
     )

@@ -21,6 +21,9 @@
 | `src/get_mpra.py` | TPM → LegNet 18-bin soft-classification fractions (`python -m src.get_mpra`) |
 | `src/splits/main.py` | `@split` dispatcher (`python -m src.splits.main`) |
 | `src/caduceus.py` | `@caduceus` fine-tune (`python -m src.caduceus`) |
+| `src/hydra_pipeline.py` | `/pipeline` Hydra orchestrator |
+| `src/hydra_train.py` | `/train` Hydra entry (LegNet/Caduceus) |
+| `src/tb_logging.py` | Dual SummaryWriter + TensorBoardLogger |
 | `src/metrics_logging.py` | `metrics.md` TorchMetrics helpers |
 | `src/train_viz/` | `@train-viz` figures (`python -m src.train_viz`) |
 | `src/ready_analysis.py` | `@analyze-ready-data` EDA (`python -m src.ready_analysis`) |

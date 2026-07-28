@@ -40,14 +40,14 @@ If any obligatory input is missing → **stop** (missing-data-policy). Do not in
 ```
 /train cycle:
   1. Validate obligatory inputs + folders (train/val/test or SPLIT/FASTA+PREDICT)
-  2. WRITE src/run/<run_id>/{data}_{split}_{train}_{direct|adversarial}.py
-     — thin orchestrator: import src.pipeline.train / src.caduceus / src.legnet /
-       src.pipeline.train_viz / src.train_viz; no parallel trainer
-  3. EXEC that file (or python path/to/script.py)
-  4. REUSE the same script for later runs / GPUs / seeds
+  2. Prefer Hydra: python -m src.hydra_train mode=direct|adversarial train=legnet|caduceus …
+     OR WRITE src/run/<run_id>/{data}_{split}_{train}_{direct|adversarial}.py
+     — thin orchestrator calling src.hydra_train / src.pipeline.train; no parallel trainer
+  3. EXEC Hydra or that file
+  4. REUSE the same Hydra overrides / script for later runs / GPUs / seeds
 ```
 
-**Never** invent a parallel trainer or plotter in-chat. Extend `src/pipeline/train.py`, `src/caduceus.py`, `src/legnet.py`, or `src/train_viz/` instead.
+**Never** invent a parallel trainer or plotter in-chat. Extend `src/pipeline/train.py`, `src/caduceus.py`, `src/legnet.py`, `src/tb_logging.py`, or `src/train_viz/` instead.
 
 Follow project rules: skills-write-and-exec-src, model-train, validation-first, missing-data-policy, reproducibility, artifact-registry.
 
@@ -65,7 +65,10 @@ Examples:
 ## What the run script must do
 
 1. **Train** via `src.pipeline.train.run_train(...)` (dispatches to `src.caduceus` / `src.legnet`).
-2. **TensorBoard** — Always under `outdir/tensorboard/` for any `/train` mode (direct|adversarial, regression|classification, Caduceus|LegNet). Caduceus: live `SummaryWriter` with per-epoch split metrics. LegNet: Lightning `TensorBoardLogger` during fit + jsonl backfill via `src.train_viz.tensorboard_metrics`. `src.pipeline.train.run_train` always finalizes TB + monitor after a successful non-smoke train. Do not invent metrics.
+2. **TensorBoard (both loggers, both models)** — Always under `outdir/tensorboard/`:
+   - `summary/` — `torch.utils.tensorboard.SummaryWriter`
+   - `lightning/` — Lightning `TensorBoardLogger` (or SummaryWriter stand-in if PL import fails)
+   Caduceus and LegNet both write both during train; `run_train` also backfills from jsonl. Do not invent metrics.
 3. **metrics.md** — regression epochs must log the suite (loss, pearson, spearman, mse, rmse, mae, r2; genewise/samplewise when gene axes exist) via Caduceus / TorchMetrics / LegNet LitModel val+train collections. Classification: loss+accuracy (Caduceus).
 4. **Visualization** — `run_train` calls `refresh_train_monitor` (learning curves + split_compare). Also `src.pipeline.train_viz` / `src.train_viz` as needed.
 5. **Zero-shot-validation** — if ZSV is specified / `eval_zsv=True`:
@@ -78,24 +81,16 @@ Examples:
 ## Exact patterns
 
 ```bash
-# Prefer exec of the written run script or Hydra pipeline
+# Preferred: Hydra /train
+python -m src.hydra_train mode=direct train=legnet run_id=run0 epochs=3
+python -m src.hydra_train mode=adversarial train=caduceus run_id=run0 zsv=true
+
+# Or full pipeline (Hydra)
 python -m src.hydra_pipeline mode=run train=legnet zsv=true
 
+# Thin write-and-exec script (imports run_train / hydra_train)
 conda run -n caduceus_env python src/run/<run_id>/<data>_<split>_<train>_direct.py
-
-# Underlying stage (for smoke / debug only — still prefer the run script)
-conda run -n caduceus_env python -m src.pipeline.train \
-  --model caduceus --type regression \
-  --folders <SPLIT> --outdir <outdir> \
-  --epochs 20 --seed 42 \
-  --eval-zsv --zsv-root <panel_outdir>
-
-python -m src.pipeline.zsv_eval --model legnet --outdir <train_out> --split-root <panel>
-
-# Viz
-python -m src.pipeline.train_viz --logs <outdir> --outdir <outdir>/figures
 ```
-
 ## Workflow checklist
 
 ```

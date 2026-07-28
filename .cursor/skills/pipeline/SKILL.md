@@ -56,12 +56,21 @@ watch -n 60 'conda run -n caduceus_env python -m src.train_viz.train_monitor \
   --run-dir run/<run_id>/direct --no-split-compare'
 ```
 
-TensorBoard (after sync / during LegNet fit when `tensorboard` is installed):
+TensorBoard (after sync / during train — **both** SummaryWriter + TensorBoardLogger):
 
 ```bash
 tensorboard --logdir run/<run_id>/direct/tensorboard
+# shows tensorboard/summary/ and tensorboard/lightning/
 # adversarial (if trained):
 tensorboard --logdir run/<run_id>/adversarial/train/tensorboard
+```
+
+Hydra `/train` (single stage) and `/pipeline` both launch LegNet/Caduceus via
+`configs/train/*.yaml` + `src.pipeline.train.run_train` (dual TB finalized there):
+
+```bash
+python -m src.hydra_train mode=direct train=legnet run_id=run0 epochs=3
+python -m src.hydra_pipeline mode=run train=caduceus run_id=run0
 ```
 
 Outputs: `{run}/figures/train_monitor/Figure_*learning_curves*` (+ Altair HTML),
@@ -145,6 +154,8 @@ pipeline:
 | `/train` | Fine-tune + optional ZSV |
 | `/adversarial` | Copy + random split + **fold-class PREDICT** |
 | `src.hydra_pipeline` | This orchestrator |
+| `src.hydra_train` | Hydra `/train` entry (LegNet/Caduceus) |
+| `src.tb_logging` | Dual SummaryWriter + TensorBoardLogger helpers |
 | `src.train_viz.train_monitor` | Sync Lightning→jsonl + learning-curve monitor figs + TB export |
 | `src.train_viz.tensorboard_metrics` | Caduceus-shaped `tensorboard/` from train jsonl |
 | `src.train_viz.split_compare` | train/val/test/ZSV metric bars (cnsplots + Altair) |
