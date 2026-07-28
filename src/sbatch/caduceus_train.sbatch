@@ -26,6 +26,7 @@ torchrun --standalone --nproc_per_node="${SLURM_GPUS_ON_NODE:-4}" \
   --splits-dir "${SPLITS_DIR}" \
   --epochs "${EPOCHS}" \
   --seed "${SEED}" \
-  --batch-size 2 \
-  --max-length 8192 \
+  --batch-size 16 \
+  --max-length 2048 \
+  --amp \
   "${EXTRA[@]}"

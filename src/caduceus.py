@@ -211,16 +211,20 @@ def cleanup() -> None:
 
 
 @torch.no_grad()
-def evaluate_regression(model, loader, device, criterion) -> dict[str, float]:
+def evaluate_regression(
+    model, loader, device, criterion, *, amp: bool = False
+) -> dict[str, float]:
     model.eval()
     preds, targets = [], []
     total_loss, n = 0.0, 0
+    use_amp = amp and device.type == "cuda"
     for batch in loader:
         batch = {k: v.to(device) for k, v in batch.items()}
-        out = model(**batch)
-        logits = out.logits.squeeze(-1)
-        labels = batch["labels"]
-        loss = criterion(logits, labels)
+        with torch.cuda.amp.autocast(enabled=use_amp):
+            out = model(**batch)
+            logits = out.logits.squeeze(-1)
+            labels = batch["labels"]
+            loss = criterion(logits, labels)
         bs = labels.size(0)
         total_loss += float(loss.item()) * bs
         n += bs
@@ -239,17 +243,21 @@ def evaluate_regression(model, loader, device, criterion) -> dict[str, float]:
 
 
 @torch.no_grad()
-def evaluate_classification(model, loader, device) -> dict[str, float]:
+def evaluate_classification(
+    model, loader, device, *, amp: bool = False
+) -> dict[str, float]:
     model.eval()
     total_loss, correct, n = 0.0, 0.0, 0
+    use_amp = amp and device.type == "cuda"
     for batch in loader:
         batch = {k: v.to(device) for k, v in batch.items()}
-        out = model(**batch)
-        bs = batch["labels"].size(0)
-        total_loss += float(out.loss.item()) * bs
-        preds = out.logits.argmax(dim=-1)
-        correct += float((preds == batch["labels"]).float().sum().item())
-        n += bs
+        with torch.cuda.amp.autocast(enabled=use_amp):
+            out = model(**batch)
+            bs = batch["labels"].size(0)
+            total_loss += float(out.loss.item()) * bs
+            preds = out.logits.argmax(dim=-1)
+            correct += float((preds == batch["labels"]).float().sum().item())
+            n += bs
     if n == 0:
         return {"loss": float("nan"), "accuracy": float("nan"), "n": 0}
     return {"loss": total_loss / n, "accuracy": correct / n, "n": int(n)}
@@ -286,12 +294,17 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     p.add_argument("--root", type=Path, default=Path("."))
     p.add_argument("--model-name", type=str, default=DEFAULT_MODEL)
     p.add_argument("--epochs", type=int, default=20)
-    p.add_argument("--batch-size", type=int, default=2)
+    p.add_argument("--batch-size", type=int, default=4)
     p.add_argument("--eval-batch-size", type=int, default=4)
     p.add_argument("--lr", type=float, default=1e-4)
     p.add_argument("--max-length", type=int, default=8192)
     p.add_argument("--seed", type=int, default=42)
     p.add_argument("--num-workers", type=int, default=2)
+    p.add_argument(
+        "--amp",
+        action="store_true",
+        help="CUDA automatic mixed precision (fp16 autocast + GradScaler)",
+    )
     p.add_argument("--max-samples", type=int, default=None, help="Smoke-test cap per fold")
     p.add_argument(
         "--train-eval-max-samples",
@@ -475,6 +488,7 @@ def run(args: argparse.Namespace) -> int:
             "train_eval_max_samples": train_eval_cap,
             "world_size": world,
             "max_length": args.max_length,
+            "amp": bool(args.amp),
             "lr": args.lr,
             "seed": args.seed,
             "max_samples": args.max_samples,
@@ -495,6 +509,8 @@ def run(args: argparse.Namespace) -> int:
     t0 = time.perf_counter()
     global_step = 0
     raw_model = model.module if isinstance(model, DDP) else model
+    use_amp = bool(args.amp) and device.type == "cuda"
+    scaler = torch.cuda.amp.GradScaler(enabled=use_amp)
 
     for epoch_idx in range(start_epoch, args.epochs):
         epoch = epoch_idx + 1
@@ -504,11 +520,17 @@ def run(args: argparse.Namespace) -> int:
         running_loss, seen = 0.0, 0
         for batch in train_loader:
             batch = {k: v.to(device) for k, v in batch.items()}
-            out_m = model(**batch)
-            loss = out_m.loss
             optim.zero_grad(set_to_none=True)
-            loss.backward()
-            optim.step()
+            with torch.cuda.amp.autocast(enabled=use_amp):
+                out_m = model(**batch)
+                loss = out_m.loss
+            if use_amp:
+                scaler.scale(loss).backward()
+                scaler.step(optim)
+                scaler.update()
+            else:
+                loss.backward()
+                optim.step()
             bs = batch["labels"].size(0)
             running_loss += float(loss.item()) * bs
             seen += bs
@@ -527,14 +549,24 @@ def run(args: argparse.Namespace) -> int:
             if task == "regression":
                 assert criterion is not None
                 train_metrics = evaluate_regression(
-                    raw_model, train_eval_loader, device, criterion
+                    raw_model, train_eval_loader, device, criterion, amp=use_amp
                 )
-                val_metrics = evaluate_regression(raw_model, val_loader, device, criterion)
-                test_metrics = evaluate_regression(raw_model, test_loader, device, criterion)
+                val_metrics = evaluate_regression(
+                    raw_model, val_loader, device, criterion, amp=use_amp
+                )
+                test_metrics = evaluate_regression(
+                    raw_model, test_loader, device, criterion, amp=use_amp
+                )
             else:
-                train_metrics = evaluate_classification(raw_model, train_eval_loader, device)
-                val_metrics = evaluate_classification(raw_model, val_loader, device)
-                test_metrics = evaluate_classification(raw_model, test_loader, device)
+                train_metrics = evaluate_classification(
+                    raw_model, train_eval_loader, device, amp=use_amp
+                )
+                val_metrics = evaluate_classification(
+                    raw_model, val_loader, device, amp=use_amp
+                )
+                test_metrics = evaluate_classification(
+                    raw_model, test_loader, device, amp=use_amp
+                )
 
         elapsed = time.perf_counter() - t0
         if rank == 0:
