@@ -20,7 +20,6 @@ credentials*
 .env
 .env.*
 .gitpush
-.codex/
 
 # --- Editor / IDE / tooling caches ---
 # Track project Agent Skills only; ignore Cursor IDE state
