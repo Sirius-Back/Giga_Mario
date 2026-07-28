@@ -4,6 +4,7 @@ AIRI project — anti-data leakage methods for DNA foundation models.
 
 ## Pages
 
+- [[architecture]] — target universal tool data-flow (adapt → parse_data → parse_target → split → train)
 - [[conversion]] — `raw/` → `data_ready/` preprocessing
 - [[split]] — ready panels → train/val/test folds
 - [[Split & train]] — `src/` code path for split → train → zero-shot eval → viz
