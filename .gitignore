@@ -242,6 +242,7 @@ docs/
 .docs/
 output/
 outputs/
+multirun/
 
 # Hugging Face / model caches
 .cache/huggingface/

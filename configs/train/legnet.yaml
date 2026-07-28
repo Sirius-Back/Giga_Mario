@@ -1,0 +1,31 @@
+# @package train
+name: legnet
+module: src.legnet
+# Concrete, reproducible launch (Hydra interpolates from parent cfg)
+direct_cmd: >-
+  python -m src.legnet
+  --data-path ${out_root}/legnet_input/all.tsv
+  --out ${out_root}/direct
+  --epochs ${epochs}
+  --n-devices ${n_devices}
+  --train-batch-size ${batch_size}
+  --valid-batch-size ${batch_size}
+  --num-workers ${num_workers}
+  --seed ${seed}
+  --demo
+adversarial_cmd: >-
+  python -m src.legnet
+  --data-path ${out_root}/adversarial/legnet_input/all.tsv
+  --out ${out_root}/adversarial/train
+  --epochs ${epochs}
+  --n-devices ${n_devices}
+  --train-batch-size ${batch_size}
+  --valid-batch-size ${batch_size}
+  --num-workers ${num_workers}
+  --seed ${seed}
+  --demo
+zsv_cmd: >-
+  python -m src.pipeline.zsv_eval
+  --model legnet
+  --outdir ${out_root}/direct
+  --split-root ${out_root}

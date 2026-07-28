@@ -45,11 +45,12 @@ If obligatory inputs missing → **stop**. Do not invent PREDICT/PARSED or fold 
 /adversarial cycle:
   1. Validate source panel (outdir OR split_csv+PREDICT+PARSED)
   2. WRITE src/run/<run_id>/{data}_{split}_adversarial.py
-     — imports src.pipeline.adversarial + src.pipeline.split_predict + src.pipeline.split
-  3. EXEC that script:
+     — imports adversarial + apply_fold_class_targets + split_predict + split
+  3. EXEC:
        a. run_adversarial → outdir_new
        b. random split-predict → split.csv
-       c. split materialize → SPLIT/ (+ ZSV if fold.csv marks zsv)
+       c. apply_fold_class_targets → PREDICT fold-class 0/1/2
+       d. split materialize → SPLIT/
   4. REUSE the same script later (no agent required for re-run)
 ```
 
@@ -65,13 +66,13 @@ Example: `src/run/exp01/prok_random_adversarial.py`
 
 ## What the run script must do
 
-1. `src.pipeline.adversarial.run_adversarial(...)` → hardlink/copy real `PREDICT`/`PARSED`/`split.csv` into `outdir_new`.
-2. **Random** `/split` via pipeline stages only:
-   - `src.pipeline.split_predict.run_split_predict(..., type="random", …)`
-   - `src.pipeline.split.run_split(...)` (materialize `SPLIT/`; ZSV aside when present)
-3. Do **not** call `@adapt` / parse stages unless the user explicitly locked a full re-parse cycle.
-4. Emit paths consumed by `/train` with `mode=adversarial`.
+1. `src.pipeline.adversarial.run_adversarial(...)` → hardlink/copy real `PREDICT`/`PARSED` into `outdir_new`.
+2. **Random** `split_predict` → new `split.csv` (ZSV preserved from `fold.csv` when present).
+3. **`apply_fold_class_targets(predict_root, split_csv)`** — rewrite non-ZSV `predict_var1` to Locked M2 encodings `{train:0, val:1, test:2}`; **unlink before write** (do not mutate hardlinked source panel). ZSV rows keep continuous targets. Writes `PREDICT/predict_target.json`.
+4. `src.pipeline.split.run_split(...)` materialize `SPLIT/` from the **new** class PREDICT.
+5. Emit paths for `/train` with fold-class / classification semantics.
 
+**Never** train adversarial models on the copied continuous TPM/log2 targets.
 ## Exact patterns
 
 ```bash
@@ -80,6 +81,7 @@ conda run -n caduceus_env python src/run/<run_id>/<data>_<split>_adversarial.py
 # Underlying stages (debug only)
 python -m src.pipeline.adversarial --outdir-new <new> --outdir <src_panel>
 python -m src.pipeline.split_predict --type random --outdir <new> --seed 42 …
+# then apply_fold_class_targets via Python / pipeline Hydra stage
 python -m src.pipeline.split --split-csv <new>/split.csv \
   --parsed <new>/PARSED --predict <new>/PREDICT --outdir <new> …
 ```
@@ -91,8 +93,9 @@ adversarial:
 - [ ] Confirm run_id, data, split=random, outdir_new ≠ source
 - [ ] Confirm source panel complete (split.csv + PREDICT + PARSED)
 - [ ] Write src/run/<run_id>/{data}_{split}_adversarial.py
-- [ ] Exec: adversarial combine → random split-predict → split
-- [ ] Verify outdir_new/{PREDICT,PARSED,split.csv,SPLIT}/
+- [ ] Exec: copy → random split-predict → **apply_fold_class_targets** → split materialize
+- [ ] Verify predict_target.json mode=fold_class; non-ZSV predict_var1 ∈ {0,1,2}
+- [ ] Verify source panel PREDICT unchanged (hardlink-safe)
 - [ ] method-decision + artifact-registry
 ```
 

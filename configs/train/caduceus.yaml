@@ -1,0 +1,24 @@
+# @package train
+name: caduceus
+module: src.caduceus
+direct_cmd: >-
+  python -m src.caduceus
+  --splits-dir ${out_root}/direct/caduceus_input
+  --out ${out_root}/direct
+  --epochs ${epochs}
+  --batch-size ${batch_size}
+  --seed ${seed}
+  --task ${task_type}
+adversarial_cmd: >-
+  python -m src.caduceus
+  --splits-dir ${out_root}/adversarial/train/caduceus_input
+  --out ${out_root}/adversarial/train
+  --epochs ${epochs}
+  --batch-size ${batch_size}
+  --seed ${seed}
+  --task ${adversarial_task_type}
+zsv_cmd: >-
+  python -m src.pipeline.zsv_eval
+  --model caduceus
+  --outdir ${out_root}/direct
+  --split-root ${out_root}

@@ -212,17 +212,34 @@ def run_train(
     n_devices: int = 1,
     num_workers: int = 8,
     legnet_demo: bool = False,
+    zsv_root: Path | None = None,
+    eval_zsv: bool = False,
 ) -> Path:
     """
     Wrapper around Caduceus / LegNet trainers.
 
     ``smoke=True`` validates a real materialized split and emits only structural
     counts. It never records synthetic losses or quality metrics.
+
+    When ``eval_zsv=True``, evaluates the **final** checkpoint on
+    ``{zsv_root}/PARSED|PREDICT/zero-shot-validation`` (required if True).
     """
     model = model.lower()
     type = type.lower()
     folders = Path(folders)
     outdir = ensure_dir(Path(outdir))
+
+    if eval_zsv:
+        if zsv_root is None:
+            raise ValueError("eval_zsv=True requires zsv_root (panel outdir with ZSV trees)")
+        zsv_root = Path(zsv_root)
+        parsed_z = zsv_root / "PARSED" / "zero-shot-validation"
+        pred_z = zsv_root / "PREDICT" / "zero-shot-validation"
+        if not parsed_z.is_dir() or not pred_z.is_dir():
+            raise FileNotFoundError(
+                "ZSV requested but trees missing: "
+                f"need {parsed_z} and {pred_z}"
+            )
 
     if model == "caduceus":
         caduceus_input, counts = adapt_split_for_caduceus(
@@ -257,6 +274,14 @@ def run_train(
                 argv += ["--max-samples", str(max_samples)]
             if caduceus.main(argv) != 0:
                 raise RuntimeError("src.caduceus returned a non-zero status")
+            if eval_zsv:
+                from .zsv_eval import eval_zsv_from_train_outdir
+
+                result = eval_zsv_from_train_outdir(
+                    model=model, outdir=outdir, split_root=zsv_root  # type: ignore[arg-type]
+                )
+                if result is None:
+                    raise RuntimeError("ZSV eval requested but produced no metrics")
             return outdir
 
         from src import legnet
@@ -276,6 +301,14 @@ def run_train(
             argv.append("--demo")
         if legnet.main(argv) != 0:
             raise RuntimeError("src.legnet returned a non-zero status")
+        if eval_zsv:
+            from .zsv_eval import eval_zsv_from_train_outdir
+
+            result = eval_zsv_from_train_outdir(
+                model=model, outdir=outdir, split_root=zsv_root  # type: ignore[arg-type]
+            )
+            if result is None:
+                raise RuntimeError("ZSV eval requested but produced no metrics")
         return outdir
 
     logs = ensure_dir(outdir / "logs")
@@ -292,6 +325,8 @@ def run_train(
             "smoke": True, "strategy": strategy,
             "metrics_interpretation": "structural only; not model-quality metrics",
             "caduceus_input": str(caduceus_input) if model == "caduceus" else None,
+            "eval_zsv": eval_zsv,
+            "zsv_root": str(zsv_root) if zsv_root else None,
         }, indent=2) + "\n",
         encoding="utf-8",
     )
@@ -319,6 +354,17 @@ def main(argv: list[str] | None = None) -> int:
         help="Use human_legnet's single fold-1 test / fold-2 validation run.",
     )
     p.add_argument(
+        "--eval-zsv",
+        action="store_true",
+        help="After train, evaluate final model on panel ZSV trees",
+    )
+    p.add_argument(
+        "--zsv-root",
+        type=Path,
+        default=None,
+        help="Panel outdir containing PARSED/PREDICT/zero-shot-validation",
+    )
+    p.add_argument(
         "--tiny-outdir", type=Path, default=None,
         help="Materialize a deterministic 50/10/10 real SPLIT subset and exit",
     )
@@ -340,6 +386,7 @@ def main(argv: list[str] | None = None) -> int:
         max_samples=args.max_samples, batch_size=args.batch_size,
         max_length=args.max_length, seed=args.seed, n_devices=args.n_devices,
         num_workers=args.num_workers, legnet_demo=args.legnet_demo,
+        zsv_root=args.zsv_root, eval_zsv=args.eval_zsv,
     ))
     return 0
 

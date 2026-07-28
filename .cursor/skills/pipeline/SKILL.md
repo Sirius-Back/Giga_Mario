@@ -1,117 +1,90 @@
 ---
 name: pipeline
 description: >-
-  End-to-end orchestrator around src/run/<run_id>/pipeline.py (dry|run):
-  validate inputs, /split, /train, optional /adversarial + adversarial /train.
-  Re-runnable without agent. Use for /pipeline.
+  End-to-end Hydra orchestrator (configs/pipeline.yaml): validate inputs,
+  /split, /train, optional /adversarial (fold-class PREDICT) + adversarial
+  /train, optional ZSV final-model eval. Re-runnable without agent. Use for /pipeline.
 disable-model-invocation: true
 ---
 
 # Pipeline (`/pipeline`)
 
-Wrapper around `src/run/<run_id>/pipeline.py` so the full graph can be re-run **without an agent**. Orchestrates `/split`, `/train`, and optional `/adversarial` by writing/executing thin run scripts that import `./src` modules.
+**Preferred entry:** Hydra — `python -m src.hydra_pipeline` with
+[`configs/pipeline.yaml`](../../../configs/pipeline.yaml) +
+[`configs/train/*.yaml`](../../../configs/train/) (concrete model launch commands).
+
+Legacy thin wrappers under `src/run/<run_id>/pipeline.py` may still exist for a
+named run, but **new runs must use Hydra** so parameters and model CLIs are
+reproducible (not ad-hoc `model_dir` on the orchestrator).
 
 ## Variants
 
 | Variant | Behavior |
 |---------|----------|
-| **`run`** | Execute stages end-to-end; monitor long jobs (`@monitor` / SLURM as needed) |
-| **`dry`** | Generate code, code-review it, smoketest if needed; **do not** execute full training |
+| **`mode=run`** | Execute stages end-to-end; monitor long jobs |
+| **`mode=dry`** | Stage split / fold-class rewrite / smoke train logs; **no** full GPU train |
 
-Select via argparse on the orchestrator: `--mode dry|run` (see stub).
+```bash
+# dry
+python -m src.hydra_pipeline mode=dry run_id=run0
 
-## Obligatory inputs
+# run (example)
+CUDA_VISIBLE_DEVICES=0,1,2,3 python -m src.hydra_pipeline mode=run \
+  run_id=run0 epochs=3 n_devices=4 train=legnet
+```
 
-| Input | Meaning |
-|-------|---------|
-| **`run_id`** | Directory `src/run/<run_id>/` (orchestrator + child scripts live here) |
+Resolved configs + command templates are written to
+`{out_root}/hydra_resolved_config.yaml` and `hydra_resolved_commands.yaml`.
+
+## Obligatory inputs (Hydra keys)
+
+| Key | Meaning |
+|-----|---------|
+| **`run_id`** | Experiment id → `panel_root` / `out_root` default `run/${run_id}` |
 | **`mode`** | `dry` \| `run` |
-| **`data`** | Data panel id |
+| **`data`** | Data panel id (metadata) |
 | **`split`** | Split strategy (`random` for adversarial path) |
-| **`train`** | Model: `caduceus` \| `legnet` \| `human_legnet` |
-| **`type`** | `regression` \| `classification` |
-| **Panel / SPLIT inputs** | Whatever `/split` needs: e.g. `PARSED`, `PREDICT`, `id_csv` / fold / strat as specified; or legacy `raw/`+`ready/` if using `src.splits` path — **must be explicit** |
-| **`outdir` / `out-root`** | Artifact root for this pipeline run |
+| **`train`** | Config group: `legnet` \| `caduceus` (`configs/train/`) |
+| **`task_type`** | Direct train: `regression` \| `classification` |
+| **`panel_root`** | Prepared panel (`ID.csv`, `PARSED`, `PREDICT`, optional `fold.csv`) |
+| **`out_root`** | Artifact root |
 
-When adversarial is requested, also obligatory:
+When **`adversarial=true`** (default in pipeline.yaml):
 
-| Input | Meaning |
-|-------|---------|
-| **`adversarial=true`** (or equivalent flag) | Enable adversarial branch |
-| **`outdir_new`** / adversarial target | Distinct panel root for adversarial combine |
-| **Adversarial train model** | Model for second `/train` (often same as direct; must be specified) |
+| Key | Meaning |
+|-----|---------|
+| **`adversarial_task_type`** | Usually `classification` (fold-class 0/1/2) |
+| Fold-class rewrite | **Required:** `apply_fold_class_targets` after adversarial `split_predict` |
 
-Optional: **ZSV** / holdout genomes for final-model zero-shot-validation on `/train` stages; **`epochs`**, **`seed`** (default 42).
-
-If required features are unspecified → **stop** and list gaps. Do not guess.
-
-## Code-first contract (LOCKED)
-
-```
-/pipeline:
-  1. Check inputs / all necessary features specified
-  2. WRITE/UPDATE src/run/<run_id>/pipeline.py (and child run scripts as needed)
-  3. dry → generate + code-review (+ smoketest); no full train
-     run → EXEC: python src/run/<run_id>/pipeline.py --mode run …
-  4. Later: exec the same pipeline.py without subagents
-```
-
-Prefer calling `src.pipeline.*` modules. Child scripts follow `/train` and `/adversarial` naming:
-
-- `{data}_{split}_{train}_direct.py`
-- `{data}_{split}_adversarial.py`
-- `{data}_{split}_{train}_adversarial.py`
+Optional: **`zsv=true`** → after each real train, eval final model on
+`{out_root|adversarial}/PARSED|PREDICT/zero-shot-validation` via
+`src.pipeline.zsv_eval` (fail if trees missing).
 
 ## Stage order
 
 ```
-1. validate inputs
-2. /split          → split-predict + split (or src.splits when Locked)
-3. /train          → direct model on SPLIT
-4. /adversarial    → if specified (combine + random split)
-5. /train          → adversarial model on adversarial SPLIT (if specified)
+1. validate panel
+2. /split (direct) → train (task_type) → optional ZSV eval
+3. /adversarial copy
+4. random split_predict
+5. apply_fold_class_targets  # train/val/test → 0/1/2; ZSV keeps continuous
+6. materialize SPLIT
+7. /train adversarial (adversarial_task_type) → optional ZSV eval
 ```
 
-Visualization + TensorBoard are owned by `/train` (reuse Caduceus TB + `src.train_viz`). ZSV final-model eval when specified on train stages.
-
-## dry vs run
-
-**dry**
-
-- Emit/update `pipeline.py` + child scripts
-- Run `@code-review` (or equivalent) on generated code
-- Optional structural smoke (`src.pipeline.train --smoke`, tiny subset) — **not** full epochs
-- Exit without launching full training
-
-**run**
-
-- Exec `pipeline.py --mode run`
-- Monitor long GPU jobs; register artifacts
-- Fail early on missing inputs
-
-## Exact command
-
-```bash
-# dry (generate / review path — skill may stop before this if only writing)
-python src/run/<run_id>/pipeline.py --mode dry --help
-
-# run
-conda run -n caduceus_env python src/run/<run_id>/pipeline.py --mode run \
-  --data <data> --split random --train caduceus --type regression \
-  --out-root output/<run_id> --seed 42
-```
-
-Template stub (importable): [`src/run/run_id/pipeline.py`](../../../src/run/run_id/pipeline.py). Copy/adapt into a concrete `src/run/<run_id>/` for each experiment.
+Model CLIs are declared in `configs/train/{legnet,caduceus}.yaml`
+(`direct_cmd`, `adversarial_cmd`, `zsv_cmd`).
 
 ## Workflow checklist
 
 ```
 pipeline:
-- [ ] Confirm run_id, mode (dry|run), data, split, train, type, out-root
-- [ ] Confirm panel inputs; adversarial flags/paths if requested; ZSV if requested
-- [ ] Write/update src/run/<run_id>/pipeline.py (+ child scripts)
-- [ ] dry: code-review (+ optional smoke); do NOT full-train
-- [ ] run: exec pipeline.py --mode run; verify SPLIT + runs + figures
+- [ ] Confirm Hydra overrides (run_id, mode, train, epochs, gpus, adversarial, zsv)
+- [ ] Confirm panel_root complete
+- [ ] dry: python -m src.hydra_pipeline mode=dry …
+- [ ] run: python -m src.hydra_pipeline mode=run …
+- [ ] Verify fold-class sidecar adversarial/PREDICT/predict_target.json when adversarial
+- [ ] Verify logs/zero_shot_metrics.json when zsv=true
 - [ ] method-decision + artifact-registry
 ```
 
@@ -120,14 +93,14 @@ pipeline:
 | Skill / module | Role |
 |----------------|------|
 | `/split` | Fold assignment + materialize |
-| `/train` | Direct + adversarial fine-tune + viz + TB + optional ZSV |
-| `/adversarial` | Adversarial panel + random re-split |
-| `src.pipeline.*` | Stage implementations |
-| `src/run/<run_id>/pipeline.py` | This orchestrator |
+| `/train` | Fine-tune + optional ZSV |
+| `/adversarial` | Copy + random split + **fold-class PREDICT** |
+| `src.hydra_pipeline` | This orchestrator |
+| `configs/` | Reproducible parameters + model commands |
 
 ## Rules
 
-- Reuse `./src` only — orchestrator = imports + `run_*` calls
-- `dry` never runs full training
-- `run` is re-executable without agents
+- Prefer Hydra over hand-rolled argparse orchestrators for new runs
+- Reuse `./src` only
+- `dry` never runs full training (`smoke=True` path)
 - Register outputs in `docs/artifact-registry.md`

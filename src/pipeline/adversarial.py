@@ -1,16 +1,32 @@
-"""Build an adversarial panel with the same structural contracts."""
+"""Build an adversarial panel with the same structural contracts.
+
+After a new random split, call ``apply_fold_class_targets`` so PREDICT becomes
+M2-style fold-class encodings (train/val/test → 0/1/2) before materialize/train.
+"""
 from __future__ import annotations
 
 import argparse
+import json
 import os
 import shutil
+from datetime import datetime, timezone
 from pathlib import Path
+from typing import Any
 
-from .common import ensure_dir, read_csv
+from src.splits.random import M1_FOLD_TO_CLASS
+
+from .common import ensure_dir, read_csv, sanitize_filename, write_csv
+from .generate_fold import is_zsv_fold
 
 
 def _link_or_copy(source: Path, destination: Path) -> None:
     destination.parent.mkdir(parents=True, exist_ok=True)
+    source = Path(source)
+    destination = Path(destination)
+    if destination.exists() or destination.is_symlink():
+        if destination.resolve() == source.resolve():
+            return
+        destination.unlink()
     try:
         os.link(source, destination)
     except OSError:
@@ -63,6 +79,120 @@ def _validate_panel(
     )
 
 
+def _break_write(path: Path, text: str) -> None:
+    """Write ``text`` without mutating hardlinked source inodes."""
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    if path.exists() or path.is_symlink():
+        path.unlink()
+    path.write_text(text, encoding="utf-8")
+
+
+def apply_fold_class_targets(
+    *,
+    predict_root: Path,
+    split_csv: Path,
+    class_map: dict[str, int] | None = None,
+) -> dict[str, Any]:
+    """Rewrite non-ZSV PREDICT targets to fold-class encodings.
+
+    Uses the Locked M1/M2 map ``train→0, val→1, test→2`` (``M1_FOLD_TO_CLASS``).
+    ZSV rows keep their existing continuous ``predict_var1``. Destination files
+    are unlinked before write so hardlinked source panels stay intact.
+    """
+    predict_root = Path(predict_root)
+    if (predict_root / "PREDICT").is_dir():
+        predict_root = predict_root / "PREDICT"
+    if not predict_root.is_dir():
+        raise FileNotFoundError(f"PREDICT root missing: {predict_root}")
+
+    mapping = dict(class_map or M1_FOLD_TO_CLASS)
+    split_rows = read_csv(Path(split_csv))
+    if not split_rows:
+        raise ValueError(f"split.csv is empty: {split_csv}")
+
+    id_to_class: dict[str, int] = {}
+    zsv_ids: set[str] = set()
+    for row in split_rows:
+        rid = row["ID"].strip()
+        tt = row["train_test"].strip().lower()
+        if tt in {"validation", "val"}:
+            tt = "val"
+        if is_zsv_fold(tt) or is_zsv_fold(row.get("fold", "")):
+            zsv_ids.add(rid)
+            continue
+        if tt not in mapping:
+            raise ValueError(
+                f"Cannot map train_test={tt!r} for ID={rid!r}; "
+                f"expected one of {sorted(mapping)}"
+            )
+        id_to_class[rid] = int(mapping[tt])
+
+    predict_csv = predict_root / "predict.csv"
+    if not predict_csv.is_file():
+        raise FileNotFoundError(f"Missing {predict_csv}")
+    rows = read_csv(predict_csv)
+    if not rows or "id" not in rows[0] or "predict_var1" not in rows[0]:
+        raise ValueError(f"{predict_csv} must have id|predict_var1")
+
+    mapped = 0
+    kept_zsv = 0
+    missing: list[str] = []
+    for row in rows:
+        rid = row["id"].strip()
+        if rid in zsv_ids:
+            kept_zsv += 1
+            continue
+        if rid not in id_to_class:
+            missing.append(rid)
+            continue
+        new_val = str(id_to_class[rid])
+        row["predict_var1"] = new_val
+        mapped += 1
+        # Prefer flat PREDICT/{id}.ext; fall back to mapped sample subdirs.
+        ext = predict_root / f"{sanitize_filename(rid)}.ext"
+        if not ext.is_file() and "sample_id" in row and row["sample_id"].strip():
+            ext = (
+                predict_root
+                / sanitize_filename(row["sample_id"].strip())
+                / f"{sanitize_filename(rid)}.ext"
+            )
+        if not ext.is_file():
+            # Composite mapped ids already sanitized in stem form.
+            candidates = list(predict_root.rglob(f"{sanitize_filename(rid)}.ext"))
+            if len(candidates) == 1:
+                ext = candidates[0]
+            else:
+                raise FileNotFoundError(f"PREDICT .ext missing for {rid}")
+        _break_write(ext, new_val + "\n")
+
+    if missing:
+        raise ValueError(
+            "split.csv IDs missing from class assignment (non-ZSV): "
+            f"{missing[:5]}{'…' if len(missing) > 5 else ''}"
+        )
+
+    fields = list(rows[0].keys())
+    if predict_csv.exists():
+        predict_csv.unlink()
+    write_csv(predict_csv, rows, fields)
+
+    meta = {
+        "generated_at": datetime.now(timezone.utc).isoformat(),
+        "mode": "fold_class",
+        "class_map": mapping,
+        "n_mapped": mapped,
+        "n_zsv_kept_continuous": kept_zsv,
+        "predict_root": str(predict_root),
+        "split_csv": str(split_csv),
+    }
+    meta_path = predict_root / "predict_target.json"
+    if meta_path.exists() or meta_path.is_symlink():
+        meta_path.unlink()
+    meta_path.write_text(json.dumps(meta, indent=2) + "\n", encoding="utf-8")
+    return meta
+
+
 def run_adversarial(
     *,
     outdir_new: Path,
@@ -73,10 +203,13 @@ def run_adversarial(
     intersect_allow: bool = False,
 ) -> Path:
     """
-    Copy panel structure into `outdir_new` so parse_target can be re-run.
+    Copy panel structure into `outdir_new` for adversarial re-split + class targets.
 
     Accepts either a prior `outdir` containing PREDICT/PARSED/split.csv,
     or explicit split_csv + parsed_target + parsed_data.
+
+    Does **not** rewrite PREDICT by itself — call ``apply_fold_class_targets``
+    after the adversarial ``split_predict`` produces the new ``split.csv``.
     """
     if outdir is not None:
         src = Path(outdir)

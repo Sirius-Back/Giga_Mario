@@ -68,28 +68,32 @@ Examples:
 2. **TensorBoard** — Caduceus already writes `outdir/tensorboard/` via `SummaryWriter`. Do not bypass; reuse that path. LegNet: wire TB only through existing trainer hooks if present; do not invent metrics.
 3. **metrics.md** — regression epochs must log the full suite (via Caduceus / `src.metrics_logging`).
 4. **Visualization** — call `src.pipeline.train_viz.run_train_viz` and/or `src.train_viz` on the run `logs/` (publication figures under `outdir/figures/` or similar).
-5. **Zero-shot-validation** — if ZSV is specified and trees exist from split:
-   - Evaluate the **final model** on ZSV (same metric keys as validation when regression).
-   - Log results to `logs/` + TensorBoard under a `zero-shot-validation/…` tag when TB is active.
+5. **Zero-shot-validation** — if ZSV is specified / `eval_zsv=True`:
+   - Require `{zsv_root}/PARSED/zero-shot-validation` and `…/PREDICT/zero-shot-validation`.
+   - Evaluate the **final model** via `src.pipeline.zsv_eval` (LegNet checkpoint + continuous ZSV labels; Caduceus when helper exists).
+   - Write `logs/zero_shot_metrics.json` + append `metrics.log` / `train_metrics.jsonl`.
    - If ZSV requested but trees missing → **stop** (do not skip silently).
-   - If ZSV not specified → omit ZSV eval (do not invent holdouts).
+   - If ZSV not specified → omit ZSV eval.
 
 ## Exact patterns
 
 ```bash
-# Prefer exec of the written run script
+# Prefer exec of the written run script or Hydra pipeline
+python -m src.hydra_pipeline mode=run train=legnet zsv=true
+
 conda run -n caduceus_env python src/run/<run_id>/<data>_<split>_<train>_direct.py
 
 # Underlying stage (for smoke / debug only — still prefer the run script)
 conda run -n caduceus_env python -m src.pipeline.train \
   --model caduceus --type regression \
   --folders <SPLIT> --outdir <outdir> \
-  --epochs 20 --seed 42
+  --epochs 20 --seed 42 \
+  --eval-zsv --zsv-root <panel_outdir>
+
+python -m src.pipeline.zsv_eval --model legnet --outdir <train_out> --split-root <panel>
 
 # Viz
 python -m src.pipeline.train_viz --logs <outdir> --outdir <outdir>/figures
-# or
-python -m src.train_viz --models <outdir> -o <outdir>/figures
 ```
 
 ## Workflow checklist

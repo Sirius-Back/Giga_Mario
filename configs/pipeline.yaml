@@ -1,0 +1,32 @@
+# @package _global_
+# Reproducible pipeline defaults (Hydra). Override via CLI: model=caduceus epochs=5 …
+
+defaults:
+  - train: legnet
+  - _self_
+
+run_id: run0
+mode: dry  # dry | run
+data: prokaryotes
+split: random
+# Direct-task target type (continuous TPM / log2)
+task_type: regression
+# After adversarial fold-class rewrite
+adversarial: true
+adversarial_task_type: classification
+seed: 42
+epochs: 3
+n_devices: 4
+batch_size: 1024
+num_workers: 8
+ratios: [1, 1, 3]
+panel_root: run/${run_id}
+out_root: run/${run_id}
+zsv: true
+conda_env: legnet
+
+hydra:
+  run:
+    dir: run/${run_id}/hydra/${now:%Y-%m-%d_%H-%M-%S}
+  job:
+    chdir: false
