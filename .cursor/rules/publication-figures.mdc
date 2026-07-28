@@ -1,0 +1,47 @@
+---
+description: Produce publication-ready figures — vector output, consistent styling, colorblind-safe palettes
+alwaysApply: true
+---
+
+# Publication Figures
+
+All figures must be publication-ready by default, suitable for high-impact journals without additional editing.
+
+## Output Format
+
+- Prefer **vector graphics** (PDF, SVG) over raster when possible
+- Use high-resolution raster (≥300 DPI) only when vector output is impractical (e.g., heatmaps, microscopy)
+
+## Visual Consistency
+
+Across the project, maintain consistent:
+
+- **Typography** — font family, sizes for axis labels, ticks, legends, and panel titles
+- **Panel alignment and spacing** — shared axes, equal gutters, consistent aspect ratios
+- **Axis formatting** — units, tick density, zero baselines where meaningful
+- **Color palettes** — reuse project-defined schemes; do not introduce one-off colors per figure
+
+## Accessibility
+
+- Use **colorblind-safe palettes** (e.g., Okabe–Ito, viridis) unless another palette is explicitly requested
+- Keep figures **interpretable in grayscale** when feasible — use line styles, markers, or hatching in addition to color
+
+## Examples
+
+```
+❌ BAD
+plt.savefig("plot.png", dpi=72)
+colors = ["#FF0000", "#00FF00", "#0000FF"]  # ad hoc, not colorblind-safe
+
+✅ GOOD
+plt.savefig("figures/abundance_by_group.pdf", bbox_inches="tight")
+# project palette from config/plot_style.yaml; Okabe–Ito colors + distinct markers
+```
+
+```
+❌ BAD
+Four panels with mismatched font sizes, unlabeled axes, and tight overlapping legends.
+
+✅ GOOD
+Shared x-axis labels, aligned panel tops, 8–10 pt axis text, units on every axis, legend outside plot area.
+```

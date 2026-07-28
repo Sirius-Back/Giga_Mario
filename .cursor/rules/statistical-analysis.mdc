@@ -1,0 +1,48 @@
+---
+description: Follow accepted statistical best practices — valid tests, assumptions, effect sizes, and no p-hacking
+alwaysApply: true
+---
+
+# Statistical Analysis
+
+All statistical analyses must follow accepted best practices.
+
+## Test Selection and Assumptions
+
+- Choose tests **appropriate for the experimental design** and **data distribution**
+- Consider assumptions: **independence**, **normality**, **variance homogeneity**, and **sample size**
+- If assumptions cannot be verified, **state this explicitly** and recommend valid alternatives (e.g., non-parametric tests, mixed models, permutation tests)
+
+## Multiple Testing and Reporting
+
+- Apply **multiple testing correction** whenever multiple hypotheses are tested (e.g., Benjamini–Hochberg FDR, Bonferroni)
+- Report **effect sizes** and **confidence intervals** whenever appropriate — not p-values alone
+- Never perform **p-hacking** (optional stopping, cherry-picking tests, post-hoc subgroup fishing without correction)
+- Never recommend statistically invalid procedures
+
+## Examples
+
+```
+❌ BAD
+Ran t-tests on all 500 features; reported only uncorrected p < 0.05 hits.
+
+✅ GOOD
+Used Wilcoxon signed-rank tests (non-normal, paired design). Applied BH-FDR across 500 tests.
+Reported median difference, 95% CI, and adjusted q-values.
+```
+
+```
+❌ BAD
+Data look skewed but we'll use ANOVA anyway.
+
+✅ GOOD
+Shapiro–Wilk rejected normality (p < 0.01); Kruskal–Wallis with Dunn post-hoc (BH-adjusted) is recommended instead.
+```
+
+```
+❌ BAD
+Try several cutoffs until one gives p < 0.05.
+
+✅ GOOD
+Pre-specify the primary endpoint and analysis plan. If exploring thresholds, treat as hypothesis-generating and validate independently.
+```

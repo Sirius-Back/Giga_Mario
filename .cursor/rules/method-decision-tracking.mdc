@@ -1,0 +1,56 @@
+---
+description: Log methodological choices and rationale in method-decision.md when options exist
+alwaysApply: true
+---
+
+# Method Decision Tracking
+
+Whenever multiple reasonable methods, algorithms, software tools, statistical tests, parameters, or workflow designs could be chosen, **explicitly record the selected choice and rationale** in `method-decision.md` — unless the user has already fixed the choice.
+
+## Scope
+
+Applies to decisions about:
+
+- Software selection, preprocessing, statistical analyses, ML algorithms
+- Visualization approaches, workflow architecture, quality control
+- Filtering thresholds, reference databases, and other methodological choices
+
+## Entry Format
+
+Append or update entries in `method-decision.md` (do **not** recreate the file). Each entry must include:
+
+| Field | Content |
+|-------|---------|
+| **Decision** | What was chosen |
+| **Alternatives considered** | Other viable options |
+| **Justification** | Why this choice fits the data, design, or constraints |
+| **Expected impact** | Effect on results, runtime, or interpretability |
+| **Confidence** | High / Medium / Low |
+| **Status** | Locked / Tentative / Open |
+
+## Status Rules
+
+- User **explicitly specifies** a method → record as **Locked**
+- Assistant selects among options → record with appropriate **Confidence**; default **Tentative** unless strongly justified
+- Unresolved trade-offs → **Open** until decided
+
+## Example Entry
+
+```markdown
+### Differential abundance test (2026-07-15)
+
+- **Decision:** Wilcoxon rank-sum with Benjamini–Hochberg FDR
+- **Alternatives considered:** DESeq2 (count-based), ALDEx2 (compositional)
+- **Justification:** Normalized relative abundances; non-normal distribution; no paired design
+- **Expected impact:** Conservative rank-based tests; may miss small fold-changes DESeq2 would detect
+- **Confidence:** Medium
+- **Status:** Tentative
+```
+
+```
+❌ BAD
+Chose Kraken2 over MetaPhlAn with no record — rationale lost.
+
+✅ GOOD
+Append entry to method-decision.md; set Locked if user said "use Kraken2 with PlusPF".
+```

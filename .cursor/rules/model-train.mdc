@@ -1,0 +1,76 @@
+---
+description: >-
+  Model training workflow (e.g. Caduceus): initialize training, epoch-wise
+  benchmark logging per metrics.md, default 20 epochs, save checkpoint, monitor
+  10 min. Apply when the user asks to train, fine-tune, or run training for a model.
+alwaysApply: false
+---
+
+# Model Train
+
+When the user asks to train or fine-tune a model (e.g. Caduceus), follow this workflow.
+
+## Initialize
+
+1. Validate inputs (data splits, config, checkpoints, env) before launch — fail early
+2. Initialize training (seed, logging, checkpoint dir, device as required)
+3. Record the chosen trainer/config in `method-decision.md` when multiple options exist
+4. For Caduceus / expression tasks, confirm `metrics.md` + `torchmetrics` are available
+
+## Epoch logging (required)
+
+Log **every epoch** on the selected benchmarks. Default splits:
+
+| Split | Default |
+|-------|---------|
+| `train` | yes |
+| `test` | yes |
+| `validation` | yes |
+| `zero-shot-validation` | only if the user highlights / explicitly requests it |
+
+Do not skip epochs.
+
+### Expression / continuous TPM (Caduceus project default)
+
+Use project-root **`metrics.md`** as the sole metric contract. Each selected split, each epoch:
+
+```text
+loss, pearson, spearman, mse, rmse, mae, r2,
+genewise_pearson_median, samplewise_pearson_median
+```
+
+- Implement via TorchMetrics `MetricCollection` (see `metrics.md` and
+  `.cursor/skills/caduceus/scripts/metrics_logging.py`).
+- Compute **once per epoch** over the full split — do **not** average batch-wise correlations.
+- Prefer `validation` loss (or Locked alternate) for early stopping / checkpoints.
+- Persist `metrics.json` + human `metrics.log` under the run’s `epoch{N}/` dir.
+
+### Classification-only benchmarks (GB / NT)
+
+Log task metrics (e.g. accuracy) as required by that benchmark. If the same run also has a
+regression/TPM head, still emit the full `metrics.md` suite for that head.
+
+## Defaults
+
+- **Epochs:** 20 unless the user specifies otherwise
+- **Checkpoint:** save the trained model for later inference (path under the project; register in `artifact-registry.md`)
+- **Monitor:** after submit/start, invoke the **monitor** skill for **10 minutes** (explicit override of monitor’s default duration)
+
+## Examples
+
+```
+❌ BAD
+Train Caduceus on TPM; log only loss/accuracy; average batch Pearson.
+
+✅ GOOD
+Initialize Caduceus TPM fine-tune → each epoch log metrics.md suite on
+train/validation/test via TorchMetrics → checkpoint on val_loss → @monitor 10 min.
+```
+
+```
+❌ BAD
+User highlighted zero-shot-validation → still omit that split from epoch logs.
+
+✅ GOOD
+Also evaluate and log zero-shot-validation every epoch when requested (same metrics.md keys).
+```

@@ -1,0 +1,40 @@
+---
+description: Register every generated report, graph, manifest, or checkpoint in artifact-registry.md
+alwaysApply: true
+---
+
+# Artifact Registry
+
+Instead of creating standalone reports in arbitrary locations, **every generated artifact must be registered** in `artifact-registry.md`.
+
+Prefer path: `docs/artifact-registry.md` when `docs/` exists; otherwise project root `artifact-registry.md`.
+
+## Required entry fields
+
+| Field | Content |
+|-------|---------|
+| **artifact** | Path to the generated file |
+| **producer skill** | Skill that wrote it (e.g. `verify-todo`) |
+| **generation date** | YYYY-MM-DD (ISO) |
+| **purpose** | Why the artifact exists |
+| **status** | `draft` / `final` / `superseded` / `failed` / `active` |
+| **downstream consumers** | Skills, tasks, or humans that use it |
+
+## Scope
+
+Register every generated:
+
+- report
+- graph (including `.mmd`)
+- manifest
+- checkpoint
+- sync summary, audit, Methods/Results drafts, figure plans, acquisition logs when produced as deliverables
+
+Living files that skills update (`todo.md`, `method-decision.md`) must have a registry entry created on first write and **updated** (date + status) on subsequent material changes.
+
+## Rules
+
+- Append or update entries — do not delete history; mark old paths `superseded` when replaced
+- Register immediately after writing the artifact
+- Unregistered deliverables are incomplete work
+- Consumers should discover artifacts via the registry when possible

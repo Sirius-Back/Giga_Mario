@@ -1,0 +1,33 @@
+---
+description: Agents write production-ready reusable code under ./src; novel edits require pytest
+alwaysApply: true
+---
+
+# Agent production code
+
+Applies to **all** agents (including those driven by skills).
+
+## Required behavior
+
+1. **Production-ready code** — Deliver real, runnable modules under `./src` (and `./src/run/` when the skill contract says so). Do not leave logic only in chat replies or one-off scratchpads.
+2. **Reuse first** — Prefer calling existing `./src` functions/modules over rewriting the same capability. Extend with thin wrappers or flags rather than parallel implementations.
+3. **Novel code in existing functions → pytest** — If you change or extend previously written functions/modules under `./src`, run the project pytest for the affected area (at least `python -m pytest tests/…` for touched packages) before treating the task as done.
+4. **Do not break `./src/run`** — Changes to shared library functions must preserve entry points and scripts under `./src/run/` (and legacy `./src/runs/` until archived). Update callers in the same change set when signatures change.
+
+## Examples
+
+```
+❌ BAD
+Paste a new split algorithm only in the assistant message; never land it in src/.
+
+✅ GOOD
+Add or call src/pipeline/split_predict.py; write src/run/run_id/…py that imports it; run pytest.
+```
+
+```
+❌ BAD
+Edit src/pipeline/common.py helpers and skip tests.
+
+✅ GOOD
+Edit helpers, update callers under src/run/, run pytest tests/pipeline/.
+```

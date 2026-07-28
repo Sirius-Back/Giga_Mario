@@ -23,15 +23,17 @@ credentials*
 .codex/
 
 # --- Editor / IDE / tooling caches ---
-# Track project Agent Skills only; ignore Cursor IDE state
-# (nested .cursor/.gitignore un-ignores plugins/projects/rules — re-block here)
+# Track project Agent Skills + rules; ignore Cursor IDE state
+# (nested .cursor/.gitignore un-ignores plugins/projects/rules — re-block IDE dirs here)
 .cursor/*
+!.cursor/.gitignore
 !.cursor/skills/
 !.cursor/skills/**
+!.cursor/rules/
+!.cursor/rules/**
 .cursor/plugins/
 .cursor/projects/
 .cursor/skills-cursor/
-.cursor/rules/
 .cursor/hooks/
 .cursor/debug-logs/
 .cursor/ide_state.json

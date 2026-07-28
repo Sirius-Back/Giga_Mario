@@ -1,0 +1,47 @@
+---
+description: Ensure every computational analysis is reproducible with deterministic, documented workflows
+alwaysApply: true
+---
+
+# Reproducibility
+
+Every computational analysis must be reproducible. Code should produce identical results when rerun under the same conditions.
+
+## Workflow Requirements
+
+- Prefer **deterministic workflows**; set **fixed random seeds** wherever randomness is used
+- Record **explicit software versions** (tools, libraries, runtimes)
+- Manage dependencies with **Conda environments** or **containers** — avoid implicit environment assumptions
+- Use **relative paths** rooted in the project, not machine-specific absolute paths
+- Keep settings in **reproducible configuration files** (YAML, TOML, etc.) rather than hard-coded values
+- Preserve **intermediate results** when they are costly to regenerate or needed for audit trails
+
+## Avoid Hidden Dependencies
+
+- Do not rely on undocumented environment variables, module load order, or system-wide installs
+- State assumptions about input data, reference files, and compute resources explicitly
+- Document the exact command or entry point needed to rerun an analysis end to end
+
+## Examples
+
+```
+❌ BAD
+df = pd.read_csv("/home/alice/data/samples.csv")
+np.random.shuffle(ids)  # no seed
+
+✅ GOOD
+df = pd.read_csv("data/samples.csv")
+rng = np.random.default_rng(42)
+rng.shuffle(ids)
+# environment.yml pins pandas==2.2.0, numpy==1.26.4
+```
+
+```
+❌ BAD
+Run megahit on the FASTQ files.  # no versions, no commands saved
+
+✅ GOOD
+# config/megahit.yaml + conda env bstngs-megahit-1.2.9
+megahit -1 data/sample_R1.fq.gz -2 data/sample_R2.fq.gz \
+  -o results/megahit/sample --min-contig-len 500
+```

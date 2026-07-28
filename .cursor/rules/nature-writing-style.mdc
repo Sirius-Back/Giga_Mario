@@ -1,0 +1,48 @@
+---
+description: Write in Nature journal style — concise, precise, evidence-driven scientific prose
+alwaysApply: true
+---
+
+# Nature Writing Style
+
+Unless the user explicitly requests another journal or writing style, all scientific writing should follow the style commonly expected in Nature journals.
+
+## Tone and Precision
+
+- Be **concise and precise**; avoid unnecessary repetition and filler
+- Stay **evidence-driven** — every claim should trace to data or cited literature
+- Avoid **exaggerated claims** and **unsupported interpretations**
+- Prefer active voice and short sentences where clarity improves
+
+## Results vs Discussion
+
+**Results** — describe **observations**, not speculation:
+
+- Report what was measured, compared, or detected
+- Use past tense for completed experiments
+- Do not interpret mechanisms or significance in Results
+
+**Discussion** — clearly separate:
+
+1. **Findings** — what the data show
+2. **Biological interpretation** — cautious, hypothesis-grounded reading of findings
+3. **Limitations** — design constraints, assumption violations, generalizability
+4. **Future directions** — testable next steps, not open-ended speculation
+
+## Examples
+
+```
+❌ BAD (Results)
+"Our groundbreaking analysis proves that species X drives the entire microbiome shift."
+
+✅ GOOD (Results)
+"Species X abundance increased 3.2-fold in treated samples compared with controls (median, IQR; Wilcoxon, q = 0.008)."
+```
+
+```
+❌ BAD (Discussion)
+"This clearly confirms our hypothesis and resolves a long-standing debate."
+
+✅ GOOD (Discussion)
+"These findings are consistent with a role for species X in community restructuring, though the observational design cannot establish causality. Longitudinal sampling and perturbation experiments are needed to test this mechanism."
+```

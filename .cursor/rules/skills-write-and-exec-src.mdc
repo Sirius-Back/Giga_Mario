@@ -1,0 +1,35 @@
+---
+description: Skills must reuse ./src; edits preserve logic; no parallel reimplementation; do not break src/run
+alwaysApply: true
+---
+
+# Skilled agents and `./src`
+
+Supersedes and tightens the prior “skills write-and-exec” contract for Cursor skills under `.cursor/skills/`.
+
+## Required behavior
+
+1. **Reuse `./src`** — Every skill must execute project code under `./src` (`python -m src…`, `python src/run/…`, documented wrappers). Do not reimplement windowing, ID maps, split, train, or metrics in-chat.
+2. **Edit then same logic** — If a skill must edit `./src`, keep the **same general function** and observable contracts so legacy callers and prior runs do not break. Prefer additive flags with legacy defaults.
+3. **No parallel “new” functions** — Do **not** invent a generally new function when an existing module already covers the same role (e.g. do not add a second ID mapper beside `id_rule`). Extend or call the existing API.
+4. **Protect `./src/run`** — Any change to shared library code must not break scripts under `./src/run/` (re-runnable agent outputs). Update those runners in the same task when needed.
+5. **Novel edits → pytest** — Changing previously written `./src` functions requires running relevant pytest before COMPLETED.
+6. **Record decisions** — Intentional behavior changes go in `method-decision.md`.
+
+## Examples
+
+```
+❌ BAD
+Skill re-derives gene windows in prose and writes a one-off script outside src/.
+
+✅ GOOD
+Skill writes src/run/preprocess_<data>.py that calls src.pipeline.adapt / parse_data / parse_target, then execs it.
+```
+
+```
+❌ BAD
+Add src/pipeline/id_map2.py because id_rule “is awkward.”
+
+✅ GOOD
+Call src.pipeline.id_rule.run_id_rule; only extend id_rule if the contract is insufficient.
+```

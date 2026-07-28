@@ -1,0 +1,59 @@
+---
+description: Validate inputs and dependencies before running workflows — fail early with clear errors
+alwaysApply: true
+---
+
+# Validation First
+
+Before executing or generating any workflow, verify that all required inputs are available and valid.
+
+## Pre-flight Checks
+
+Confirm before processing:
+
+- **Inputs and files** — paths exist, are readable, and non-empty
+- **Metadata and parameters** — required columns/keys present, values in expected ranges
+- **Software dependencies** — tools installed, versions compatible
+- **Reference databases** — indices and FASTA paths present and match tool expectations
+- **Expected outputs** — output directories writable; naming conventions consistent
+
+## Code Requirements
+
+Generated code must:
+
+- **Validate inputs before processing** and **fail early** with informative error messages
+- Avoid **silent failures**, **ignored exceptions**, and **unchecked assumptions**
+- Include **sanity checks** where possible:
+  - matrix/table dimensions
+  - sample counts and ID overlap between files
+  - missing values and empty files
+  - malformed tables (headers, dtypes, delimiters)
+  - incompatible software versions
+
+## Examples
+
+```
+❌ BAD
+df = pd.read_csv(metadata_path)
+merged = abundances.join(df)  # KeyError swallowed; writes empty output
+
+✅ GOOD
+if not metadata_path.exists():
+    raise FileNotFoundError(f"Metadata missing: {metadata_path}")
+df = pd.read_csv(metadata_path)
+required = {"sample_id", "group"}
+if missing := required - set(df.columns):
+    raise ValueError(f"Metadata missing columns: {missing}")
+if df["sample_id"].duplicated().any():
+    raise ValueError("Duplicate sample_id values in metadata")
+```
+
+```
+❌ BAD
+subprocess.run(["megahit", ...])  # no version or index check
+
+✅ GOOD
+check_tool_version("megahit", min_version="1.2.9")
+assert_path_exists("refs/host.idx", "Host subtraction index")
+assert_non_empty(fastq_r1, "Input FASTQ")
+```

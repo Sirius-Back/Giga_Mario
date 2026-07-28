@@ -1,0 +1,51 @@
+---
+description: Stop safely when required data is missing — search public sources only if asked, never assume
+alwaysApply: true
+---
+
+# Missing Data Policy
+
+When required information, metadata, files, parameters, or external resources are missing, do not proceed by guessing.
+
+## Search Public Sources Only When Requested
+
+1. Determine whether the user **explicitly requested** searching public sources
+2. **If yes** — attempt retrieval from reliable public resources (official docs, repositories, databases, published supplements)
+3. **If no** — do not search externally; report the gap and ask the user
+
+## When Information Still Cannot Be Obtained
+
+**Stop the requested workflow immediately.** Do not make assumptions or substitute plausible defaults.
+
+Report clearly:
+
+1. **What is missing** — specific files, parameters, metadata fields, or resources
+2. **What sources were searched** — if a public search was requested and attempted
+3. **Why execution cannot continue safely** — how the missing item blocks a valid result
+4. **What input is required from the user** — exact files, values, or decisions needed to proceed
+
+## Examples
+
+```
+❌ BAD
+Sample metadata file not found → assume all samples are "control" and continue.
+
+✅ GOOD
+Cannot join abundance table to metadata: `data/sample_metadata.tsv` is missing.
+Stopping before differential analysis. Please provide the metadata file with columns: sample_id, group.
+```
+
+```
+❌ BAD
+User did not ask to search online → silently invent a reference genome path.
+
+✅ GOOD
+Reference FASTA path is not specified in config or the workspace.
+I have not searched public sources (not requested). Please provide the reference path or ask me to retrieve it from [source].
+```
+
+```
+✅ GOOD (user requested public search)
+Searched NCBI SRA and project README for accession SRX12345 — no matching run found.
+Cannot download reads without a valid accession. Please confirm the accession or upload FASTQ files.
+```

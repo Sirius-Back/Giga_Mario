@@ -1,0 +1,26 @@
+---
+description: Restrict TODO/task execution status to the canonical eight values only
+alwaysApply: true
+---
+
+# Task Status Vocabulary
+
+Every skill that tracks **task** or **TODO** execution state must use **only** these statuses:
+
+| Status | Meaning |
+|--------|---------|
+| **TODO** | Not started; not yet ready to run |
+| **READY** | Dependencies satisfied; eligible for execution |
+| **RUNNING** | Currently executing |
+| **BLOCKED** | Cannot proceed (missing deps, inputs, or external blocker) |
+| **FAILED** | Execution failed; not automatically recoverable in-place |
+| **RECOVERABLE** | Failed or inconsistent, but repair/retry is expected |
+| **COMPLETED** | Done criteria met |
+| **SKIPPED** | Out of scope, obsolete, or intentionally not run |
+
+## Rules
+
+- Do **not** introduce additional execution states (no `pending`, `in_progress`, `cancelled`, etc.).
+- Map legacy labels when syncing older todos: `pending`→`TODO`, `in_progress`→`RUNNING`, `completed`→`COMPLETED`, `blocked`→`BLOCKED`, `cancelled`→`SKIPPED`.
+- Method-decision statuses (`Locked` / `Tentative` / `Open`) are **not** task execution states — leave unchanged.
+- Artifact registry `status` values (`draft` / `final` / …) are **not** task execution states — leave unchanged.
