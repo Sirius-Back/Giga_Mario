@@ -20,6 +20,7 @@ credentials*
 .env
 .env.*
 .gitpush
+.codex/
 
 # --- Editor / IDE / tooling caches ---
 # Track project Agent Skills only; ignore Cursor IDE state
@@ -85,6 +86,8 @@ wandb/
 mlruns/
 lightning_logs/
 tensorboard/
+.pytest_cache/
+clean/
 /runs/
 !src/runs/
 !src/runs/**
@@ -94,6 +97,12 @@ figures/
 figure/
 adapt/
 monitoring-report.md
+
+# Architecture contract panel roots (when written at repo root)
+/MARKED/
+/PARSED/
+/PREDICT/
+/SPLIT/
 
 # Materialized panels / splits / expression dumps (not strategy docs)
 data_splits/
@@ -244,3 +253,12 @@ dist/
 build/
 
 .sudo_as_admin_successful
+
+# --- Exceptions: track tiny pipeline pytest fixtures ---
+# Broad omics globs (*.fna/*.gtf/*.fai) and ready_*/ would otherwise drop them.
+!tests/fixtures/ready_v2_mock/
+!tests/fixtures/ready_v2_mock/**
+!tests/fixtures/mini_raw/**/*.fna
+!tests/fixtures/mini_raw/**/*.gtf
+!tests/fixtures/mini_raw/**/*.fai
+!tests/fixtures/mini_raw/**/*.fa

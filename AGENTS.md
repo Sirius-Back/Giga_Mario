@@ -18,6 +18,7 @@
 | `src/legnet_preprocess.py` | `@legnet-adapt` entry (promoters → 230 bp TSV) |
 | `src/legnet.py` | `@legnet` train (`python -m src.legnet`) |
 | `src/legnet_demo_metrics.py` | LegNet post-hoc test metrics summary |
+| `src/get_mpra.py` | TPM → LegNet 18-bin soft-classification fractions (`python -m src.get_mpra`) |
 | `src/splits/main.py` | `@split` dispatcher (`python -m src.splits.main`) |
 | `src/caduceus.py` | `@caduceus` fine-tune (`python -m src.caduceus`) |
 | `src/metrics_logging.py` | `metrics.md` TorchMetrics helpers |

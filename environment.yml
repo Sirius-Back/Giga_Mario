@@ -9,3 +9,5 @@ dependencies:
   - pip
   - pip:
       - -e .
+      - pytest>=8
+      - pyfaidx>=0.8

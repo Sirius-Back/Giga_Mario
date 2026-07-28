@@ -1,0 +1,2 @@
+Genome|Gene|Neighbour|Chr|Side|Original_start|Original_end|Trimmed_start|Trimmed_end|Neighbour_start|Neighbour_end|Cut_from
+GCF_TEST000001.1|GENEA|GENEB|chr1|downstream|40|160|50|150|120|220|160

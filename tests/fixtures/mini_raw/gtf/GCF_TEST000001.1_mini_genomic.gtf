@@ -1,0 +1,10 @@
+#!genome-build mini
+chr1	mini	gene	50	150	.	+	.	gene_id "g1"; gene "GENEA";
+chr1	mini	transcript	50	150	.	+	.	gene_id "g1"; transcript_id "t1"; gene "GENEA";
+chr1	mini	CDS	60	140	.	+	0	gene_id "g1"; transcript_id "t1"; gene "GENEA";
+chr1	mini	gene	120	220	.	+	.	gene_id "g2"; gene "GENEB";
+chr1	mini	transcript	120	220	.	+	.	gene_id "g2"; transcript_id "t2"; gene "GENEB";
+chr1	mini	CDS	130	210	.	+	0	gene_id "g2"; transcript_id "t2"; gene "GENEB";
+chr2	mini	gene	10	80	.	-	.	gene_id "g3"; gene "GENEC";
+chr2	mini	transcript	10	80	.	-	.	gene_id "g3"; transcript_id "t3"; gene "GENEC";
+chr2	mini	CDS	20	70	.	-	0	gene_id "g3"; transcript_id "t3"; gene "GENEC";

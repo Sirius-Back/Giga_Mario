@@ -1,9 +1,8 @@
 ---
 name: adapt
 description: >-
-  Mandatory stage between raw genomic data and Caduceus: CDS±10kb DNA windows
-  with neighbour trim, large-gene crop, matched non-coding, continuous TPM;
-  write data_ready/ Caduceus-ready dataset via src/preprocessing.py. Never splits folds.
+  Universal adapt stage: GTF+FNA (+ ID.csv) → MARKED/*.fa + intersect.csv via
+  src/pipeline/adapt.py. Write-and-exec only. Legacy Caduceus data_ready prep is @adapt-legacy.
 disable-model-invocation: true
 ---
 
@@ -11,112 +10,82 @@ disable-model-invocation: true
 
 ## Goal
 
-`adapt` prepares Caduceus-ready DNA windows + continuous TPM from raw FNA/GTF/TPM.
+Mark genomic intervals from GTF + FNA into model-agnostic **MARKED** FASTA and **intersect.csv**.
 
 ```
-raw/{fna,gtf,tpm}  ──►  src/preprocessing.py  ──►  data_ready/
-                                                      ├── ready.fna / ready.csv
-                                                      ├── non_coding.csv, neighbours.csv, large_genes.csv
-                                                      └── caduceus_ready/all/{sequences/*.txt, labels.tsv}
+GTF/ + FNA/ + ID.csv  ──►  src/pipeline/adapt.py  ──►  outdir/
+                                                      ├── MARKED/{id}.fa
+                                                      └── intersect.csv
 ```
 
-`@split` owns folds. This skill MUST NOT perform train/validation/test splitting.
+Does **not** join TPM (that is `parse_target` / `@prepare-target`). Does **not** assign folds (`split-predict`).
+
+Legacy Caduceus `data_ready/` builder: **`@adapt-legacy`** → `src/preprocessing.py`.
 
 --------------------------------------------------
 GENERAL PRINCIPLES
 --------------------------------------------------
 
-Reproducible, deterministic (seed 42), restartable, idempotent, scientific, fully documented.
-
-Never silently guess. Follow: validation-first, missing-data-policy, reproducibility, scientific-integrity, method-decision-tracking, artifact-registry, slurm-execution-policy, task-status.
+Reproducible, deterministic, validation-first. Skills **write-and-exec** `./src` — do not reimplement marking in-chat. Do not change proven `src/preprocessing.py` behavior from this skill.
 
 --------------------------------------------------
-STAGE 1 — REPOSITORY AUDIT
+INPUTS
 --------------------------------------------------
 
-Expect:
-
-```
-raw/fna/*.fna(.gz)
-raw/gtf/*.gtf(.gz)
-raw/tpm/*.csv
-raw/random_borzoi_expr_file_mappings.csv
-```
-
-Pair by GCF accession. Skip genomes missing a local TPM (do not invent). Abort if no complete bundles.
-
---------------------------------------------------
-STAGE 2 — CADUCEUS FORMAT
---------------------------------------------------
-
-See [docs/caduceus_format.md](../../docs/caduceus_format.md). Continuous TPM → `caduceus_ready/{fold}/sequences/*.txt` + `labels.tsv`.
-
---------------------------------------------------
-STAGE 3 — WINDOW STRATEGY (LOCKED 2026-07-27)
---------------------------------------------------
-
-| Rule | Value |
-|------|-------|
-| Anchor | CDS span (min–max CDS from GTF) |
-| Flank | ±**10 000** bp |
-| Neighbours | If other CDS enter the window → trim at neighbour CDS corner; log `neighbours.csv` |
-| Large genes | CDS length > **130 000** → 10 kb before strand-aware start + **120 kb** of CDS; log `large_genes.csv` |
-| Orientation | Forward genomic sequence only |
-| Non-coding | Intergenic complement; match gene **length** & **GC** (greedy 1:1); TPM **0** |
-| Properties | Gene + non-coding Length/GC → `non_coding.csv` |
-
-No multi-window genes. No RC by default.
+| Input | Role |
+|-------|------|
+| `--gtf` | Folder of `.gtf` |
+| `--fna` | Folder of `.fna` / `.fa` |
+| `--id-csv` | `ID.csv` from `id_gen` |
+| `--task` | `gene` (default) or `promotor` |
+| `--size` | Flank bp (`gene`) or window width (`promotor`) |
+| `--outdir` | Output root |
 
 --------------------------------------------------
 OUTPUT
 --------------------------------------------------
 
-Directory: **`data_ready/`** (see [wiki/conversion.md](../../wiki/conversion.md))
-
-- `ready.fna` — `>Genome|GeneOrID|Chr|Position_start|Position_end`
-- `ready.csv` — `Genome|GeneOrID|Chr|Position_start|Position_end|TPM`
-- `non_coding.csv`, `neighbours.csv`, `large_genes.csv`
-- `caduceus_ready/`, `statistics.json`, `metadata.json`
+- `MARKED/{id}.fa` — header `>|genome|chr|pos1|pos2|gene_nameORnon_coding_ID|raw_target_ID|ID`
+- `intersect.csv` — `ID1|ID2|intersection_size` (legacy analogue: `neighbours.csv`)
 
 --------------------------------------------------
 EXACT COMMAND
 --------------------------------------------------
 
-**Do not reimplement windowing in-chat** — run the script.
-
 ```bash
-conda run -n caduceus_env python src/preprocessing.py \
-  --raw raw \
-  --out data_ready \
-  --flank 10000 \
-  --seed 42
+python -m src.pipeline.adapt \
+  --gtf path/to/gtf \
+  --fna path/to/fna \
+  --id-csv path/to/ID.csv \
+  --outdir path/to/out \
+  --task gene \
+  --size 10000
 ```
 
-| Flag | Default | Notes |
-|------|---------|-------|
-| `--raw` | `raw` | Root with `fna/`, `gtf/`, `tpm/` |
-| `--out` | `data_ready` | Output directory |
-| `--flank` | `10000` | Upstream/downstream flank (LOCKED) |
-| `--seed` | `42` | Deterministic non-coding placement |
-| `--genomes` | all | Optional GCF filter |
-| `--max-genes` | none | Smoke-test cap |
-| `--tpm-merged-only` | off | Use only `tpm/{assembly}_merged.csv` (prokaryotes) |
-
-Heavy panels → `sbatch src/sbatch/preprocess_raw.sbatch` (16 CPUs, 128G, 48h; runs `src/preprocessing.py`).
-
-## Workflow checklist
+--------------------------------------------------
+WORKFLOW
+--------------------------------------------------
 
 ```
 adapt:
-- [ ] Stage 1: Audit raw/{fna,gtf,tpm} + mapping; skip incomplete; abort if empty
-- [ ] Stage 2: Confirm docs/caduceus_format.md + wiki/conversion.md
-- [ ] Stage 3: CDS±10kb; neighbour trim; large-gene crop; non-coding match
-- [ ] Write data_ready/* + caduceus_ready/*
-- [ ] Update method-decision.md + artifact-registry + wiki/conversion.md
+- [ ] Confirm ID.csv exists (run id_gen if needed)
+- [ ] Exec src/pipeline/adapt.py
+- [ ] Verify MARKED/*.fa headers + intersect.csv columns
+- [ ] Register artifacts; do not invent sequences
 ```
 
-## Additional resources
+## Coordination
 
-- [wiki/conversion.md](../../wiki/conversion.md) — algo + I/O structures
-- [README.md](README.md)
-- Project entry: [`src/preprocessing.py`](../../src/preprocessing.py)
+| Skill / module | Role |
+|----------------|------|
+| `src/pipeline/id_gen.py` | Build ID.csv |
+| `src/pipeline/parse_fasta.py` | MARKED → PARSED |
+| `src/pipeline/parse_target.py` | TARGET → PREDICT |
+| `@adapt-legacy` | Old Caduceus `data_ready/` path |
+| `wiki/architecture.md` | Contracts |
+
+## Tests
+
+```bash
+python -m pytest tests/pipeline/test_pipeline_io.py -q
+```

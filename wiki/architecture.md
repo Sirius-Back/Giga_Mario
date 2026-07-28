@@ -106,7 +106,7 @@ Skills are **write-and-exec** wrappers: they may author or update scripts under 
 
 **`predict.csv` columns:** `id | predict_var1 | …`
 
-**Skill:** planned `@prepare` executes this function (write-and-exec of the `src` module).
+**Skill:** `@prepare-target` executes this function (`src/pipeline/parse_target.py`). Todo-orchestrator remains `@prepare`.
 
 ### `adapt`
 
@@ -118,11 +118,11 @@ Skills are **write-and-exec** wrappers: they may author or update scripts under 
 
 **Skills:** new `@adapt` executes this function; current Caduceus prep skill moves to `@adapt-legacy` (keeps proven `src/preprocessing.py` behavior).
 
-### `parse_fasta` (= **parse_data** on the diagram)
+### `parse_data`
 
 | | |
 |--|--|
-| **Input** | marked FASTA; `outdir` |
+| **Input** | marked FASTA (file or `MARKED/` dir); `to_type` (`caduceus`\|`legnet`); `outdir` |
 | **Output** | `./PARSED/id.ext` |
 
 ### `split-predict`
@@ -179,8 +179,8 @@ Skills are **write-and-exec** wrappers: they may author or update scripts under 
 | Diagram edge | Function | Planned skill |
 |--------------|----------|---------------|
 | `E1` → MARKED + intersect | `adapt` | `@adapt` (new); legacy → `@adapt-legacy` |
-| MARKED → PARSED | `parse_fasta` / parse_data | (thin skill or CLI) |
-| raw TARGET → PREDICT | `parse_target` | `@prepare` (new meaning) |
+| MARKED → PARSED | `parse_data` | (thin skill or CLI) |
+| raw TARGET → PREDICT | `parse_target` | `@prepare-target` |
 | `E2` → `split.csv` | `split-predict` | part of `@split` (updated) |
 | `E3` → SPLIT trees | `split` | part of `@split` (updated) |
 | SPLIT → logs | `train` | `@caduceus` / `@legnet` / unified `@train` |

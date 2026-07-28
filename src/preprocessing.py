@@ -25,13 +25,13 @@ from typing import Any, Iterable, Iterator, TextIO
 
 try:
     from pyfaidx import Fasta
-except ImportError as exc:  # pragma: no cover
-    raise SystemExit("pyfaidx required: conda install -n caduceus_env pyfaidx") from exc
+except ImportError:  # pragma: no cover
+    Fasta = None  # type: ignore[assignment,misc]
 
 try:
     import numpy as np
-except ImportError as exc:  # pragma: no cover
-    raise SystemExit("numpy required") from exc
+except ImportError:  # pragma: no cover
+    np = None  # type: ignore[assignment]
 
 # ---------------------------------------------------------------------------
 # Locked defaults
@@ -588,6 +588,10 @@ def process_genome(
     seed: int = SEED,
 ) -> tuple[list[Window], list[dict[str, Any]], list[dict[str, Any]], dict[str, Any]]:
     assert bundle.tpm is not None
+    if Fasta is None:  # pragma: no cover - environment-dependent dependency
+        raise SystemExit("pyfaidx required: conda install -n caduceus_env pyfaidx")
+    if np is None:  # pragma: no cover - environment-dependent dependency
+        raise SystemExit("numpy required")
     tpm_map = load_tpm_row(bundle.tpm)
     fasta = Fasta(str(bundle.fasta), as_raw=True, sequence_always_upper=True)
 
