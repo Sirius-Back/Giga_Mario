@@ -207,9 +207,9 @@ def render_parse_md(checks: dict[str, Any]) -> str:
     lines = [
         "# Preprocess report (`parse.md`)",
         "",
-        f"- **Generated (UTC):** {checks.get('generated_at', '')}",
-        f"- **Outdir:** `{checks.get('outdir', '')}`",
-        f"- **Overall OK:** {checks.get('ok', False)}",
+        f"- Generated (UTC): {checks.get('generated_at', '')}",
+        f"- Outdir: `{checks.get('outdir', '')}`",
+        f"- Overall OK: {checks.get('ok', False)}",
         "",
         "## Checks",
         "",

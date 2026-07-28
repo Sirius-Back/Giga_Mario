@@ -4,4 +4,5 @@
 - [[architecture]]
 - [[conversion]]
 - [[split]]
+- [[split-generate]]
 - [[Split & train]]

@@ -15,6 +15,7 @@ from src.pipeline.common import (
     parse_marked_header,
     read_csv,
 )
+from tests.pipeline.conftest import resolve_pipeline_prok
 from src.pipeline import (
     id_gen,
     id_rule,
@@ -111,7 +112,8 @@ def test_id_rule_maps_columns(id_csv):
 def _real_prok_id_csv() -> Path:
     """Return the real prokaryote ID table, regenerating it only when absent."""
     root = Path(__file__).resolve().parents[2]
-    id_csv = root / "output" / "pipeline_prok" / "id_gen" / "ID.csv"
+    panel = resolve_pipeline_prok()
+    id_csv = (panel / "id_gen" / "ID.csv") if panel else root / "output" / "pipeline_prok" / "id_gen" / "ID.csv"
     if not id_csv.is_file():
         id_gen.run_id_gen(
             root / "prokaryotes" / "gtf",
@@ -429,7 +431,8 @@ def test_parse_data_model_ready_formats(tmp_path, to_type):
 def test_parse_data_real_marked_subset(tmp_path):
     """parse_data on actual 200 bp MARKED files (caduceus + legnet)."""
     root = Path(__file__).resolve().parents[2]
-    marked = root / "output" / "pipeline_prok" / "adapt_gene_pm100" / "MARKED"
+    panel = resolve_pipeline_prok() or (root / "output" / "pipeline_prok")
+    marked = panel / "adapt_gene_pm100" / "MARKED"
     files = sorted(marked.glob("*.fa"))[:3]
     assert len(files) == 3
 
@@ -555,7 +558,8 @@ def test_train_tiny_split_links_real_prokaryote_artifacts(tmp_path):
     import os
 
     root = Path(__file__).resolve().parents[2]
-    source = root / "output" / "pipeline_prok" / "split_caduceus" / "SPLIT"
+    panel = resolve_pipeline_prok() or (root / "output" / "pipeline_prok")
+    source = panel / "split_caduceus" / "SPLIT"
     tiny = train.materialize_tiny_split(
         source, outdir=tmp_path / "tiny", counts={"train": 2, "val": 1, "test": 1}
     )

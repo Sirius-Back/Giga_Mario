@@ -1,1 +1,1 @@
-"""Agent-written runnable entrypoints."""
+"""Per-run orchestrators under src/run/<run_id>/ (thin imports over src.pipeline.*)."""

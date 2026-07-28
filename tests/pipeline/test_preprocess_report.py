@@ -47,25 +47,27 @@ def test_write_parse_md_mini_panel(tmp_path: Path) -> None:
         ["id", "predict_var1"],
     )
 
+    checks = collect_preprocess_checks(outdir=tmp_path, id_csv=id_csv)
+    assert checks["ok"] is True, checks
     out = write_parse_md(tmp_path, id_csv=id_csv)
     text = out.read_text(encoding="utf-8")
     assert out.name == "parse.md"
-    assert "Overall OK: True" in text
+    assert f"Overall OK: {checks['ok']}" in text
     assert "id_csv" in text
-    checks = collect_preprocess_checks(outdir=tmp_path, id_csv=id_csv)
-    assert checks["ok"] is True
 
 
 def test_write_parse_md_real_pipeline_prok_if_present() -> None:
-    root = Path(__file__).resolve().parents[1] / "output" / "pipeline_prok"
-    if not root.is_dir():
+    project = Path(__file__).resolve().parents[1]
+    candidates = [
+        project / "output" / "pipeline_prok",
+        project / "archive" / "results" / "output" / "pipeline_prok",
+    ]
+    root = next((p for p in candidates if p.is_dir()), None)
+    if root is None:
         return
-    # Prefer archived or live panel layout
     id_csv = root / "id_gen" / "ID.csv"
     if not id_csv.is_file():
         return
-    # Build a thin view dir with symlinks/copies of stage roots for the checker
-    # collect_preprocess_checks already searches common subdir names.
     checks = collect_preprocess_checks(outdir=root, id_csv=id_csv)
     assert checks["id_csv"]["ok"] is True
     assert checks["id_csv"]["n_rows"] > 1000

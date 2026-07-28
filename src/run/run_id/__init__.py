@@ -1,1 +1,1 @@
-"""Per-run_id wrappers (split/train/adversarial/pipeline)."""
+"""Template run_id package — copy to a concrete run directory."""

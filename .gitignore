@@ -264,3 +264,6 @@ build/
 !tests/fixtures/mini_raw/**/*.gtf
 !tests/fixtures/mini_raw/**/*.fai
 !tests/fixtures/mini_raw/**/*.fa
+
+# --- Archived run outputs (keep tree; ignore bulky results) ---
+archive/results/

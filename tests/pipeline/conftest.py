@@ -10,6 +10,17 @@ MINI_RAW = ROOT / "tests" / "fixtures" / "mini_raw"
 READY_V2_MOCK = ROOT / "tests" / "fixtures" / "ready_v2_mock"
 
 
+def resolve_pipeline_prok() -> Path | None:
+    """Live or archived prokaryote pipeline panel root."""
+    for path in (
+        ROOT / "output" / "pipeline_prok",
+        ROOT / "archive" / "results" / "output" / "pipeline_prok",
+    ):
+        if path.is_dir():
+            return path
+    return None
+
+
 @pytest.fixture
 def mini_raw() -> Path:
     assert (MINI_RAW / "gtf").is_dir()

@@ -15,7 +15,10 @@ from src.pipeline.split_predict import run_split_predict
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
-PROKARYOTE_IDS = PROJECT_ROOT / "output/pipeline_prok/id_gen/ID.csv"
+from tests.pipeline.conftest import resolve_pipeline_prok
+
+_PROK = resolve_pipeline_prok()
+PROKARYOTE_IDS = (_PROK / "id_gen" / "ID.csv") if _PROK else PROJECT_ROOT / "output/pipeline_prok/id_gen/ID.csv"
 
 
 def test_generate_fold_from_prepare_rules(tmp_path: Path) -> None:
@@ -302,7 +305,7 @@ def test_random_split_predict_real_prokaryote_ids_format_and_counts(tmp_path: Pa
 
 def test_split_materialize_real_prokaryote_artifacts(tmp_path: Path) -> None:
     """Materialize the complete Caduceus panel from actual pipeline outputs."""
-    root = PROJECT_ROOT / "output/pipeline_prok"
+    root = resolve_pipeline_prok() or PROJECT_ROOT / "output/pipeline_prok"
     split_root = run_split(
         root / "split_predict_random/split.csv",
         root / "parse_target_merged",
