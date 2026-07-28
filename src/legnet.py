@@ -24,6 +24,7 @@ from __future__ import annotations
 import argparse
 import csv
 import json
+import os
 import shutil
 import subprocess
 import sys
@@ -177,6 +178,7 @@ def run(
     vendor: Path,
     epochs: int,
     device: int,
+    n_devices: int,
     seed: int,
     demo: bool,
     use_shift: bool,
@@ -209,6 +211,7 @@ def run(
         "vendor": str(vendor),
         "epochs": epochs,
         "device": device,
+        "n_devices": n_devices,
         "seed": seed,
         "demo": demo,
         "use_shift": use_shift,
@@ -224,8 +227,7 @@ def run(
         json.dumps(run_config, indent=2) + "\n", encoding="utf-8"
     )
 
-    cmd = [
-        sys.executable,
+    cmd_core = [
         str(core),
         "--model_dir",
         str(out_dir),
@@ -245,17 +247,34 @@ def run(
         str(num_workers),
     ]
     if demo:
-        cmd.append("--demo")
+        cmd_core.append("--demo")
     if use_shift:
-        cmd.append("--use_shift")
+        cmd_core.append("--use_shift")
     if reverse_augment:
-        cmd.append("--reverse_augment")
+        cmd_core.append("--reverse_augment")
     if use_reverse_channel:
-        cmd.append("--use_reverse_channel")
+        cmd_core.append("--use_reverse_channel")
+
+    env = os.environ.copy()
+    env["LEGNET_N_DEVICES"] = str(max(1, n_devices))
+    if n_devices > 1:
+        cmd = [
+            sys.executable,
+            "-m",
+            "torch.distributed.run",
+            "--standalone",
+            f"--nproc_per_node={n_devices}",
+            *cmd_core,
+        ]
+    else:
+        cmd = [sys.executable, *cmd_core]
 
     t0 = time.time()
-    print(f"Launching: {' '.join(cmd)}", flush=True)
-    proc = subprocess.run(cmd, cwd=str(vendor), check=False)
+    print(
+        f"Launching (n_devices={n_devices}): {' '.join(cmd)}",
+        flush=True,
+    )
+    proc = subprocess.run(cmd, cwd=str(vendor), check=False, env=env)
     elapsed = time.time() - t0
     train_time = {
         "elapsed_sec": elapsed,
@@ -308,7 +327,13 @@ def main(argv: list[str] | None = None) -> int:
     )
     ap.add_argument("--vendor", type=Path, default=DEFAULT_VENDOR)
     ap.add_argument("--epochs", type=int, default=20)
-    ap.add_argument("--device", type=int, default=0)
+    ap.add_argument("--device", type=int, default=0, help="Primary GPU index (single-GPU mode)")
+    ap.add_argument(
+        "--n-devices",
+        type=int,
+        default=1,
+        help="Number of GPUs (Lightning ddp_spawn when >1; sets LEGNET_N_DEVICES)",
+    )
     ap.add_argument("--seed", type=int, default=777)
     ap.add_argument("--demo", action="store_true", help="Single CV split (test=1,val=2)")
     ap.add_argument("--use-shift", action="store_true")
@@ -329,6 +354,7 @@ def main(argv: list[str] | None = None) -> int:
         vendor=args.vendor,
         epochs=args.epochs,
         device=args.device,
+        n_devices=args.n_devices,
         seed=args.seed,
         demo=args.demo,
         use_shift=args.use_shift,

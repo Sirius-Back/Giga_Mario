@@ -79,7 +79,8 @@ conda run -n legnet python -m src.legnet \
 | `--data-path` | required | `legnet_ready` TSV |
 | `--out` | `runs/legnet/<stem>/` | logs + ckpts |
 | `--epochs` | 20 | per `model-train.mdc` |
-| `--device` | 0 | GPU index |
+| `--device` | 0 | Primary GPU (single-GPU mode) |
+| `--n-devices` | 1 | GPUs via Lightning `ddp_spawn` when >1 |
 | `--seed` | 777 | human_legnet default |
 | `--demo` | off | one split only (test=1, val=2) |
 | `--use-shift` / `--reverse-augment` | off | match paper demo |
