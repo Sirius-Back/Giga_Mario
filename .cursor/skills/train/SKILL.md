@@ -65,9 +65,9 @@ Examples:
 ## What the run script must do
 
 1. **Train** via `src.pipeline.train.run_train(...)` (dispatches to `src.caduceus` / `src.legnet`).
-2. **TensorBoard** — Caduceus already writes `outdir/tensorboard/` via `SummaryWriter`. Do not bypass; reuse that path. LegNet: wire TB only through existing trainer hooks if present; do not invent metrics.
-3. **metrics.md** — regression epochs must log the full suite (via Caduceus / `src.metrics_logging`).
-4. **Visualization** — call `src.pipeline.train_viz.run_train_viz` and/or `src.train_viz` on the run `logs/` (publication figures under `outdir/figures/` or similar).
+2. **TensorBoard** — Always under `outdir/tensorboard/` for any `/train` mode (direct|adversarial, regression|classification, Caduceus|LegNet). Caduceus: live `SummaryWriter` with per-epoch split metrics. LegNet: Lightning `TensorBoardLogger` during fit + jsonl backfill via `src.train_viz.tensorboard_metrics`. `src.pipeline.train.run_train` always finalizes TB + monitor after a successful non-smoke train. Do not invent metrics.
+3. **metrics.md** — regression epochs must log the suite (loss, pearson, spearman, mse, rmse, mae, r2; genewise/samplewise when gene axes exist) via Caduceus / TorchMetrics / LegNet LitModel val+train collections. Classification: loss+accuracy (Caduceus).
+4. **Visualization** — `run_train` calls `refresh_train_monitor` (learning curves + split_compare). Also `src.pipeline.train_viz` / `src.train_viz` as needed.
 5. **Zero-shot-validation** — if ZSV is specified / `eval_zsv=True`:
    - Require `{zsv_root}/PARSED/zero-shot-validation` and `…/PREDICT/zero-shot-validation`.
    - Evaluate the **final model** via `src.pipeline.zsv_eval` (LegNet checkpoint + continuous ZSV labels; Caduceus when helper exists).

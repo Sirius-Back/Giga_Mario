@@ -106,6 +106,19 @@ def _run_stages(cfg: DictConfig) -> int:
         zsv_root=out_root if eval_zsv else None,
         eval_zsv=eval_zsv and run_training,
     )
+    # During/after-train monitoring figures (learning curves + split compare)
+    try:
+        from src.train_viz.train_monitor import refresh_train_monitor
+
+        mon = refresh_train_monitor(
+            out_root / "direct",
+            model=f"{cfg.run_id}_direct",
+            title=f"{cfg.run_id} direct — train monitor",
+            include_split_compare=True,
+        )
+        print(f"train_monitor[direct] status={mon.get('status')} → {mon.get('outdir')}")
+    except Exception as exc:  # noqa: BLE001
+        print(f"WARNING: train_monitor[direct] skipped: {type(exc).__name__}: {exc}")
 
     if not bool(cfg.adversarial):
         print(OmegaConf.to_yaml(cfg))
@@ -125,15 +138,21 @@ def _run_stages(cfg: DictConfig) -> int:
         parsed_data=panel_root / "PARSED",
         intersect_allow=True,
     )
+    # New training folds must differ from direct/M1 (M2 uses seed+1).
+    adv_seed = int(seed) + 1
     adv_split = run_split_predict(
         outdir=adv_root,
         type="random",
-        seed=seed,
+        seed=adv_seed,
         id_csv=panel_root / "ID.csv",
         fold_csv=panel_root / "fold.csv",
         ratios=ratios,
     )
-    apply_fold_class_targets(predict_root=adv_root / "PREDICT", split_csv=adv_split)
+    # Labels = previous direct/M1 train/val/test → 0/1/2 (not the new adv split).
+    apply_fold_class_targets(
+        predict_root=adv_root / "PREDICT",
+        label_split_csv=out_root / "split.csv",
+    )
     run_split(
         adv_split,
         parsed_target=adv_root / "PREDICT",
@@ -168,6 +187,39 @@ def _run_stages(cfg: DictConfig) -> int:
         zsv_root=adv_root if eval_zsv else None,
         eval_zsv=eval_zsv and run_training,
     )
+    try:
+        from src.train_viz.train_monitor import refresh_train_monitor
+
+        mon = refresh_train_monitor(
+            adv_root / "train",
+            model=f"{cfg.run_id}_adversarial",
+            title=f"{cfg.run_id} adversarial — train monitor",
+            include_split_compare=True,
+        )
+        print(
+            f"train_monitor[adversarial] status={mon.get('status')} → {mon.get('outdir')}"
+        )
+    except Exception as exc:  # noqa: BLE001
+        print(
+            f"WARNING: train_monitor[adversarial] skipped: {type(exc).__name__}: {exc}"
+        )
+
+    # Final pass: direct + adversarial monitors + TensorBoard export
+    try:
+        from src.train_viz.train_monitor import refresh_pipeline_monitors
+
+        pipe_mon = refresh_pipeline_monitors(
+            out_root,
+            run_id=str(cfg.run_id),
+            include_split_compare=True,
+        )
+        print(
+            f"pipeline_monitors status={pipe_mon.get('status')} "
+            f"direct={((pipe_mon.get('direct') or {}).get('status'))} "
+            f"adversarial={((pipe_mon.get('adversarial') or {}).get('status'))}"
+        )
+    except Exception as exc:  # noqa: BLE001
+        print(f"WARNING: pipeline_monitors skipped: {type(exc).__name__}: {exc}")
 
     # Persist resolved commands for audit
     cmds = {
@@ -182,6 +234,7 @@ def _run_stages(cfg: DictConfig) -> int:
     (out_root / "hydra_resolved_config.yaml").write_text(
         OmegaConf.to_yaml(cfg), encoding="utf-8"
     )
+
     print(f"Hydra pipeline {mode} complete → {out_root}")
     print(f"Model launch templates:\n{OmegaConf.to_yaml(cmds)}")
     return 0

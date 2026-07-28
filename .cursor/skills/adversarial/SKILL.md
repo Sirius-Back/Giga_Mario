@@ -49,8 +49,9 @@ If obligatory inputs missing → **stop**. Do not invent PREDICT/PARSED or fold 
   3. EXEC:
        a. run_adversarial → outdir_new
        b. random split-predict → split.csv
-       c. apply_fold_class_targets → PREDICT fold-class 0/1/2
-       d. split materialize → SPLIT/
+       c. apply_fold_class_targets(label_split_csv=previous/direct split.csv)
+          → PREDICT fold-class 0/1/2 from **previous** train/val/test
+       d. split materialize → SPLIT/  (new folds; mixed 0/1/2 in train)
   4. REUSE the same script later (no agent required for re-run)
 ```
 
@@ -67,12 +68,19 @@ Example: `src/run/exp01/prok_random_adversarial.py`
 ## What the run script must do
 
 1. `src.pipeline.adversarial.run_adversarial(...)` → hardlink/copy real `PREDICT`/`PARSED` into `outdir_new`.
-2. **Random** `split_predict` → new `split.csv` (ZSV preserved from `fold.csv` when present).
-3. **`apply_fold_class_targets(predict_root, split_csv)`** — rewrite non-ZSV `predict_var1` to Locked M2 encodings `{train:0, val:1, test:2}`; **unlink before write** (do not mutate hardlinked source panel). ZSV rows keep continuous targets. Writes `PREDICT/predict_target.json`.
-4. `src.pipeline.split.run_split(...)` materialize `SPLIT/` from the **new** class PREDICT.
+2. **Random** `split_predict` with **`seed+1`** (vs direct) → new `split.csv` (training folds only; ZSV preserved).
+3. **`apply_fold_class_targets(..., label_split_csv=<previous/direct split.csv>)`** —
+   rewrite non-ZSV `predict_var1` to Locked M2 encodings from the **previous**
+   train/val/test membership `{train:0, val:1, test:2}`; **unlink before write**.
+   Do **not** use the new adversarial split for labels (that yields constant
+   buckets). ZSV rows keep continuous targets. Writes `PREDICT/predict_target.json`.
+4. `src.pipeline.split.run_split(...)` materialize `SPLIT/` from the **new**
+   training folds + **previous** class PREDICT (train bucket must mix 0/1/2).
 5. Emit paths for `/train` with fold-class / classification semantics.
 
 **Never** train adversarial models on the copied continuous TPM/log2 targets.
+**Never** hardlink `split.csv` into `outdir_new` without a byte-copy — rewriting
+the adv split must not mutate the previous/direct label source.
 ## Exact patterns
 
 ```bash
@@ -93,8 +101,9 @@ adversarial:
 - [ ] Confirm run_id, data, split=random, outdir_new ≠ source
 - [ ] Confirm source panel complete (split.csv + PREDICT + PARSED)
 - [ ] Write src/run/<run_id>/{data}_{split}_adversarial.py
-- [ ] Exec: copy → random split-predict → **apply_fold_class_targets** → split materialize
-- [ ] Verify predict_target.json mode=fold_class; non-ZSV predict_var1 ∈ {0,1,2}
+- [ ] Exec: copy → random split-predict → **apply_fold_class_targets(previous split)** → split materialize
+- [ ] Verify predict_target.json mode=fold_class, label_source=previous_split_m1; non-ZSV predict_var1 ∈ {0,1,2}
+- [ ] Verify new TRAIN bucket mixes classes 0/1/2 (not constant)
 - [ ] Verify source panel PREDICT unchanged (hardlink-safe)
 - [ ] method-decision + artifact-registry
 ```

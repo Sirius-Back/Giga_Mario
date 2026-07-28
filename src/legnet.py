@@ -7,6 +7,7 @@ Input:
 
 Output (--out, default runs/legnet/<data_stem>/):
   logs/                 run_config.json, train_metrics.jsonl, metrics.log, epoch{N}/
+  tensorboard/          train/val scalars (Lightning + jsonl backfill)
   model_{val}_{test}/   upstream Lightning dump + predictions
   best_model/           best val_pearson .ckpt
   final_model/          last epoch .ckpt
@@ -75,25 +76,67 @@ def _validate_tsv(path: Path, *, max_check: int = 5000) -> dict[str, Any]:
     return {"n_rows": n, "folds": sorted(folds), "seq_len": STITCHED_LEN}
 
 
+_METRIC_KEYS = (
+    "loss",
+    "pearson",
+    "spearman",
+    "mse",
+    "rmse",
+    "mae",
+    "r2",
+    "genewise_pearson_median",
+    "samplewise_pearson_median",
+)
+
+
 def _merge_lightning_epochs(metrics_csv: Path) -> list[dict[str, Any]]:
     """Collapse sparse Lightning metrics.csv rows into one record per epoch."""
     by_ep: dict[int, dict[str, Any]] = {}
     with metrics_csv.open(newline="", encoding="utf-8") as fh:
         reader = csv.DictReader(fh)
+        fieldnames = reader.fieldnames or []
         for row in reader:
             ep_raw = row.get("epoch")
             if ep_raw in (None, ""):
                 continue
             ep = int(float(ep_raw))
             rec = by_ep.setdefault(ep, {"epoch": ep})
-            for key in ("train_loss", "val_loss", "val_pearson", "step"):
+            for key in fieldnames:
+                if key in {"epoch", "step"} or key not in row:
+                    continue
+                if not (
+                    key.startswith("train_")
+                    or key.startswith("val_")
+                    or key.startswith("test_")
+                ):
+                    continue
                 raw = row.get(key)
                 if raw not in (None, ""):
                     try:
                         rec[key] = float(raw)
                     except ValueError:
                         pass
+            raw_step = row.get("step")
+            if raw_step not in (None, ""):
+                try:
+                    rec["step"] = float(raw_step)
+                except ValueError:
+                    pass
     return [by_ep[k] for k in sorted(by_ep)]
+
+
+def _split_block(rec: dict[str, Any], prefix: str) -> dict[str, float]:
+    out: dict[str, float] = {}
+    loss_key = f"{prefix}_loss"
+    if loss_key in rec:
+        out["loss"] = float(rec[loss_key])
+    for name in _METRIC_KEYS:
+        if name == "loss":
+            continue
+        key = f"{prefix}_{name}"
+        if key in rec:
+            out[name] = float(rec[key])
+    return out
 
 
 def _write_caduceus_like_logs(out_dir: Path, epoch_rows: list[dict[str, Any]]) -> None:
@@ -106,25 +149,29 @@ def _write_caduceus_like_logs(out_dir: Path, epoch_rows: list[dict[str, Any]]) -
     for rec in epoch_rows:
         ep = int(rec["epoch"])
         obj: dict[str, Any] = {"epoch": ep}
-        if "train_loss" in rec:
-            obj["train"] = {"loss": rec["train_loss"]}
-        val: dict[str, float] = {}
-        if "val_loss" in rec:
-            val["loss"] = rec["val_loss"]
-        if "val_pearson" in rec:
-            val["pearson"] = rec["val_pearson"]
+        train = _split_block(rec, "train")
+        val = _split_block(rec, "val")
+        test = _split_block(rec, "test")
+        if train:
+            obj["train"] = train
         if val:
             obj["validation"] = val
+        if test:
+            obj["test"] = test
         if "step" in rec:
             obj["global_step"] = int(rec["step"])
         lines_jsonl.append(json.dumps(obj, sort_keys=True))
-        # human log line
         tr = obj.get("train", {})
         va = obj.get("validation", {})
         lines_log.append(
             f"epoch={ep} train_loss={tr.get('loss', float('nan'))} "
             f"val_loss={va.get('loss', float('nan'))} "
-            f"val_pearson={va.get('pearson', float('nan'))}"
+            f"val_pearson={va.get('pearson', float('nan'))} "
+            f"val_spearman={va.get('spearman', float('nan'))} "
+            f"val_mse={va.get('mse', float('nan'))} "
+            f"val_rmse={va.get('rmse', float('nan'))} "
+            f"val_mae={va.get('mae', float('nan'))} "
+            f"val_r2={va.get('r2', float('nan'))}"
         )
         ep_dir = logs / f"epoch{ep}"
         ep_dir.mkdir(parents=True, exist_ok=True)
@@ -297,6 +344,18 @@ def run(
         print(f"Wrote {out_dir / 'logs' / 'train_metrics.jsonl'} ({len(epoch_rows)} epochs)")
     else:
         print(f"WARNING: no metrics.csv under {out_dir}", flush=True)
+
+    try:
+        from src.train_viz.tensorboard_metrics import write_tensorboard_from_jsonl
+
+        tb_man = write_tensorboard_from_jsonl(out_dir)
+        print(
+            f"tensorboard status={tb_man.get('status')} "
+            f"n_scalars={tb_man.get('n_scalars')} → {tb_man.get('tensorboard')}",
+            flush=True,
+        )
+    except Exception as exc:  # noqa: BLE001
+        print(f"WARNING: tensorboard export skipped: {type(exc).__name__}: {exc}", flush=True)
 
     ckpt_info = _copy_checkpoints(out_dir)
     print(f"Checkpoints: {ckpt_info}", flush=True)

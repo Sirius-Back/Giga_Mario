@@ -36,6 +36,51 @@ CUDA_VISIBLE_DEVICES=0,1,2,3 python -m src.hydra_pipeline mode=run \
 Resolved configs + command templates are written to
 `{out_root}/hydra_resolved_config.yaml` and `hydra_resolved_commands.yaml`.
 
+### During-train monitoring (learning curves + TensorBoard)
+
+Refresh anytime while / after training (reads live Lightning ``metrics.csv`` →
+jsonl → cnsplots + Altair learning curves; refreshes split_compare; exports
+``tensorboard/`` from train metrics):
+
+```bash
+# one-shot (single train outdir)
+conda run -n caduceus_env python -m src.train_viz.train_monitor \
+  --run-dir run/<run_id>/direct
+
+# both direct + adversarial (when adversarial/train exists)
+conda run -n caduceus_env python -m src.train_viz.train_monitor \
+  --pipeline-root run/<run_id>
+
+# poll every 60s while the job runs
+watch -n 60 'conda run -n caduceus_env python -m src.train_viz.train_monitor \
+  --run-dir run/<run_id>/direct --no-split-compare'
+```
+
+TensorBoard (after sync / during LegNet fit when `tensorboard` is installed):
+
+```bash
+tensorboard --logdir run/<run_id>/direct/tensorboard
+# adversarial (if trained):
+tensorboard --logdir run/<run_id>/adversarial/train/tensorboard
+```
+
+Outputs: `{run}/figures/train_monitor/Figure_*learning_curves*` (+ Altair HTML),
+synced `logs/train_metrics.jsonl`, and `{run}/tensorboard/` event files.
+Hydra pipeline calls monitor after each `/train` and a final
+`refresh_pipeline_monitors` (direct + adversarial when present).
+
+### Split comparison figures
+
+```bash
+conda run -n caduceus_env python -m src.train_viz.split_compare \
+  --run-dir run/<run_id>/direct \
+  -o run/<run_id>/direct/figures/split_compare
+```
+
+Outputs: `split_metrics_compare.csv/.json`, `Figure_*_split_compare_train_val_test_zsv.{pdf,svg,png}`,
+`Figure_*_altair.html` + `.vl.json`. Also invoked from `train_monitor` / pipeline after train
+(including **adversarial/train** when that stage ran).
+
 ## Obligatory inputs (Hydra keys)
 
 | Key | Meaning |
@@ -54,7 +99,7 @@ When **`adversarial=true`** (default in pipeline.yaml):
 | Key | Meaning |
 |-----|---------|
 | **`adversarial_task_type`** | Usually `classification` (fold-class 0/1/2) |
-| Fold-class rewrite | **Required:** `apply_fold_class_targets` after adversarial `split_predict` |
+| Fold-class rewrite | **Required:** `apply_fold_class_targets(..., label_split_csv=<direct split.csv>)` after adversarial `split_predict` |
 
 Optional: **`zsv=true`** → after each real train, eval final model on
 `{out_root|adversarial}/PARSED|PREDICT/zero-shot-validation` via
@@ -64,12 +109,13 @@ Optional: **`zsv=true`** → after each real train, eval final model on
 
 ```
 1. validate panel
-2. /split (direct) → train (task_type) → optional ZSV eval
+2. /split (direct) → train (task_type) → optional ZSV eval → **train_monitor + TensorBoard**
 3. /adversarial copy
 4. random split_predict
-5. apply_fold_class_targets  # train/val/test → 0/1/2; ZSV keeps continuous
-6. materialize SPLIT
-7. /train adversarial (adversarial_task_type) → optional ZSV eval
+5. apply_fold_class_targets(label_split_csv=direct/previous split)  # prev train/val/test → 0/1/2
+6. materialize SPLIT  # new adv folds; TRAIN mixes 0/1/2
+7. /train adversarial (adversarial_task_type) → optional ZSV eval → **train_monitor + TensorBoard**
+8. **refresh_pipeline_monitors** (direct + adversarial viz/TB if adversarial ran)
 ```
 
 Model CLIs are declared in `configs/train/{legnet,caduceus}.yaml`
@@ -85,6 +131,9 @@ pipeline:
 - [ ] run: python -m src.hydra_pipeline mode=run …
 - [ ] Verify fold-class sidecar adversarial/PREDICT/predict_target.json when adversarial
 - [ ] Verify logs/zero_shot_metrics.json when zsv=true
+- [ ] Verify `{direct,adversarial/train}/figures/train_monitor/` learning curves for monitoring
+- [ ] Verify `{direct,adversarial/train}/figures/split_compare/` (cnsplots + Altair) when metrics exist
+- [ ] Verify `{direct,adversarial/train}/tensorboard/` has train metrics event files
 - [ ] method-decision + artifact-registry
 ```
 
@@ -96,6 +145,9 @@ pipeline:
 | `/train` | Fine-tune + optional ZSV |
 | `/adversarial` | Copy + random split + **fold-class PREDICT** |
 | `src.hydra_pipeline` | This orchestrator |
+| `src.train_viz.train_monitor` | Sync Lightning→jsonl + learning-curve monitor figs + TB export |
+| `src.train_viz.tensorboard_metrics` | Caduceus-shaped `tensorboard/` from train jsonl |
+| `src.train_viz.split_compare` | train/val/test/ZSV metric bars (cnsplots + Altair) |
 | `configs/` | Reproducible parameters + model commands |
 
 ## Rules

@@ -43,7 +43,7 @@ def test_apply_fold_class_targets_rewrites_and_keeps_zsv(tmp_path: Path) -> None
     panel = _write_panel(tmp_path)
     adv = tmp_path / "adv"
     run_adversarial(outdir=panel, outdir_new=adv, intersect_allow=True)
-    # New split assignment for adversarial
+    # New split assignment for adversarial *training folds* (different from previous)
     write_csv(
         adv / "split.csv",
         [
@@ -58,24 +58,31 @@ def test_apply_fold_class_targets_rewrites_and_keeps_zsv(tmp_path: Path) -> None
     )
     # Source continuous must survive hardlink-safe rewrite
     before_src = (panel / "PREDICT" / "1.ext").read_text(encoding="utf-8").strip()
+    # Labels come from **previous (direct) split**, not adv/split.csv
     meta = apply_fold_class_targets(
-        predict_root=adv / "PREDICT", split_csv=adv / "split.csv"
+        predict_root=adv / "PREDICT",
+        label_split_csv=panel / "split.csv",
     )
     assert meta["mode"] == "fold_class"
+    assert meta["label_source"] == "previous_split_m1"
     assert meta["n_mapped"] == 4
     assert meta["n_zsv_kept_continuous"] == 2
     assert meta["class_map"] == M1_FOLD_TO_CLASS
 
     by_id = {r["id"]: r["predict_var1"] for r in read_csv(adv / "PREDICT" / "predict.csv")}
-    assert by_id["1"] == "2"  # test
-    assert by_id["2"] == "1"  # val
-    assert by_id["3"] == "0"  # train
-    assert by_id["4"] == "0"
+    # Previous: 1=train→0, 2=train→0, 3=test→2, 4=val→1
+    assert by_id["1"] == "0"
+    assert by_id["2"] == "0"
+    assert by_id["3"] == "2"
+    assert by_id["4"] == "1"
     assert float(by_id["5"]) == pytest.approx(15.0)  # zsv kept
-    assert (adv / "PREDICT" / "1.ext").read_text(encoding="utf-8").strip() == "2"
+    assert (adv / "PREDICT" / "1.ext").read_text(encoding="utf-8").strip() == "0"
     assert (panel / "PREDICT" / "1.ext").read_text(encoding="utf-8").strip() == before_src
     side = json.loads((adv / "PREDICT" / "predict_target.json").read_text(encoding="utf-8"))
     assert side["mode"] == "fold_class"
+    assert side["label_source"] == "previous_split_m1"
+    # New adv train bucket (IDs 3,4) must mix previous classes {2,1} — not constant
+    assert {by_id["3"], by_id["4"]} == {"2", "1"}
 
 
 def test_zsv_load_pairs_and_metrics(tmp_path: Path) -> None:

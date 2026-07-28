@@ -1,7 +1,11 @@
 """Build an adversarial panel with the same structural contracts.
 
-After a new random split, call ``apply_fold_class_targets`` so PREDICT becomes
-M2-style fold-class encodings (train/val/test → 0/1/2) before materialize/train.
+After a new random split for *training folds*, call ``apply_fold_class_targets``
+with the **previous (direct / M1) ``split.csv``** so PREDICT becomes M2-style
+fold-class encodings (previous train/val/test → 0/1/2) before materialize/train.
+
+Using the new adversarial split for labels would make each train/val/test bucket
+constant (all-0 / all-1 / all-2) and break the fold-membership task.
 """
 from __future__ import annotations
 
@@ -91,10 +95,15 @@ def _break_write(path: Path, text: str) -> None:
 def apply_fold_class_targets(
     *,
     predict_root: Path,
-    split_csv: Path,
+    split_csv: Path | None = None,
+    label_split_csv: Path | None = None,
     class_map: dict[str, int] | None = None,
 ) -> dict[str, Any]:
-    """Rewrite non-ZSV PREDICT targets to fold-class encodings.
+    """Rewrite non-ZSV PREDICT targets to **previous** fold-class encodings.
+
+    ``label_split_csv`` (preferred) or ``split_csv`` must be the **previous**
+    direct/M1 ``split.csv`` (train/val/test membership to encode). Do **not**
+    pass the new adversarial training split here.
 
     Uses the Locked M1/M2 map ``train→0, val→1, test→2`` (``M1_FOLD_TO_CLASS``).
     ZSV rows keep their existing continuous ``predict_var1``. Destination files
@@ -106,10 +115,17 @@ def apply_fold_class_targets(
     if not predict_root.is_dir():
         raise FileNotFoundError(f"PREDICT root missing: {predict_root}")
 
+    label_csv = Path(label_split_csv or split_csv or "")
+    if not label_csv.is_file():
+        raise FileNotFoundError(
+            "label_split_csv/split_csv missing — pass the previous (direct/M1) "
+            f"split.csv for fold-class labels (got {label_split_csv!r} / {split_csv!r})"
+        )
+
     mapping = dict(class_map or M1_FOLD_TO_CLASS)
-    split_rows = read_csv(Path(split_csv))
+    split_rows = read_csv(label_csv)
     if not split_rows:
-        raise ValueError(f"split.csv is empty: {split_csv}")
+        raise ValueError(f"split.csv is empty: {label_csv}")
 
     id_to_class: dict[str, int] = {}
     zsv_ids: set[str] = set()
@@ -180,11 +196,13 @@ def apply_fold_class_targets(
     meta = {
         "generated_at": datetime.now(timezone.utc).isoformat(),
         "mode": "fold_class",
+        "label_source": "previous_split_m1",
         "class_map": mapping,
         "n_mapped": mapped,
         "n_zsv_kept_continuous": kept_zsv,
         "predict_root": str(predict_root),
-        "split_csv": str(split_csv),
+        "split_csv": str(label_csv),
+        "label_split_csv": str(label_csv),
     }
     meta_path = predict_root / "predict_target.json"
     if meta_path.exists() or meta_path.is_symlink():
@@ -237,7 +255,12 @@ def run_adversarial(
     }:
         raise ValueError("outdir_new must differ from the source panel")
     ensure_dir(outdir_new)
-    _link_or_copy(split_csv, outdir_new / "split.csv")
+    # Always byte-copy split.csv (never hardlink): adversarial re-split must not
+    # mutate the previous/direct split used for fold-class labels.
+    dest_split = outdir_new / "split.csv"
+    if dest_split.exists() or dest_split.is_symlink():
+        dest_split.unlink()
+    shutil.copy2(split_csv, dest_split)
     _replace_linked_tree(parsed_target, outdir_new / "PREDICT")
     _replace_linked_tree(parsed_data, outdir_new / "PARSED")
 

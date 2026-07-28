@@ -196,6 +196,44 @@ def _validate_legnet_tsv(path: Path) -> None:
         raise ValueError(f"LegNet TSV missing columns; have {header}")
 
 
+def _finalize_train_artifacts(outdir: Path) -> None:
+    """Ensure TensorBoard + synced jsonl exist after any successful /train.
+
+    Caduceus already writes live TB; LegNet writes Lightning TB + jsonl backfill.
+    Always re-export Caduceus-shaped ``outdir/tensorboard/`` from jsonl so
+    ``tensorboard --logdir …/tensorboard`` works for every model/task mode.
+    """
+    outdir = Path(outdir)
+    try:
+        from src.train_viz.train_monitor import sync_train_metrics_jsonl
+
+        sync_train_metrics_jsonl(outdir)
+    except Exception as exc:  # noqa: BLE001
+        print(f"WARNING: train metrics sync skipped: {type(exc).__name__}: {exc}")
+    try:
+        from src.train_viz.tensorboard_metrics import write_tensorboard_from_jsonl
+
+        tb = write_tensorboard_from_jsonl(outdir)
+        print(
+            f"tensorboard status={tb.get('status')} n_scalars={tb.get('n_scalars')} "
+            f"→ {tb.get('tensorboard')}"
+        )
+    except Exception as exc:  # noqa: BLE001
+        print(f"WARNING: tensorboard export skipped: {type(exc).__name__}: {exc}")
+    try:
+        from src.train_viz.train_monitor import refresh_train_monitor
+
+        mon = refresh_train_monitor(
+            outdir,
+            model=outdir.name,
+            title=f"Train monitor — {outdir.name}",
+            include_split_compare=True,
+        )
+        print(f"train_monitor status={mon.get('status')} → {mon.get('outdir')}")
+    except Exception as exc:  # noqa: BLE001
+        print(f"WARNING: train_monitor skipped: {type(exc).__name__}: {exc}")
+
+
 def run_train(
     *,
     model: str,
@@ -282,6 +320,7 @@ def run_train(
                 )
                 if result is None:
                     raise RuntimeError("ZSV eval requested but produced no metrics")
+            _finalize_train_artifacts(outdir)
             return outdir
 
         from src import legnet
@@ -309,6 +348,7 @@ def run_train(
             )
             if result is None:
                 raise RuntimeError("ZSV eval requested but produced no metrics")
+        _finalize_train_artifacts(outdir)
         return outdir
 
     logs = ensure_dir(outdir / "logs")

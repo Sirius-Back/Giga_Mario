@@ -40,6 +40,10 @@ def ensure_dir(path: Path) -> Path:
 
 def write_csv(path: Path, rows: Sequence[dict[str, Any]], fieldnames: Sequence[str], *, delimiter: str = "|") -> None:
     ensure_dir(path.parent)
+    path = Path(path)
+    # Break hardlinks so rewriting adversarial/split.csv cannot mutate the source panel.
+    if path.exists() or path.is_symlink():
+        path.unlink()
     with path.open("w", newline="", encoding="utf-8") as fh:
         w = csv.DictWriter(fh, fieldnames=list(fieldnames), delimiter=delimiter, extrasaction="ignore")
         w.writeheader()
