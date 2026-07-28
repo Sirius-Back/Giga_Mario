@@ -50,7 +50,7 @@ Document / require these before writing or executing the runner. **Stop** (valid
 | ZSV / `prepare_fold` | If ZSV holdouts are specified → run `generate_fold` (`ID.csv` + `prepare_fold.csv` → `fold.csv`) |
 | `environment` / `window` | `adapt` API: `environment=gene\|random`; `window={"pos1":…,"pos2":…}` — **not** retired `task` |
 | `to_type` | `caduceus` \| `legnet` for `parse_data` / `parse_target` |
-| `get_mpra` flags | When LegNet soft-classification targets are needed: `--tpm`, `--outfolder`, `--n-bins`, `--per-file-scale` via `src.get_mpra` |
+| `get_mpra` flags | When LegNet targets are needed: `--tpm`, `--outfolder`, `--mode soft|continuous`, `--n-bins`, `--per-file-scale`, `--scale-01` via `src.get_mpra` |
 
 Ask the user for any missing obligatory input. Do not invent defaults for GTF/FNA/TARGET/`which_data`/`outdir`.
 

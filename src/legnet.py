@@ -156,12 +156,14 @@ def _copy_checkpoints(out_dir: Path) -> dict[str, str | None]:
 
         src = max(pearson_ckpts, key=_score)
         dst = best_dir / src.name
-        shutil.copy2(src, dst)
+        if src.resolve() != dst.resolve():
+            shutil.copy2(src, dst)
         best_dst = str(dst)
     if last_ckpts:
         src = max(last_ckpts, key=lambda p: p.stat().st_mtime)
         dst = final_dir / src.name
-        shutil.copy2(src, dst)
+        if src.resolve() != dst.resolve():
+            shutil.copy2(src, dst)
         last_dst = str(dst)
     return {"best_model": best_dst, "final_model": last_dst}
 

@@ -13,7 +13,7 @@ Companion to [SKILL.md](SKILL.md). Read when wiring a dataset-specific runner.
 
 | Module | Typical CLI / API |
 |--------|-------------------|
-| `src.get_mpra` | `python -m src.get_mpra --tpm <dir> --outfolder <dir> [--n-bins 18] [--per-file-scale]` |
+| `src.get_mpra` | `python -m src.get_mpra --tpm <dir> --outfolder <dir> [--mode soft\|continuous] [--n-bins 18] [--per-file-scale] [--scale-01]` |
 | `src.pipeline.id_gen` | `python -m src.pipeline.id_gen --gtf <path> --outdir <dir> [--gtf-column gene]` |
 | `src.pipeline.id_rule` | `run_id_rule(ids, id_csv, id_col_1=…, id_col_2="ID")` (used inside parse_target / generate_fold) |
 | `src.pipeline.adapt` | `python -m src.pipeline.adapt --gtf … --fna … --id-csv … --outdir … --environment gene\|random --window '{"pos1":-100,"pos2":100}'` |

@@ -211,6 +211,7 @@ def run_train(
     seed: int = 42,
     n_devices: int = 1,
     num_workers: int = 8,
+    legnet_demo: bool = False,
 ) -> Path:
     """
     Wrapper around Caduceus / LegNet trainers.
@@ -271,6 +272,8 @@ def run_train(
         ]
         if max_samples is not None:
             raise ValueError("LegNet does not support pipeline --max-samples")
+        if legnet_demo:
+            argv.append("--demo")
         if legnet.main(argv) != 0:
             raise RuntimeError("src.legnet returned a non-zero status")
         return outdir
@@ -311,6 +314,11 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--n-devices", type=int, default=1)
     p.add_argument("--num-workers", type=int, default=8)
     p.add_argument(
+        "--legnet-demo",
+        action="store_true",
+        help="Use human_legnet's single fold-1 test / fold-2 validation run.",
+    )
+    p.add_argument(
         "--tiny-outdir", type=Path, default=None,
         help="Materialize a deterministic 50/10/10 real SPLIT subset and exit",
     )
@@ -331,7 +339,7 @@ def main(argv: list[str] | None = None) -> int:
         strategy=args.strategy, smoke=args.smoke, epochs=args.epochs,
         max_samples=args.max_samples, batch_size=args.batch_size,
         max_length=args.max_length, seed=args.seed, n_devices=args.n_devices,
-        num_workers=args.num_workers,
+        num_workers=args.num_workers, legnet_demo=args.legnet_demo,
     ))
     return 0
 
