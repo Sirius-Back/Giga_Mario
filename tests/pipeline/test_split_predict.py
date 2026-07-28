@@ -172,6 +172,24 @@ def test_split_predict_stratifies_all_columns(tmp_path: Path) -> None:
     assert len(read_csv(split_csv)) == 12
 
 
+def test_split_predict_accepts_custom_train_test_val_ratios(tmp_path: Path) -> None:
+    """Explicit 1:1:3 weights yield the requested five-way allocation."""
+    id_csv = tmp_path / "ID.csv"
+    write_csv(
+        id_csv,
+        [{"ID": str(index)} for index in range(1, 101)],
+        ["ID"],
+    )
+    split_csv = run_split_predict(
+        outdir=tmp_path / "custom_ratios",
+        id_csv=id_csv,
+        seed=42,
+        ratios=(1, 1, 3),
+    )
+    counts = Counter(row["train_test"] for row in read_csv(split_csv))
+    assert counts == {"train": 20, "test": 20, "val": 60}
+
+
 def test_split_mapped_predict_and_zsv_aside(tmp_path: Path) -> None:
     """Mapped PREDICT flattens to composite unique ids shared by PREDICT/FASTA/predict.csv."""
     from src.pipeline.common import make_mapped_unique_id

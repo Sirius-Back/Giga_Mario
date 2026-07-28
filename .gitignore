@@ -270,3 +270,12 @@ archive/
 
 # --- Local run scratch ---
 run0/
+run/
+launch.md
+data.md
+expr_file_mappings.csv
+fna
+gtf
+mpra
+random_borzoi_expr_file_mappings.csv
+tpm

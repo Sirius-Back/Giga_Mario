@@ -96,14 +96,43 @@ def load_ready_table(ready_dir: Path) -> list[dict[str, Any]]:
     return rows
 
 
-def assign_folds_random(n: int) -> list[str]:
-    """Caduceus-aligned ratios: ~10% test, then 10% of remainder → val."""
+def assign_folds_random(
+    n: int, *, ratios: tuple[float, float, float] | None = None
+) -> list[str]:
+    """Assign train/val/test labels using default or explicit train:test:val ratios.
+
+    ``ratios=None`` preserves the Caduceus-aligned behavior: 10% test, then
+    10% of the remaining samples for validation.  Explicit ratios are ordered
+    ``(train, test, val)`` and use largest-remainder allocation while ensuring
+    each split receives at least one sample.
+    """
     if n < 3:
         raise ValueError(f"need >=3 samples for train/val/test; got {n}")
-    n_test = max(1, int(round(n * TEST_FRACTION)))
-    n_remain = n - n_test
-    n_val = max(1, int(round(n_remain * VAL_FRACTION_OF_TRAINPOOL)))
-    n_train = n_remain - n_val
+    if ratios is None:
+        n_test = max(1, int(round(n * TEST_FRACTION)))
+        n_remain = n - n_test
+        n_val = max(1, int(round(n_remain * VAL_FRACTION_OF_TRAINPOOL)))
+        n_train = n_remain - n_val
+    else:
+        if len(ratios) != 3 or any(value <= 0 for value in ratios):
+            raise ValueError("ratios must contain three positive train:test:val values")
+        total = sum(ratios)
+        targets = [n * value / total for value in ratios]
+        counts = [int(target) for target in targets]
+        remaining = n - sum(counts)
+        residuals = [target - int(target) for target in targets]
+        for index in sorted(range(3), key=lambda i: (-residuals[i], i))[:remaining]:
+            counts[index] += 1
+        # All three roles must be represented. Move an item from the largest
+        # donor split when an extremely small positive ratio rounded to zero.
+        for index, count in enumerate(counts):
+            if count == 0:
+                donor = max(range(3), key=lambda i: (counts[i], -i))
+                if counts[donor] <= 1:
+                    raise ValueError(f"cannot allocate non-empty folds for n={n}")
+                counts[donor] -= 1
+                counts[index] = 1
+        n_train, n_test, n_val = counts
     if n_train < 1:
         raise ValueError(f"train empty after ratios for n={n}")
     labels = (["train"] * n_train) + (["val"] * n_val) + (["test"] * n_test)
@@ -116,6 +145,8 @@ def assign_folds_stratified(
     items: list[Any],
     strata: list[str],
     rng,
+    *,
+    ratios: tuple[float, float, float] | None = None,
 ) -> list[str]:
     """Assign train/val/test preserving stratum proportions (by M1 fold)."""
     if len(items) != len(strata):
@@ -127,7 +158,7 @@ def assign_folds_stratified(
     for s in sorted(by_s):
         idxs = by_s[s]
         rng.shuffle(idxs)
-        folds = assign_folds_random(len(idxs))
+        folds = assign_folds_random(len(idxs), ratios=ratios)
         for i, fold in zip(idxs, folds):
             out[i] = fold
     if any(not f for f in out):

@@ -11,3 +11,6 @@ dependencies:
       - -e .
       - pytest>=8
       - pyfaidx>=0.8
+      - cnsplots>=0.5.0
+      - altair>=5
+      - vl-convert-python>=1.0

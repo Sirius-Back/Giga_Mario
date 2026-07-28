@@ -80,6 +80,7 @@ def _assign_random_train_test(
     *,
     seed: int,
     strat_map: dict[str, dict[str, str]],
+    ratios: tuple[float, float, float] | None,
 ) -> dict[str, str]:
     """
     Assign train/val/test using ``assign_folds_random`` / stratified helpers
@@ -104,14 +105,14 @@ def _assign_random_train_test(
                 f"(required when --stratification is set)"
             )
         strata = [_composite_stratum(strat_map[i], strat_cols) for i in ids]
-        labels = assign_folds_stratified(ids, strata, rng)
+        labels = assign_folds_stratified(ids, strata, rng, ratios=ratios)
         return dict(zip(ids, labels))
 
     # Unstratified: shuffle index order, then zip with fixed-size fold labels
     # (matches src.splits.random M1 pairing).
     order = list(range(len(ids)))
     rng.shuffle(order)
-    folds = assign_folds_random(len(ids))
+    folds = assign_folds_random(len(ids), ratios=ratios)
     out: dict[str, str] = {}
     for idx, fold in zip(order, folds):
         out[ids[idx]] = fold
@@ -131,6 +132,7 @@ def run_split_predict(
     fna: Path | None = None,
     gtf: Path | None = None,
     marked_fasta: Path | None = None,
+    ratios: tuple[float, float, float] | None = None,
 ) -> Path:
     """
     Write `{outdir}/split.csv` with columns ID|train_test|fold.
@@ -199,7 +201,7 @@ def run_split_predict(
             assignable.append(i)
 
     train_test_map = _assign_random_train_test(
-        assignable, seed=seed, strat_map=strat_map
+        assignable, seed=seed, strat_map=strat_map, ratios=ratios
     )
 
     rows: list[dict[str, Any]] = []
@@ -243,6 +245,14 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--fna", type=Path, default=None)
     p.add_argument("--gtf", type=Path, default=None)
     p.add_argument("--marked", type=Path, default=None)
+    p.add_argument(
+        "--ratios",
+        type=float,
+        nargs=3,
+        metavar=("TRAIN", "TEST", "VAL"),
+        default=None,
+        help="Optional train:test:val split weights; default preserves Caduceus ratios",
+    )
     args = p.parse_args(argv)
     path = run_split_predict(
         outdir=args.outdir,
@@ -256,6 +266,7 @@ def main(argv: list[str] | None = None) -> int:
         fna=args.fna,
         gtf=args.gtf,
         marked_fasta=args.marked,
+        ratios=tuple(args.ratios) if args.ratios is not None else None,
     )
     print(path)
     return 0

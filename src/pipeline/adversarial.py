@@ -41,7 +41,9 @@ def _resolve_stage_dir(path: Path, name: str) -> Path:
     return resolved
 
 
-def _validate_panel(split_csv: Path, parsed_target: Path, parsed_data: Path) -> None:
+def _validate_panel(
+    split_csv: Path, parsed_target: Path, parsed_data: Path, *, intersect_allow: bool
+) -> None:
     from .common import checkout_ids_before_split
 
     split_rows = read_csv(split_csv)
@@ -57,7 +59,7 @@ def _validate_panel(split_csv: Path, parsed_target: Path, parsed_data: Path) -> 
         predict_root=parsed_target,
         parsed_root=parsed_data,
         split_ids=split_ids,
-        intersect_allow=False,
+        intersect_allow=intersect_allow,
     )
 
 
@@ -68,6 +70,7 @@ def run_adversarial(
     split_csv: Path | None = None,
     parsed_target: Path | None = None,
     parsed_data: Path | None = None,
+    intersect_allow: bool = False,
 ) -> Path:
     """
     Copy panel structure into `outdir_new` so parse_target can be re-run.
@@ -91,7 +94,9 @@ def run_adversarial(
     split_csv = Path(split_csv)
     parsed_target = _resolve_stage_dir(Path(parsed_target), "PREDICT")
     parsed_data = _resolve_stage_dir(Path(parsed_data), "PARSED")
-    _validate_panel(split_csv, parsed_target, parsed_data)
+    _validate_panel(
+        split_csv, parsed_target, parsed_data, intersect_allow=intersect_allow
+    )
 
     outdir_new = Path(outdir_new)
     if outdir_new.resolve() in {
@@ -122,6 +127,7 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--split-csv", type=Path, default=None)
     p.add_argument("--parsed-target", type=Path, default=None)
     p.add_argument("--parsed-data", type=Path, default=None)
+    p.add_argument("--intersect-allow", action="store_true")
     args = p.parse_args(argv)
     print(
         run_adversarial(
@@ -130,6 +136,7 @@ def main(argv: list[str] | None = None) -> int:
             split_csv=args.split_csv,
             parsed_target=args.parsed_target,
             parsed_data=args.parsed_data,
+            intersect_allow=args.intersect_allow,
         )
     )
     return 0

@@ -1,13 +1,19 @@
 # Reproducible publication style for @train-viz
 # Copied into each --outdir as visualization_config.yaml
+#
+# Static figures: cnsplots (Nature/Cell/Science styling) → PDF/SVG/PNG
+# Interactive: Altair → *.html + *.vl.json (+ optional *_altair.png)
 
 style: Nature Methods / Nature Machine Intelligence
+backends:
+  static: cnsplots
+  interactive: altair
 dpi_png: 600
 figure_size_px:
   single: [1800, 1400]
   double: [3600, 2400]
 font:
-  family: [Arial, Helvetica, DejaVu Sans]
+  family: [DejaVu Sans, Arial, Helvetica]
   axis_label_pt: 9
   tick_pt: 8
   legend_pt: 8
@@ -84,4 +90,5 @@ qc:
   min_dpi: 600
   require_vector_fonts: true
   reject_default_matplotlib_style: true
+  require_cnsplots_style: true
   require_ci_when_multi_seed: true

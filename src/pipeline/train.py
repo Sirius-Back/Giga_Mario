@@ -209,6 +209,8 @@ def run_train(
     batch_size: int = 1,
     max_length: int = 512,
     seed: int = 42,
+    n_devices: int = 1,
+    num_workers: int = 8,
 ) -> Path:
     """
     Wrapper around Caduceus / LegNet trainers.
@@ -262,6 +264,10 @@ def run_train(
         argv = [
             "--data-path", str(tsv), "--out", str(outdir),
             "--epochs", str(epochs), "--seed", str(seed),
+            "--n-devices", str(n_devices),
+            "--train-batch-size", str(batch_size),
+            "--valid-batch-size", str(batch_size),
+            "--num-workers", str(num_workers),
         ]
         if max_samples is not None:
             raise ValueError("LegNet does not support pipeline --max-samples")
@@ -302,6 +308,8 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--batch-size", type=int, default=1)
     p.add_argument("--max-length", type=int, default=512)
     p.add_argument("--seed", type=int, default=42)
+    p.add_argument("--n-devices", type=int, default=1)
+    p.add_argument("--num-workers", type=int, default=8)
     p.add_argument(
         "--tiny-outdir", type=Path, default=None,
         help="Materialize a deterministic 50/10/10 real SPLIT subset and exit",
@@ -322,7 +330,8 @@ def main(argv: list[str] | None = None) -> int:
         model=args.model, type=args.type, folders=args.folders, outdir=args.outdir,
         strategy=args.strategy, smoke=args.smoke, epochs=args.epochs,
         max_samples=args.max_samples, batch_size=args.batch_size,
-        max_length=args.max_length, seed=args.seed,
+        max_length=args.max_length, seed=args.seed, n_devices=args.n_devices,
+        num_workers=args.num_workers,
     ))
     return 0
 
