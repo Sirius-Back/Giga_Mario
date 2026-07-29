@@ -186,6 +186,7 @@ Unchanged roles: fine-tune on SPLIT trees, plot logs, rebuild adversarial panels
 | GC strategy | `run_gc_split_assign` | `src.splits.gc` |
 | E3 → SPLIT (+ ZSV trees) | `split` | `src.pipeline.split` |
 | SPLIT → logs | `train` | `src.pipeline.train` |
+| ZSV trees → `logs/zero_shot_metrics.json` | `zsv_eval` | `src.pipeline.zsv_eval` (+ `src.caduceus.evaluate_zsv_root` / LegNet) |
 | logs → figures | `train-viz` | `src.pipeline.train_viz` |
 
 ## Artifact shapes

@@ -255,6 +255,7 @@ def run_train(
     eval_zsv: bool = False,
     checkpoint_every_n_epochs: int = 10,
     early_stopping_patience: int = 0,
+    min_epochs: int = 0,
 ) -> Path:
     """
     Wrapper around Caduceus / LegNet trainers.
@@ -268,8 +269,9 @@ def run_train(
     ``checkpoint_every_n_epochs`` saves periodic weights (default 10); after
     train the best validation checkpoint is promoted to ``final_model/``.
 
-    ``early_stopping_patience`` (Caduceus): stop after this many epochs without
-    val_loss improvement (0 disables).
+    ``early_stopping_patience``: Caduceus stops on stalled val_loss; LegNet on
+    stalled val_pearson (0 disables). ``min_epochs`` blocks early exit before
+    that many epochs (LegNet Lightning Trainer; Caduceus custom loop).
     """
     model = model.lower()
     type = type.lower()
@@ -329,6 +331,8 @@ def run_train(
                     "--early-stopping-patience",
                     str(int(early_stopping_patience)),
                 ]
+            if int(min_epochs) > 0:
+                argv += ["--min-epochs", str(int(min_epochs))]
             if max_samples is not None:
                 argv += ["--max-samples", str(max_samples)]
             # Multi-GPU: Caduceus uses torch.distributed (RANK/WORLD_SIZE), so
@@ -378,6 +382,8 @@ def run_train(
             "--valid-batch-size", str(batch_size),
             "--num-workers", str(num_workers),
             "--checkpoint-every-n-epochs", str(int(checkpoint_every_n_epochs)),
+            "--early-stopping-patience", str(int(early_stopping_patience)),
+            "--min-epochs", str(int(min_epochs)),
         ]
         if max_samples is not None:
             raise ValueError("LegNet does not support pipeline --max-samples")

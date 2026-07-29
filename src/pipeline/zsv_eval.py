@@ -109,6 +109,41 @@ def metrics_from_preds(preds: list[float], targets: list[float]) -> dict[str, An
     }
 
 
+def write_zsv_artifacts(
+    *,
+    out_json: Path,
+    model: str,
+    checkpoint: Path | str,
+    metrics: dict[str, Any],
+    extra: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Universal ZSV payload → ``zero_shot_metrics.json`` + jsonl/log sidecars."""
+    payload: dict[str, Any] = {
+        "generated_at": datetime.now(timezone.utc).isoformat(),
+        "model": model,
+        "checkpoint": str(checkpoint),
+        "split": "zero-shot-validation",
+        "metrics": metrics,
+    }
+    if extra:
+        payload.update(extra)
+    ensure_dir(out_json.parent)
+    out_json.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
+    log_path = out_json.parent / "metrics.log"
+    line = (
+        f"zero-shot-validation n={metrics.get('n')} pearson={metrics.get('pearson')} "
+        f"spearman={metrics.get('spearman')} mse={metrics.get('mse')} "
+        f"rmse={metrics.get('rmse')}"
+    )
+    with log_path.open("a", encoding="utf-8") as fh:
+        fh.write(line + "\n")
+    jsonl = out_json.parent / "train_metrics.jsonl"
+    zsv_rec = {"epoch": "final", "zero-shot-validation": metrics}
+    with jsonl.open("a", encoding="utf-8") as fh:
+        fh.write(json.dumps(zsv_rec, sort_keys=True) + "\n")
+    return payload
+
+
 def eval_legnet_zsv(
     *,
     model_dir: Path,
@@ -180,28 +215,65 @@ def eval_legnet_zsv(
         )
 
     metrics = metrics_from_preds([float(p) for p in preds], targets)
-    payload = {
-        "generated_at": datetime.now(timezone.utc).isoformat(),
-        "model": "legnet",
-        "checkpoint": str(ckpt_path),
-        "split": "zero-shot-validation",
-        "metrics": metrics,
-    }
-    ensure_dir(out_json.parent)
-    out_json.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
-    log_path = out_json.parent / "metrics.log"
-    line = (
-        f"zero-shot-validation n={metrics['n']} pearson={metrics['pearson']} "
-        f"spearman={metrics['spearman']} mse={metrics['mse']} rmse={metrics['rmse']}"
+    return write_zsv_artifacts(
+        out_json=out_json,
+        model="legnet",
+        checkpoint=ckpt_path,
+        metrics=metrics,
     )
-    with log_path.open("a", encoding="utf-8") as fh:
-        fh.write(line + "\n")
-    # Also machine-readable jsonl tag for train-viz
-    jsonl = out_json.parent / "train_metrics.jsonl"
-    zsv_rec = {"epoch": "final", "zero-shot-validation": metrics}
-    with jsonl.open("a", encoding="utf-8") as fh:
-        fh.write(json.dumps(zsv_rec, sort_keys=True) + "\n")
-    return payload
+
+
+def _resolve_zsv_trees(split_root: Path) -> tuple[Path, Path] | None:
+    """Find PARSED|FASTA + PREDICT roots that contain zero-shot-validation/."""
+    split_root = Path(split_root)
+    candidates = [
+        (split_root / "FASTA", split_root / "PREDICT"),
+        (split_root / "PARSED", split_root / "PREDICT"),
+        (split_root.parent / "PARSED", split_root.parent / "PREDICT"),
+        (split_root.parent / "FASTA", split_root.parent / "PREDICT"),
+    ]
+    for p_root, y_root in candidates:
+        if (p_root / "zero-shot-validation").is_dir() and (
+            y_root / "zero-shot-validation"
+        ).is_dir():
+            return p_root, y_root
+    return None
+
+
+def _read_run_config(outdir: Path) -> dict[str, Any]:
+    for cand in (outdir / "logs" / "run_config.json", outdir / "run_config.json"):
+        if cand.is_file():
+            try:
+                return json.loads(cand.read_text(encoding="utf-8"))
+            except json.JSONDecodeError:
+                return {}
+    return {}
+
+
+def eval_caduceus_zsv(
+    *,
+    model_dir: Path,
+    parsed_root: Path,
+    predict_root: Path,
+    out_json: Path,
+    batch_size: int = 192,
+    max_length: int = 256,
+    device: int = 0,
+    amp: bool = True,
+) -> dict[str, Any]:
+    """Caduceus HF checkpoint on universal ZSV trees (same artifacts as LegNet)."""
+    from src import caduceus
+
+    return caduceus.evaluate_zsv_root(
+        model_dir=model_dir,
+        parsed_root=parsed_root,
+        predict_root=predict_root,
+        out_json=out_json,
+        batch_size=batch_size,
+        max_length=max_length,
+        device=device,
+        amp=amp,
+    )
 
 
 def eval_zsv_from_train_outdir(
@@ -211,24 +283,18 @@ def eval_zsv_from_train_outdir(
     split_root: Path,
     device: int = 0,
 ) -> dict[str, Any] | None:
-    """Dispatch ZSV eval when ``SPLIT`` (or panel) has zero-shot-validation trees."""
+    """Dispatch ZSV eval when ``SPLIT`` (or panel) has zero-shot-validation trees.
+
+    Universal contract (LegNet + Caduceus):
+      ``{PARSED|FASTA}/zero-shot-validation/*.ext`` + matching PREDICT
+      → ``outdir/logs/zero_shot_metrics.json`` (+ jsonl/log sidecars).
+    """
     split_root = Path(split_root)
     outdir = Path(outdir)
-    # Prefer materialized SPLIT trees; else panel-level PARSED/PREDICT
-    candidates = [
-        (split_root / "FASTA", split_root / "PREDICT"),
-        (split_root / "PARSED", split_root / "PREDICT"),
-        (split_root.parent / "PARSED", split_root.parent / "PREDICT"),
-    ]
-    parsed = predict = None
-    for p_root, y_root in candidates:
-        if (p_root / "zero-shot-validation").is_dir() and (
-            y_root / "zero-shot-validation"
-        ).is_dir():
-            parsed, predict = p_root, y_root
-            break
-    if parsed is None or predict is None:
+    trees = _resolve_zsv_trees(split_root)
+    if trees is None:
         return None
+    parsed, predict = trees
 
     out_json = outdir / "logs" / "zero_shot_metrics.json"
     model_l = model.lower()
@@ -241,19 +307,22 @@ def eval_zsv_from_train_outdir(
             device=device,
         )
     if model_l == "caduceus":
-        # Caduceus ZSV uses the same continuous metrics helper via a thin adapter
-        # that reuses checkpoint + DataLoader from src.caduceus when available.
-        from src import caduceus  # local import
-
-        if not hasattr(caduceus, "evaluate_zsv_root"):
-            raise NotImplementedError(
-                "Caduceus ZSV eval requires src.caduceus.evaluate_zsv_root; "
-                "use LegNet ZSV or add the helper."
-            )
-        return caduceus.evaluate_zsv_root(  # type: ignore[attr-defined]
-            model_dir=outdir / "final_model",
-            zsv_root=parsed.parent,
+        model_dir = outdir / "final_model"
+        if not (model_dir / "config.json").is_file():
+            model_dir = outdir / "best_model"
+        cfg = _read_run_config(outdir)
+        max_length = int(cfg.get("max_length") or 256)
+        batch_size = int(cfg.get("eval_batch_size") or cfg.get("batch_size") or 192)
+        amp = bool(cfg.get("amp", True))
+        return eval_caduceus_zsv(
+            model_dir=model_dir,
+            parsed_root=parsed,
+            predict_root=predict,
             out_json=out_json,
+            batch_size=batch_size,
+            max_length=max_length,
+            device=device,
+            amp=amp,
         )
     raise ValueError(f"Unknown model for ZSV eval: {model}")
 

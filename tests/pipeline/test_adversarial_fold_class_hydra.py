@@ -104,6 +104,79 @@ def test_zsv_load_pairs_and_metrics(tmp_path: Path) -> None:
     assert m["mse"] == pytest.approx(0.0)
 
 
+def test_caduceus_evaluate_zsv_root_writes_universal_artifacts(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Path + artifact contract without loading the real Caduceus weights."""
+    import torch
+    from torch import nn
+
+    from src import caduceus
+
+    parsed = tmp_path / "PARSED" / "zero-shot-validation"
+    predict = tmp_path / "PREDICT" / "zero-shot-validation"
+    parsed.mkdir(parents=True)
+    predict.mkdir(parents=True)
+    for i, y in enumerate((1.0, 2.0, 3.0)):
+        (parsed / f"s{i}.ext").write_text("ACGTACGT\n", encoding="utf-8")
+        (predict / f"s{i}.ext").write_text(f"{y}\n", encoding="utf-8")
+
+    model_dir = tmp_path / "final_model"
+    model_dir.mkdir()
+    (model_dir / "config.json").write_text("{}", encoding="utf-8")
+
+    class _Tok:
+        pad_token_id = 4
+
+        def __call__(self, seq, **kwargs):
+            ids = torch.tensor([[1, 2, 3, 4]], dtype=torch.long)
+            return {"input_ids": ids, "attention_mask": torch.ones_like(ids)}
+
+    class _Out:
+        def __init__(self, logits):
+            self.logits = logits
+
+    class _Model(nn.Module):
+        def forward(self, **batch):
+            b = batch["labels"].shape[0]
+            # Predict label itself → perfect metrics
+            return _Out(batch["labels"].unsqueeze(-1))
+
+        def to(self, device):
+            return self
+
+        def eval(self):
+            return self
+
+    monkeypatch.setattr(
+        caduceus,
+        "AutoTokenizer",
+        type("T", (), {"from_pretrained": staticmethod(lambda *a, **k: _Tok())}),
+    )
+    monkeypatch.setattr(
+        caduceus,
+        "AutoModelForSequenceClassification",
+        type("M", (), {"from_pretrained": staticmethod(lambda *a, **k: _Model())}),
+    )
+
+    out_json = tmp_path / "logs" / "zero_shot_metrics.json"
+    payload = caduceus.evaluate_zsv_root(
+        model_dir=model_dir,
+        zsv_root=tmp_path,
+        out_json=out_json,
+        batch_size=2,
+        max_length=16,
+        device="cpu",
+        amp=False,
+    )
+    assert out_json.is_file()
+    assert payload["model"] == "caduceus"
+    assert payload["metrics"]["n"] == 3
+    assert payload["metrics"]["pearson"] == pytest.approx(1.0)
+    assert payload["metrics"]["mse"] == pytest.approx(0.0)
+    assert (tmp_path / "logs" / "train_metrics.jsonl").is_file()
+
+
 def test_hydra_pipeline_imports_and_config() -> None:
     pytest.importorskip("hydra")
     from hydra import compose, initialize_config_dir

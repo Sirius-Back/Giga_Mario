@@ -321,6 +321,8 @@ def run(
     valid_batch_size: int,
     num_workers: int,
     checkpoint_every_n_epochs: int = 10,
+    early_stopping_patience: int = 0,
+    min_epochs: int = 0,
 ) -> int:
     data_path = data_path.resolve()
     out_dir = out_dir.resolve()
@@ -355,6 +357,8 @@ def run(
         "valid_batch_size": valid_batch_size,
         "num_workers": num_workers,
         "checkpoint_every_n_epochs": checkpoint_every_n_epochs,
+        "early_stopping_patience": early_stopping_patience,
+        "min_epochs": min_epochs,
         "data_stats": stats,
         "started_at": datetime.now(timezone.utc).isoformat(),
     }
@@ -382,6 +386,10 @@ def run(
         str(num_workers),
         "--checkpoint_every_n_epochs",
         str(checkpoint_every_n_epochs),
+        "--early_stopping_patience",
+        str(int(early_stopping_patience)),
+        "--min_epochs",
+        str(int(min_epochs)),
     ]
     if demo:
         cmd_core.append("--demo")
@@ -491,6 +499,18 @@ def main(argv: list[str] | None = None) -> int:
         help="Periodic Lightning checkpoints every N epochs (0 disables). "
         "Best val_pearson is always kept; final_model/ is set to best after train.",
     )
+    ap.add_argument(
+        "--early-stopping-patience",
+        type=int,
+        default=0,
+        help="Stop after N epochs without val_pearson improvement (0=off).",
+    )
+    ap.add_argument(
+        "--min-epochs",
+        type=int,
+        default=0,
+        help="Minimum epochs before early stopping can end training (0=off).",
+    )
     args = ap.parse_args(argv)
 
     out = args.out
@@ -513,6 +533,8 @@ def main(argv: list[str] | None = None) -> int:
         valid_batch_size=args.valid_batch_size,
         num_workers=args.num_workers,
         checkpoint_every_n_epochs=args.checkpoint_every_n_epochs,
+        early_stopping_patience=args.early_stopping_patience,
+        min_epochs=args.min_epochs,
     )
 
 

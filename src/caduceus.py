@@ -266,6 +266,157 @@ def evaluate_classification(
     return {"loss": total_loss / n, "accuracy": correct / n, "n": int(n)}
 
 
+class ZsvPairDataset(Dataset):
+    """In-memory ``(sequence, target)`` rows from universal ZSV trees."""
+
+    def __init__(
+        self,
+        pairs: list[tuple[str, str, float]],
+        tokenizer,
+        max_length: int,
+    ):
+        self.pairs = pairs
+        self.tokenizer = tokenizer
+        self.max_length = max_length
+
+    def __len__(self) -> int:
+        return len(self.pairs)
+
+    def __getitem__(self, idx: int):
+        _rid, seq, y = self.pairs[idx]
+        enc = self.tokenizer(
+            seq,
+            padding=False,
+            truncation=True,
+            max_length=self.max_length,
+            add_special_tokens=False,
+            return_tensors="pt",
+        )
+        item = {k: v.squeeze(0) for k, v in enc.items()}
+        item["labels"] = torch.tensor(float(y), dtype=torch.float32)
+        return item
+
+
+def evaluate_zsv_root(
+    *,
+    model_dir: Path,
+    out_json: Path,
+    zsv_root: Path | None = None,
+    parsed_root: Path | None = None,
+    predict_root: Path | None = None,
+    batch_size: int = 192,
+    max_length: int = 256,
+    device: int | str = 0,
+    amp: bool = True,
+    task: str = "regression",
+) -> dict[str, Any]:
+    """Universal Caduceus ZSV: PARSED|PREDICT ``zero-shot-validation`` → metrics JSON.
+
+    Accepts either ``zsv_root`` (panel/SPLIT parent with PARSED+PREDICT) or explicit
+    ``parsed_root`` + ``predict_root``. Writes the same artifact shape as LegNet ZSV
+    via ``src.pipeline.zsv_eval.write_zsv_artifacts``.
+    """
+    from src.pipeline.zsv_eval import load_zsv_pairs, metrics_from_preds, write_zsv_artifacts
+
+    model_dir = Path(model_dir)
+    if not (model_dir / "config.json").is_file():
+        raise FileNotFoundError(f"Caduceus checkpoint missing config.json: {model_dir}")
+
+    if parsed_root is None or predict_root is None:
+        if zsv_root is None:
+            raise ValueError("Need zsv_root or parsed_root+predict_root")
+        zsv_root = Path(zsv_root)
+        parsed_root = parsed_root or (zsv_root / "PARSED")
+        if not (Path(parsed_root) / "zero-shot-validation").is_dir():
+            parsed_root = zsv_root / "FASTA"
+        predict_root = predict_root or (zsv_root / "PREDICT")
+
+    pairs = load_zsv_pairs(parsed_root=Path(parsed_root), predict_root=Path(predict_root))
+    if task != "regression":
+        raise NotImplementedError(
+            f"Caduceus ZSV currently supports regression only (got task={task!r})"
+        )
+
+    if isinstance(device, int):
+        torch_device = torch.device(
+            f"cuda:{device}" if torch.cuda.is_available() else "cpu"
+        )
+    else:
+        torch_device = torch.device(device)
+
+    tokenizer = AutoTokenizer.from_pretrained(str(model_dir), trust_remote_code=True)
+    pad_id = tokenizer.pad_token_id if tokenizer.pad_token_id is not None else 4
+    model = AutoModelForSequenceClassification.from_pretrained(
+        str(model_dir),
+        trust_remote_code=True,
+        num_labels=1,
+        problem_type="regression",
+    )
+    model.to(torch_device)
+    model.eval()
+
+    ds = ZsvPairDataset(pairs, tokenizer, max_length)
+    loader = DataLoader(
+        ds,
+        batch_size=batch_size,
+        shuffle=False,
+        num_workers=0,
+        pin_memory=torch_device.type == "cuda",
+        collate_fn=lambda b: collate_pad(b, pad_id),
+    )
+
+    preds: list[float] = []
+    targets: list[float] = []
+    use_amp = bool(amp) and torch_device.type == "cuda"
+    criterion = torch.nn.MSELoss()
+    total_loss, n = 0.0, 0
+    for batch in loader:
+        batch = {k: v.to(torch_device) for k, v in batch.items()}
+        with torch.cuda.amp.autocast(enabled=use_amp):
+            out = model(**batch)
+            logits = out.logits.squeeze(-1)
+            labels = batch["labels"]
+            loss = criterion(logits, labels)
+        bs = labels.size(0)
+        total_loss += float(loss.item()) * bs
+        n += bs
+        preds.extend(logits.detach().float().cpu().reshape(-1).tolist())
+        targets.extend(labels.detach().float().cpu().reshape(-1).tolist())
+
+    if len(preds) != len(targets) or n == 0:
+        raise RuntimeError(
+            f"Caduceus ZSV pred/target mismatch or empty: {len(preds)} vs {len(targets)}"
+        )
+
+    metrics = metrics_from_preds(preds, targets)
+    # Align with train-time regression suite when available.
+    try:
+        rich = compute_epoch_regression_metrics(
+            torch.tensor(preds, dtype=torch.float32),
+            torch.tensor(targets, dtype=torch.float32),
+            loss=total_loss / max(n, 1),
+        )
+        metrics = {**metrics, **{k: float(v) for k, v in rich.items()}}
+        metrics["n"] = int(n)
+        metrics["loss"] = float(total_loss / max(n, 1))
+    except Exception:
+        metrics["loss"] = float(total_loss / max(n, 1))
+
+    return write_zsv_artifacts(
+        out_json=Path(out_json),
+        model="caduceus",
+        checkpoint=model_dir,
+        metrics=metrics,
+        extra={
+            "n_pairs": len(pairs),
+            "max_length": int(max_length),
+            "batch_size": int(batch_size),
+            "amp": bool(use_amp),
+            "device": str(torch_device),
+        },
+    )
+
+
 def tb_log_split(writer, split: str, metrics: dict[str, Any], epoch: int) -> None:
     """Backward-compatible SummaryWriter-only helper."""
     from src.tb_logging import log_split_metrics

@@ -110,9 +110,26 @@ When **`adversarial=true`** (default in pipeline.yaml):
 | **`adversarial_task_type`** | Usually `classification` (fold-class 0/1/2) |
 | Fold-class rewrite | **Required:** `apply_fold_class_targets(..., label_split_csv=<direct split.csv>)` after adversarial `split_predict` |
 
-Optional: **`zsv=true`** → after each real train, eval final model on
+Optional: **`zsv=true`** → after each real train, eval **final_model** on
 `{out_root|adversarial}/PARSED|PREDICT/zero-shot-validation` via
 `src.pipeline.zsv_eval` (fail if trees missing).
+
+**Universal ZSV contract** (LegNet + Caduceus):
+
+| Piece | Role |
+|-------|------|
+| Trees | `{PARSED\|FASTA}/zero-shot-validation/*.ext` + matching `PREDICT/zero-shot-validation` |
+| Loader | `src.pipeline.zsv_eval.load_zsv_pairs` |
+| Metrics + artifacts | `metrics_from_preds` → `write_zsv_artifacts` → `logs/zero_shot_metrics.json` (+ jsonl/log) |
+| Caduceus adapter | `src.caduceus.evaluate_zsv_root` (HF `final_model/`, same JSON shape) |
+| LegNet adapter | `eval_legnet_zsv` (Lightning ckpt) |
+| Viz | `train_monitor` + `split_compare` consume ZSV metrics automatically |
+
+```bash
+# Caduceus / LegNet (same CLI)
+python -m src.pipeline.zsv_eval --model caduceus \
+  --outdir runs/run1/direct --split-root runs/run1 --device 0
+```
 
 ### Checkpoints (every 10 epochs → best as final)
 
@@ -168,6 +185,8 @@ pipeline:
 | `/adversarial` | Copy + random split + **fold-class PREDICT** |
 | `src.hydra_pipeline` | This orchestrator |
 | `src.hydra_train` | Hydra `/train` entry (LegNet/Caduceus) |
+| `src.pipeline.zsv_eval` | Universal ZSV dispatch (`load_zsv_pairs` + model adapters) |
+| `src.caduceus.evaluate_zsv_root` | Caduceus HF ZSV adapter |
 | `src.tb_logging` | Dual SummaryWriter + TensorBoardLogger helpers |
 | `src.train_viz.train_monitor` | Sync Lightning→jsonl + learning-curve monitor figs + TB export |
 | `src.train_viz.tensorboard_metrics` | Caduceus-shaped `tensorboard/` from train jsonl |
