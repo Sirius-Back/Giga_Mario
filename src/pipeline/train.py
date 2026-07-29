@@ -253,6 +253,7 @@ def run_train(
     legnet_demo: bool = False,
     zsv_root: Path | None = None,
     eval_zsv: bool = False,
+    checkpoint_every_n_epochs: int = 10,
 ) -> Path:
     """
     Wrapper around Caduceus / LegNet trainers.
@@ -262,6 +263,9 @@ def run_train(
 
     When ``eval_zsv=True``, evaluates the **final** checkpoint on
     ``{zsv_root}/PARSED|PREDICT/zero-shot-validation`` (required if True).
+
+    ``checkpoint_every_n_epochs`` saves periodic weights (default 10); after
+    train the best validation checkpoint is promoted to ``final_model/``.
     """
     model = model.lower()
     type = type.lower()
@@ -314,6 +318,7 @@ def run_train(
                 "--amp",
                 "--eval-max-samples", "8192",
                 "--train-eval-max-samples", "4096",
+                "--checkpoint-every-n-epochs", str(int(checkpoint_every_n_epochs)),
             ]
             if max_samples is not None:
                 argv += ["--max-samples", str(max_samples)]
@@ -363,6 +368,7 @@ def run_train(
             "--train-batch-size", str(batch_size),
             "--valid-batch-size", str(batch_size),
             "--num-workers", str(num_workers),
+            "--checkpoint-every-n-epochs", str(int(checkpoint_every_n_epochs)),
         ]
         if max_samples is not None:
             raise ValueError("LegNet does not support pipeline --max-samples")
@@ -435,6 +441,13 @@ def main(argv: list[str] | None = None) -> int:
         help="Panel outdir containing PARSED/PREDICT/zero-shot-validation",
     )
     p.add_argument(
+        "--checkpoint-every-n-epochs",
+        type=int,
+        default=10,
+        help="Save a periodic checkpoint every N epochs (0 disables). "
+        "After train, best validation checkpoint is promoted to final_model/.",
+    )
+    p.add_argument(
         "--tiny-outdir", type=Path, default=None,
         help="Materialize a deterministic 50/10/10 real SPLIT subset and exit",
     )
@@ -457,6 +470,7 @@ def main(argv: list[str] | None = None) -> int:
         max_length=args.max_length, seed=args.seed, n_devices=args.n_devices,
         num_workers=args.num_workers, legnet_demo=args.legnet_demo,
         zsv_root=args.zsv_root, eval_zsv=args.eval_zsv,
+        checkpoint_every_n_epochs=args.checkpoint_every_n_epochs,
     ))
     return 0
 

@@ -95,6 +95,7 @@ def _run_stages(cfg: DictConfig) -> int:
     )
 
     max_length = int(cfg.get("max_length", 512))
+    ckpt_every = int(cfg.get("checkpoint_every_n_epochs", 10))
     run_train(
         model=train_name,
         type=str(cfg.task_type),
@@ -111,6 +112,7 @@ def _run_stages(cfg: DictConfig) -> int:
         legnet_demo=train_name in {"legnet", "human_legnet"},
         zsv_root=out_root if eval_zsv else None,
         eval_zsv=eval_zsv and run_training,
+        checkpoint_every_n_epochs=ckpt_every,
     )
     # During/after-train monitoring figures (learning curves + split compare)
     try:
@@ -196,6 +198,7 @@ def _run_stages(cfg: DictConfig) -> int:
         legnet_demo=train_name in {"legnet", "human_legnet"},
         zsv_root=adv_root if eval_zsv else None,
         eval_zsv=eval_zsv and run_training,
+        checkpoint_every_n_epochs=ckpt_every,
     )
     try:
         from src.train_viz.train_monitor import refresh_train_monitor

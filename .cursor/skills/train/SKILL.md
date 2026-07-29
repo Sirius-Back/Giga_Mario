@@ -23,14 +23,15 @@ Write-and-exec adapter for model fine-tune on pipeline **SPLIT** trees (or legac
 | **`mode`** | `direct` \| `adversarial` (encoded in script filename) |
 | **`folders`** | Materialized SPLIT root (or Caduceus `train/val/test` layout) |
 | **`type`** | Task: `regression` (TPM / `predict_var1`) or `classification` |
-| **`outdir`** | Run output root (`logs/`, `tensorboard/`, `final_model/`, figures) |
+| **`outdir`** | Run output root (`logs/`, `tensorboard/`, `checkpoints/`, `best_model/`, `final_model/` = best, figures) |
 
 Optional but required when user/spec requests them:
 
 | Input | Meaning |
 |-------|---------|
-| **`zero-shot-validation` / ZSV** | Path to ZSV trees from `@split` / `src.pipeline.split` (`…/zero-shot-validation/`) — eval **final model** when specified |
+| **`zero-shot-validation` / ZSV** | Path to ZSV trees from `@split` / `src.pipeline.split` (`…/zero-shot-validation/`) — eval **final model** (best checkpoint) when specified |
 | **`epochs`**, **`seed`**, **`max_samples`** | Defaults: epochs per `model-train.mdc` (20), seed `42` |
+| **`checkpoint_every_n_epochs`** | Default **10**; periodic dumps under `checkpoints/`; `0` disables |
 | **`metrics.md`** | Regression metric contract (via Caduceus / TorchMetrics) |
 
 If any obligatory input is missing → **stop** (missing-data-policy). Do not invent folds, labels, or metrics.
@@ -99,7 +100,7 @@ train:
 - [ ] Confirm folders + type; ZSV path if requested
 - [ ] Write src/run/<run_id>/{data}_{split}_{train}_{mode}.py (imports only)
 - [ ] Exec that script
-- [ ] Verify logs/ + tensorboard/ + final_model/ (+ figures/; + ZSV metrics if requested)
+- [ ] Verify logs/ + tensorboard/ + checkpoints/ + best_model/ + final_model/ (=best) (+ figures with best ★; + ZSV metrics if requested)
 - [ ] method-decision + artifact-registry
 ```
 

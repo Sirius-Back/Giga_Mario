@@ -113,6 +113,7 @@ def _run(cfg) -> int:
         legnet_demo=bool(cfg.legnet_demo) and train_name in {"legnet", "human_legnet"},
         zsv_root=panel if zsv else None,
         eval_zsv=zsv and not smoke,
+        checkpoint_every_n_epochs=int(cfg.get("checkpoint_every_n_epochs", 10)),
     )
 
     outdir.mkdir(parents=True, exist_ok=True)

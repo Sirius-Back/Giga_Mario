@@ -8,7 +8,9 @@ Input:
 Output (--out, default runs/caduceus/<splits_name>/):
   logs/            epoch metrics.json / metrics.log / train_metrics.jsonl
   tensorboard/     Dual TB: summary/ (SummaryWriter) + lightning/ (TensorBoardLogger)
-  final_model/     HF save_pretrained checkpoint + tokenizer
+  checkpoints/     periodic HF checkpoints every N epochs (default 10)
+  best_model/      best val_loss checkpoint + best_meta.json
+  final_model/     copy of best_model (selected after train)
 
 Task auto-detect from labels.tsv:
   - column ``label`` (int) → classification (M2-style)
@@ -26,6 +28,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import shutil
 import sys
 import time
 from datetime import timedelta
@@ -285,8 +288,8 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         "--out",
         type=Path,
         default=None,
-        help="Output root (logs/, tensorboard/, final_model/). "
-        "Default: runs/caduceus/<splits_name>/",
+        help="Output root (logs/, tensorboard/, checkpoints/, best_model/, "
+        "final_model/=best). Default: runs/caduceus/<splits_name>/",
     )
     p.add_argument("--root", type=Path, default=Path("."))
     p.add_argument("--model-name", type=str, default=DEFAULT_MODEL)
@@ -326,6 +329,14 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         default="auto",
     )
     p.add_argument("--num-labels", type=int, default=None, help="Override class count")
+    p.add_argument(
+        "--checkpoint-every-n-epochs",
+        type=int,
+        default=10,
+        help="Save a periodic checkpoint under out/checkpoints/epochN every N "
+        "epochs (0 disables). Best val_loss is always tracked in best_model/; "
+        "final_model/ is set to best after train.",
+    )
     return p.parse_args(argv)
 
 
@@ -684,9 +695,42 @@ def run(args: argparse.Namespace) -> int:
                 raw_model.save_pretrained(best_dir)
                 tokenizer.save_pretrained(best_dir)
                 (best_dir / "best_meta.json").write_text(
-                    json.dumps({"epoch": epoch, "val_loss": best_val}, indent=2),
+                    json.dumps(
+                        {
+                            "epoch": epoch,
+                            "metric": "val_loss",
+                            "value": best_val,
+                            "val_loss": best_val,
+                            "selection": "min_val_loss",
+                        },
+                        indent=2,
+                    )
+                    + "\n",
                     encoding="utf-8",
                 )
+
+            # Periodic epoch checkpoints (every N epochs; also last epoch if
+            # it is not already a multiple — kept only on the every-N grid).
+            every_n = int(getattr(args, "checkpoint_every_n_epochs", 10) or 0)
+            if every_n > 0 and epoch % every_n == 0:
+                ckpt_dir = out / "checkpoints" / f"epoch{epoch}"
+                ckpt_dir.mkdir(parents=True, exist_ok=True)
+                raw_model.save_pretrained(ckpt_dir)
+                tokenizer.save_pretrained(ckpt_dir)
+                (ckpt_dir / "epoch_meta.json").write_text(
+                    json.dumps(
+                        {
+                            "epoch": epoch,
+                            "val_loss": float(val_metrics["loss"]),
+                            "kind": "periodic",
+                            "every_n_epochs": every_n,
+                        },
+                        indent=2,
+                    )
+                    + "\n",
+                    encoding="utf-8",
+                )
+                print(f"Saved periodic checkpoint → {ckpt_dir}", flush=True)
 
             print(json.dumps(payload), flush=True)
 
@@ -695,8 +739,30 @@ def run(args: argparse.Namespace) -> int:
 
     total_time = time.perf_counter() - t0
     if rank == 0:
-        raw_model.save_pretrained(final_dir)
-        tokenizer.save_pretrained(final_dir)
+        # final_model = best validation checkpoint (not last epoch)
+        best_dir = out / "best_model"
+        best_meta_path = best_dir / "best_meta.json"
+        if best_meta_path.is_file():
+            if final_dir.exists():
+                shutil.rmtree(final_dir)
+            shutil.copytree(best_dir, final_dir)
+            selection = json.loads(best_meta_path.read_text(encoding="utf-8"))
+            selection["promoted_to_final"] = True
+            (final_dir / "best_meta.json").write_text(
+                json.dumps(selection, indent=2) + "\n", encoding="utf-8"
+            )
+            print(
+                f"Selected best_model (epoch={selection.get('epoch')}, "
+                f"val_loss={selection.get('val_loss')}) → final_model",
+                flush=True,
+            )
+        else:
+            raw_model.save_pretrained(final_dir)
+            tokenizer.save_pretrained(final_dir)
+            print(
+                "WARNING: no best_model found; saved last-epoch weights as final_model",
+                flush=True,
+            )
         timing = {
             "train_time_sec": total_time,
             "train_time_min": total_time / 60.0,
@@ -705,6 +771,10 @@ def run(args: argparse.Namespace) -> int:
             "world_size": world,
             "seed": args.seed,
             "best_val_loss": best_val,
+            "checkpoint_every_n_epochs": int(
+                getattr(args, "checkpoint_every_n_epochs", 10) or 0
+            ),
+            "final_model_source": "best_model" if best_meta_path.is_file() else "last_epoch",
         }
         (logs_dir / "train_time.json").write_text(json.dumps(timing, indent=2), encoding="utf-8")
         (out / "train_time.json").write_text(json.dumps(timing, indent=2), encoding="utf-8")

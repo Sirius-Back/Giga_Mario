@@ -289,6 +289,61 @@ def _metric_long(
     return pd.DataFrame.from_records(records)
 
 
+def _mark_selected_best(
+    ax: Any,
+    grp: pd.DataFrame,
+    *,
+    x_key: str,
+    metric: str,
+    cfg: dict[str, Any],
+    color: str,
+    best_epoch: float | None,
+    patience: int | None,
+    annotate: bool = False,
+) -> None:
+    """Scatter the selected final/best checkpoint (or metric-inferred fallback)."""
+    if grp.empty:
+        return
+    xb = yb = None
+    label = "best"
+    if best_epoch is not None and x_key == "epoch":
+        # nearest epoch on the curve
+        xs = grp[x_key].to_numpy(dtype=float)
+        if xs.size:
+            j = int(np.nanargmin(np.abs(xs - float(best_epoch))))
+            xb = float(grp.iloc[j][x_key])
+            yb = float(grp.iloc[j]["value"])
+            label = "final/best"
+    if xb is None:
+        bi = best_index(list(grp["value"]), metric, cfg)
+        if bi is None:
+            return
+        xb = float(grp.iloc[bi][x_key])
+        yb = float(grp.iloc[bi]["value"])
+    ax.scatter(
+        [xb],
+        [yb],
+        s=90 if best_epoch is not None else 40,
+        color=color,
+        zorder=6,
+        edgecolors="black",
+        linewidths=0.8,
+        marker="*",
+    )
+    if annotate or best_epoch is not None:
+        ax.annotate(
+            f"{label}@{xb:g}\n{yb:.3g}",
+            (xb, yb),
+            textcoords="offset points",
+            xytext=(8, 8),
+            fontsize=7,
+            color=color,
+        )
+    if patience is not None:
+        stop = min(xb + patience, float(grp[x_key].max()))
+        ax.axvline(stop, color=color, linestyle="--", linewidth=1.0, alpha=0.7)
+
+
 def plot_learning_curves(
     rows: list[dict[str, Any]],
     metrics: list[str],
@@ -303,6 +358,7 @@ def plot_learning_curves(
     smooth: bool,
     patience: int | None,
     dpi: int,
+    best_epochs: dict[str, float] | None = None,
 ) -> list[Path]:
     import cnsplots as cns
 
@@ -314,6 +370,7 @@ def plot_learning_curves(
     metrics = metrics_with_data(rows, metrics)
     if not metrics:
         return written
+    best_epochs = best_epochs or {}
 
     pages: list[list[str]] = []
     if len(metrics) <= 9:
@@ -387,24 +444,33 @@ def plot_learning_curves(
             ax.set_xlabel(x_key.replace("_", " "))
             ax.set_ylabel(metric.replace("_", " "))
             cns.setup_ax(ax)
-            # Best-epoch markers (mean curve)
+            # Selected final/best checkpoint markers (prefer recorded best_meta epoch)
             for model in models:
-                for split in metric_splits:
+                # Prefer validation for the final-model marker; fall back to first split
+                mark_splits = (
+                    ["validation"]
+                    if "validation" in metric_splits
+                    else list(metric_splits)
+                )
+                for split in mark_splits:
                     sub = df[(df["model"] == model) & (df["split"] == split)]
                     if sub.empty:
                         continue
                     grp = sub.groupby(x_key, as_index=False)["value"].mean()
-                    bi = best_index(list(grp["value"]), metric, cfg)
-                    if bi is None:
-                        continue
-                    xb, yb = float(grp.iloc[bi][x_key]), float(grp.iloc[bi]["value"])
                     color = split_color(split, cfg) if not multi_model else model_color(
                         models.index(model), cfg
                     )
-                    ax.scatter([xb], [yb], s=40, color=color, zorder=5, edgecolors="white", linewidths=0.5)
-                    if patience is not None:
-                        stop = min(xb + patience, float(grp[x_key].max()))
-                        ax.axvline(stop, color=color, linestyle="--", linewidth=1.0, alpha=0.7)
+                    _mark_selected_best(
+                        ax,
+                        grp,
+                        x_key=x_key,
+                        metric=metric,
+                        cfg=cfg,
+                        color=color,
+                        best_epoch=best_epochs.get(model),
+                        patience=patience,
+                        annotate=(split == "validation"),
+                    )
                     if smooth and len(grp) >= 4:
                         sm = _lowess(
                             grp[x_key].to_numpy(dtype=float),
@@ -420,6 +486,7 @@ def plot_learning_curves(
                                 alpha=0.55,
                                 zorder=2,
                             )
+                    break  # one marker per model/metric panel
         stem = idx.next_stem(
             outdir, f"learning_curves_p{page_i + 1}" if len(pages) > 1 else "learning_curves"
         )
@@ -454,7 +521,7 @@ def plot_learning_curves(
                 ]
             import altair as alt
 
-            chart = (
+            line = (
                 alt.Chart(adf)
                 .mark_line(strokeWidth=2)
                 .encode(
@@ -464,10 +531,51 @@ def plot_learning_curves(
                         f"{color_field}:N",
                         scale=alt.Scale(domain=domain, range=crange),
                     ),
-                    facet=alt.Facet("metric:N", columns=3),
                     tooltip=[x_key, "value", color_field, "metric"],
                 )
-                .properties(title=page_title, width=220, height=160)
+            )
+            # Selected final/best checkpoint points (validation when available)
+            best_rows: list[dict[str, Any]] = []
+            for metric in page_metrics:
+                for model in models:
+                    be = best_epochs.get(model)
+                    if be is None or x_key != "epoch":
+                        continue
+                    sub = adf[
+                        (adf["metric"] == metric)
+                        & (adf["model"] == model)
+                        & (adf["split"] == "validation")
+                    ]
+                    if sub.empty:
+                        sub = adf[(adf["metric"] == metric) & (adf["model"] == model)]
+                    if sub.empty:
+                        continue
+                    xs = sub[x_key].to_numpy(dtype=float)
+                    j = int(np.nanargmin(np.abs(xs - float(be))))
+                    row = sub.iloc[j].to_dict()
+                    row["point_label"] = "final/best"
+                    best_rows.append(row)
+            if best_rows:
+                points = (
+                    alt.Chart(pd.DataFrame(best_rows))
+                    .mark_point(size=90, shape="triangle-up", filled=True)
+                    .encode(
+                        x=alt.X(f"{x_key}:Q"),
+                        y=alt.Y("value:Q"),
+                        color=alt.Color(
+                            f"{color_field}:N",
+                            scale=alt.Scale(domain=domain, range=crange),
+                            legend=None,
+                        ),
+                        tooltip=[x_key, "value", "point_label", "metric"],
+                    )
+                )
+                layered = alt.layer(line, points)
+            else:
+                layered = line
+            chart = (
+                layered.properties(width=220, height=160)
+                .facet(facet=alt.Facet("metric:N", columns=3), title=page_title)
                 .interactive()
             )
             written.extend(save_altair_chart(chart, stem.with_name(stem.name + "_altair")))
@@ -521,6 +629,32 @@ def plot_learning_curves(
         ax.set_xlabel(x_key.replace("_", " "))
         ax.set_ylabel(metric.replace("_", " "))
         cns.setup_ax(ax)
+        for model in models:
+            mark_splits = (
+                ["validation"] if "validation" in metric_splits else list(metric_splits)
+            )
+            for split in mark_splits:
+                sub = df[(df["model"] == model) & (df["split"] == split)]
+                if sub.empty:
+                    continue
+                grp = sub.groupby(x_key, as_index=False)["value"].mean()
+                color = (
+                    split_color(split, cfg)
+                    if not multi_model
+                    else model_color(models.index(model), cfg)
+                )
+                _mark_selected_best(
+                    ax,
+                    grp,
+                    x_key=x_key,
+                    metric=metric,
+                    cfg=cfg,
+                    color=color,
+                    best_epoch=best_epochs.get(model),
+                    patience=None,
+                    annotate=True,
+                )
+                break
         stem = idx.next_stem(outdir, metric)
         written.extend(save_cns_figure(stem, dpi))
         domain = sorted(df[hue].unique())
@@ -1009,6 +1143,7 @@ def plot_early_stopping(
     x_key: str,
     patience: int | None,
     dpi: int,
+    best_epochs: dict[str, float] | None = None,
 ) -> list[Path]:
     import cnsplots as cns
     import altair as alt
@@ -1021,6 +1156,7 @@ def plot_early_stopping(
     )
     split = "validation" if any(r["split"] == "validation" for r in rows) else "train"
     models = sorted({r["model"] for r in rows})
+    best_epochs = best_epochs or {}
     df = _metric_long(
         rows,
         metric,
@@ -1050,35 +1186,31 @@ def plot_early_stopping(
         sub = df[df["model"] == model].groupby(x_key, as_index=False)["value"].mean()
         if sub.empty:
             continue
-        bi = best_index(list(sub["value"]), metric, cfg)
-        if bi is None:
-            continue
-        xb, yb = float(sub.iloc[bi][x_key]), float(sub.iloc[bi]["value"])
         color = model_color(mi, cfg) if len(models) > 1 else split_color(split, cfg)
-        ax.scatter([xb], [yb], s=70, color=color, zorder=4, edgecolors="white")
-        ax.axvline(xb, color=color, linestyle=":", linewidth=1.2, alpha=0.9)
-        if patience is not None:
-            stop = min(xb + patience, float(sub[x_key].max()))
-            ax.axvspan(xb, stop, color=color, alpha=0.12)
-            ax.axvline(stop, color=color, linestyle="--", linewidth=1.2)
-        ax.annotate(
-            f"checkpoint@{xb:g}\n{yb:.3g}",
-            (xb, yb),
-            textcoords="offset points",
-            xytext=(8, 8),
-            fontsize=7,
+        _mark_selected_best(
+            ax,
+            sub,
+            x_key=x_key,
+            metric=metric,
+            cfg=cfg,
             color=color,
+            best_epoch=best_epochs.get(model),
+            patience=patience,
+            annotate=True,
         )
+        be = best_epochs.get(model)
+        if be is not None and x_key == "epoch":
+            ax.axvline(float(be), color=color, linestyle=":", linewidth=1.2, alpha=0.9)
     ax.set_xlabel(x_key.replace("_", " "))
     ax.set_ylabel(metric.replace("_", " "))
-    ax.set_title("Early stopping / best checkpoint")
+    ax.set_title("Early stopping / best checkpoint (final model)")
     cns.setup_ax(ax)
     stem = idx.next_stem(outdir, "early_stopping")
     written = save_cns_figure(stem, dpi)
     chart = _altair_line(
         df,
         x_key=x_key,
-        title="Early stopping / best checkpoint",
+        title="Early stopping / best checkpoint (final model)",
         color_field="model" if len(models) > 1 else "split_label",
         color_domain=models if len(models) > 1 else [split_label(split)],
         color_range=[model_color(i, cfg) for i in range(len(models))]

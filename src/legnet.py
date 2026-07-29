@@ -9,8 +9,9 @@ Output (--out, default runs/legnet/<data_stem>/):
   logs/                 run_config.json, train_metrics.jsonl, metrics.log, epoch{N}/
   tensorboard/          train/val scalars (Lightning + jsonl backfill)
   model_{val}_{test}/   upstream Lightning dump + predictions
-  best_model/           best val_pearson .ckpt
-  final_model/          last epoch .ckpt
+  checkpoints/          periodic every-N-epoch .ckpt files (default N=10)
+  best_model/           best val_pearson .ckpt + best_meta.json
+  final_model/          copy of best_model (selected after train)
   metrics_summary.json / .md
   train_time.json
 
@@ -182,37 +183,120 @@ def _write_caduceus_like_logs(out_dir: Path, epoch_rows: list[dict[str, Any]]) -
     log_path.write_text("\n".join(lines_log) + ("\n" if lines_log else ""), encoding="utf-8")
 
 
-def _copy_checkpoints(out_dir: Path) -> dict[str, str | None]:
+def _parse_epoch_from_ckpt_name(name: str) -> int | None:
+    """Extract epoch index from Lightning filenames like ``pearson-epoch=12-…``."""
+    import re
+
+    m = re.search(r"epoch[=_-](\d+)", name)
+    if not m:
+        return None
+    return int(m.group(1))
+
+
+def _parse_val_pearson_from_ckpt_name(name: str) -> float | None:
+    if "val_pearson=" not in name:
+        return None
+    try:
+        return float(name.split("val_pearson=")[1].replace(".ckpt", ""))
+    except ValueError:
+        return None
+
+
+def _copy_checkpoints(out_dir: Path) -> dict[str, Any]:
+    """Promote best val_pearson ckpt to best_model/ and final_model/.
+
+    Periodic ``epoch-*.ckpt`` files (every N epochs from human_legnet) are
+    collected under ``checkpoints/``. Last-epoch weights stay in Lightning dirs
+    only — ``final_model/`` is always the selected best checkpoint.
+    """
     best_dir = out_dir / "best_model"
     final_dir = out_dir / "final_model"
+    ckpt_root = out_dir / "checkpoints"
     best_dir.mkdir(parents=True, exist_ok=True)
     final_dir.mkdir(parents=True, exist_ok=True)
+    ckpt_root.mkdir(parents=True, exist_ok=True)
+
     pearson_ckpts = sorted(out_dir.rglob("pearson-*.ckpt"))
+    # Lightning stores under …/lightning_logs/…/checkpoints/; only skip our
+    # promoted roots (best_model/, final_model/, top-level checkpoints/).
+    skip_roots = {best_dir.resolve(), final_dir.resolve(), ckpt_root.resolve()}
+    periodic_ckpts = sorted(
+        p
+        for p in out_dir.rglob("epoch-*.ckpt")
+        if p.name.startswith("epoch-")
+        and not any(
+            skip == p.resolve().parent or skip in p.resolve().parents
+            for skip in skip_roots
+        )
+    )
     last_ckpts = sorted(out_dir.rglob("last_model-*.ckpt"))
+
     best_dst: str | None = None
-    last_dst: str | None = None
+    final_dst: str | None = None
+    best_meta: dict[str, Any] | None = None
+
     if pearson_ckpts:
+
         def _score(p: Path) -> float:
-            name = p.name
-            if "val_pearson=" in name:
-                try:
-                    return float(name.split("val_pearson=")[1].replace(".ckpt", ""))
-                except ValueError:
-                    return float("-inf")
-            return float("-inf")
+            parsed = _parse_val_pearson_from_ckpt_name(p.name)
+            return parsed if parsed is not None else float("-inf")
 
         src = max(pearson_ckpts, key=_score)
         dst = best_dir / src.name
         if src.resolve() != dst.resolve():
             shutil.copy2(src, dst)
         best_dst = str(dst)
-    if last_ckpts:
+        # final_model = best (not last)
+        final_path = final_dir / src.name
+        if src.resolve() != final_path.resolve():
+            shutil.copy2(src, final_path)
+        final_dst = str(final_path)
+        ep = _parse_epoch_from_ckpt_name(src.name)
+        score = _parse_val_pearson_from_ckpt_name(src.name)
+        best_meta = {
+            "epoch": ep,
+            "metric": "val_pearson",
+            "value": score,
+            "val_pearson": score,
+            "selection": "max_val_pearson",
+            "checkpoint": src.name,
+            "promoted_to_final": True,
+        }
+        (best_dir / "best_meta.json").write_text(
+            json.dumps(best_meta, indent=2) + "\n", encoding="utf-8"
+        )
+        (final_dir / "best_meta.json").write_text(
+            json.dumps(best_meta, indent=2) + "\n", encoding="utf-8"
+        )
+    elif last_ckpts:
+        # Fallback when no pearson monitor ckpt exists
         src = max(last_ckpts, key=lambda p: p.stat().st_mtime)
         dst = final_dir / src.name
         if src.resolve() != dst.resolve():
             shutil.copy2(src, dst)
-        last_dst = str(dst)
-    return {"best_model": best_dst, "final_model": last_dst}
+        final_dst = str(dst)
+        best_meta = {
+            "epoch": _parse_epoch_from_ckpt_name(src.name),
+            "metric": "last",
+            "selection": "last_epoch_fallback",
+            "checkpoint": src.name,
+            "promoted_to_final": True,
+        }
+        (final_dir / "best_meta.json").write_text(
+            json.dumps(best_meta, indent=2) + "\n", encoding="utf-8"
+        )
+
+    for src in periodic_ckpts:
+        dst = ckpt_root / src.name
+        if src.resolve() != dst.resolve():
+            shutil.copy2(src, dst)
+
+    return {
+        "best_model": best_dst,
+        "final_model": final_dst,
+        "checkpoints": str(ckpt_root) if periodic_ckpts else None,
+        "best_meta": best_meta,
+    }
 
 
 def _find_metrics_csv(out_dir: Path) -> Path | None:
@@ -236,6 +320,7 @@ def run(
     train_batch_size: int,
     valid_batch_size: int,
     num_workers: int,
+    checkpoint_every_n_epochs: int = 10,
 ) -> int:
     data_path = data_path.resolve()
     out_dir = out_dir.resolve()
@@ -269,6 +354,7 @@ def run(
         "train_batch_size": train_batch_size,
         "valid_batch_size": valid_batch_size,
         "num_workers": num_workers,
+        "checkpoint_every_n_epochs": checkpoint_every_n_epochs,
         "data_stats": stats,
         "started_at": datetime.now(timezone.utc).isoformat(),
     }
@@ -294,6 +380,8 @@ def run(
         str(valid_batch_size),
         "--num_workers",
         str(num_workers),
+        "--checkpoint_every_n_epochs",
+        str(checkpoint_every_n_epochs),
     ]
     if demo:
         cmd_core.append("--demo")
@@ -396,6 +484,13 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--train-batch-size", type=int, default=1024)
     ap.add_argument("--valid-batch-size", type=int, default=1024)
     ap.add_argument("--num-workers", type=int, default=8)
+    ap.add_argument(
+        "--checkpoint-every-n-epochs",
+        type=int,
+        default=10,
+        help="Periodic Lightning checkpoints every N epochs (0 disables). "
+        "Best val_pearson is always kept; final_model/ is set to best after train.",
+    )
     args = ap.parse_args(argv)
 
     out = args.out
@@ -417,6 +512,7 @@ def main(argv: list[str] | None = None) -> int:
         train_batch_size=args.train_batch_size,
         valid_batch_size=args.valid_batch_size,
         num_workers=args.num_workers,
+        checkpoint_every_n_epochs=args.checkpoint_every_n_epochs,
     )
 
 

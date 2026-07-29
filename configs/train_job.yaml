@@ -17,6 +17,7 @@ task_type: regression
 adversarial_task_type: classification
 seed: 42
 epochs: 20
+checkpoint_every_n_epochs: 10
 n_devices: 1
 batch_size: 1024
 num_workers: 8

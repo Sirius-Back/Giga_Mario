@@ -114,6 +114,17 @@ Optional: **`zsv=true`** → after each real train, eval final model on
 `{out_root|adversarial}/PARSED|PREDICT/zero-shot-validation` via
 `src.pipeline.zsv_eval` (fail if trees missing).
 
+### Checkpoints (every 10 epochs → best as final)
+
+| Behavior | Detail |
+|----------|--------|
+| **Periodic** | `checkpoint_every_n_epochs` (default **10**) → `checkpoints/epochN/` (Caduceus HF) or `epoch-*.ckpt` under `checkpoints/` (LegNet) |
+| **Best** | Tracked live in `best_model/` (Caduceus: min val_loss; LegNet: max val_pearson) + `best_meta.json` |
+| **Final** | After train, **`final_model/` = best checkpoint** (not last epoch). ZSV eval uses `final_model/`. |
+| **Train viz** | Learning curves + early-stopping figures mark the selected final/best epoch as a ★ point (from `best_meta.json`) |
+
+Override: `checkpoint_every_n_epochs=0` disables periodic dumps (best/final selection still runs).
+
 ## Stage order
 
 ```
@@ -134,13 +145,15 @@ Model CLIs are declared in `configs/train/{legnet,caduceus}.yaml`
 
 ```
 pipeline:
-- [ ] Confirm Hydra overrides (run_id, mode, train, epochs, gpus, adversarial, zsv)
+- [ ] Confirm Hydra overrides (run_id, mode, train, epochs, gpus, adversarial, zsv, checkpoint_every_n_epochs)
 - [ ] Confirm panel_root complete
 - [ ] dry: python -m src.hydra_pipeline mode=dry …
 - [ ] run: python -m src.hydra_pipeline mode=run …
 - [ ] Verify fold-class sidecar adversarial/PREDICT/predict_target.json when adversarial
 - [ ] Verify logs/zero_shot_metrics.json when zsv=true
-- [ ] Verify `{direct,adversarial/train}/figures/train_monitor/` learning curves for monitoring
+- [ ] Verify `checkpoints/` periodic dumps every N epochs (when N>0 and epochs≥N)
+- [ ] Verify `best_model/best_meta.json` and `final_model/` == selected best
+- [ ] Verify `{direct,adversarial/train}/figures/train_monitor/` learning curves mark final/best ★
 - [ ] Verify `{direct,adversarial/train}/figures/split_compare/` (cnsplots + Altair) when metrics exist
 - [ ] Verify `{direct,adversarial/train}/tensorboard/` has train metrics event files
 - [ ] method-decision + artifact-registry

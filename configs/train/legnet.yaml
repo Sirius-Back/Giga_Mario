@@ -12,6 +12,7 @@ direct_cmd: >-
   --valid-batch-size ${batch_size}
   --num-workers ${num_workers}
   --seed ${seed}
+  --checkpoint-every-n-epochs ${checkpoint_every_n_epochs}
   --demo
 adversarial_cmd: >-
   python -m src.legnet
@@ -23,6 +24,7 @@ adversarial_cmd: >-
   --valid-batch-size ${batch_size}
   --num-workers ${num_workers}
   --seed ${seed}
+  --checkpoint-every-n-epochs ${checkpoint_every_n_epochs}
   --demo
 zsv_cmd: >-
   python -m src.pipeline.zsv_eval

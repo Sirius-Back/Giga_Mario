@@ -230,6 +230,39 @@ def best_index(values: list[float], metric: str, cfg: dict[str, Any]) -> int | N
     return int(np.nanargmax(arr))
 
 
+def load_best_checkpoint_meta(run_dir: Path) -> dict[str, Any] | None:
+    """Load ``best_model/best_meta.json`` (or final_model copy) if present."""
+    run_dir = Path(run_dir)
+    for rel in (
+        Path("best_model") / "best_meta.json",
+        Path("final_model") / "best_meta.json",
+    ):
+        path = run_dir / rel
+        if not path.is_file():
+            continue
+        try:
+            meta = json.loads(path.read_text(encoding="utf-8"))
+        except json.JSONDecodeError:
+            continue
+        if isinstance(meta, dict) and meta.get("epoch") is not None:
+            return meta
+    return None
+
+
+def resolve_best_epoch_for_log(log_path: Path) -> float | None:
+    """Infer selected best-checkpoint epoch from a train metrics log path."""
+    log_path = Path(log_path)
+    # …/logs/train_metrics*.jsonl → run dir is parent of logs/
+    run_dir = log_path.parent.parent if log_path.parent.name == "logs" else log_path.parent
+    meta = load_best_checkpoint_meta(run_dir)
+    if meta is None:
+        return None
+    try:
+        return float(meta["epoch"])
+    except (TypeError, ValueError, KeyError):
+        return None
+
+
 def _try_parse_mapping(line: str) -> dict[str, Any] | None:
     text = line.strip()
     if not text or text[0] not in "{[":
@@ -607,8 +640,10 @@ def build_training_summary(
     *,
     patience: int | None,
     configs: dict[str, dict[str, Any] | None],
+    best_epochs: dict[str, float] | None = None,
 ) -> list[dict[str, Any]]:
     summary: list[dict[str, Any]] = []
+    best_epochs = best_epochs or {}
     runs = sorted({r["run"] for r in rows})
     for run in runs:
         run_rows = [r for r in rows if r["run"] == run]
@@ -620,17 +655,23 @@ def build_training_summary(
         dur_pts = [r["value"] for r in run_rows if r["metric"] == "elapsed_sec"]
         if dur_pts:
             duration = float(max(dur_pts))
+        recorded_best = best_epochs.get(model)
         # primary metric: loss on validation else train
         for metric in order_metrics({r["metric"] for r in run_rows}, cfg):
             for split in ("validation", "test", "train"):
                 xs, ys = _series(run_rows, run=run, split=split, metric=metric, x_key="epoch")
                 if xs.size == 0:
                     continue
-                bi = best_index(list(ys), metric, cfg)
-                if bi is None:
-                    continue
-                best_ep = float(xs[bi])
-                best_val = float(ys[bi])
+                if recorded_best is not None:
+                    j = int(np.nanargmin(np.abs(xs.astype(float) - float(recorded_best))))
+                    best_ep = float(xs[j])
+                    best_val = float(ys[j])
+                else:
+                    bi = best_index(list(ys), metric, cfg)
+                    if bi is None:
+                        continue
+                    best_ep = float(xs[bi])
+                    best_val = float(ys[bi])
                 final_val = float(ys[-1]) if not np.isnan(ys[-1]) else float("nan")
                 early = best_ep + patience if patience is not None else None
                 summary.append(
@@ -646,6 +687,7 @@ def build_training_summary(
                         "early_stopping_epoch": early,
                         "training_duration_sec": duration,
                         "number_of_epochs": n_epochs,
+                        "selected_final_checkpoint": recorded_best is not None,
                         "model_name_meta": (configs.get(run) or {}).get("model_name"),
                         "batch_size": (configs.get(run) or {}).get("batch_size"),
                     }
@@ -974,11 +1016,11 @@ def main(argv: list[str] | None = None) -> int:
         return 2
 
     all_rows: list[dict[str, Any]] = []
-    all_rows: list[dict[str, Any]] = []
     all_metrics: set[str] = set()
     all_nan_only: set[str] = set()
     configs: dict[str, dict[str, Any] | None] = {}
     summaries_txt: list[str] = []
+    best_epochs: dict[str, float] = {}
 
     for i, (path, label) in enumerate(zip(log_paths, labels)):
         config, epochs = parse_log(path)
@@ -990,10 +1032,19 @@ def main(argv: list[str] | None = None) -> int:
         all_metrics |= metrics
         all_nan_only |= nan_only
         configs[label] = config
-        summaries_txt.append(
-            f"- `{path}` → run `{label}` model=`{model}` seed=`{seed}`: "
-            f"{len(epochs)} epochs; metrics={sorted(metrics)}; splits={sorted(splits)}"
-        )
+        be = resolve_best_epoch_for_log(path)
+        if be is not None:
+            best_epochs[model] = be
+            summaries_txt.append(
+                f"- `{path}` → run `{label}` model=`{model}` seed=`{seed}`: "
+                f"{len(epochs)} epochs; metrics={sorted(metrics)}; splits={sorted(splits)}; "
+                f"final/best_epoch={be:g}"
+            )
+        else:
+            summaries_txt.append(
+                f"- `{path}` → run `{label}` model=`{model}` seed=`{seed}`: "
+                f"{len(epochs)} epochs; metrics={sorted(metrics)}; splits={sorted(splits)}"
+            )
         if nan_only:
             summaries_txt.append(
                 f"  (omitted all-NaN metrics: {sorted(nan_only)})"
@@ -1069,6 +1120,7 @@ def main(argv: list[str] | None = None) -> int:
             smooth=args.smooth,
             patience=args.patience,
             dpi=dpi,
+            best_epochs=best_epochs,
         )
     )
     if n_models >= 2:
@@ -1107,13 +1159,20 @@ def main(argv: list[str] | None = None) -> int:
             x_key=args.x,
             patience=args.patience,
             dpi=dpi,
+            best_epochs=best_epochs,
         )
     )
     written.extend(
         plot_learning_rate(all_rows, cfg, args.outdir, idx, x_key=args.x, dpi=dpi)
     )
 
-    summary = build_training_summary(all_rows, cfg, patience=args.patience, configs=configs)
+    summary = build_training_summary(
+        all_rows,
+        cfg,
+        patience=args.patience,
+        configs=configs,
+        best_epochs=best_epochs,
+    )
     write_csv(
         summary,
         args.outdir / "training_summary.csv",
@@ -1129,6 +1188,7 @@ def main(argv: list[str] | None = None) -> int:
             "early_stopping_epoch",
             "training_duration_sec",
             "number_of_epochs",
+            "selected_final_checkpoint",
             "model_name_meta",
             "batch_size",
         ],

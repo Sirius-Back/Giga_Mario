@@ -9,6 +9,7 @@ direct_cmd: >-
   --batch-size ${batch_size}
   --seed ${seed}
   --task ${task_type}
+  --checkpoint-every-n-epochs ${checkpoint_every_n_epochs}
 adversarial_cmd: >-
   python -m src.caduceus
   --splits-dir ${out_root}/adversarial/train/caduceus_input
@@ -17,6 +18,7 @@ adversarial_cmd: >-
   --batch-size ${batch_size}
   --seed ${seed}
   --task ${adversarial_task_type}
+  --checkpoint-every-n-epochs ${checkpoint_every_n_epochs}
 zsv_cmd: >-
   python -m src.pipeline.zsv_eval
   --model caduceus
