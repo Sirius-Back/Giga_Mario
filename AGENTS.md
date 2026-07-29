@@ -22,6 +22,8 @@
 | `src/splits/main.py` | `@split` dispatcher (`python -m src.splits.main`) |
 | `src/splits/sbs/` | Split-by-similarity core (FNA→distance→assignment) |
 | `src/splits/gc.py` | GC SBS strategy (`split-predict type=gc`) |
+| `src/splits/hashfrag.py` | hashFrag homology strategy (`split-predict type=hashfrag`) |
+| `splits/hashfrag.md` | Caption for hashFrag orthogonal split |
 | `wiki/sbs.md` | SBS architecture contracts |
 | `src/caduceus.py` | `@caduceus` fine-tune (`python -m src.caduceus`) |
 | `src/hydra_pipeline.py` | `/pipeline` Hydra orchestrator |

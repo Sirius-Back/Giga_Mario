@@ -20,7 +20,7 @@ Legacy Caduceus/LegNet/adapt skills were moved to [`archive/skills/`](archive/sk
 | `train` | Caduceus/LegNet train + viz + TB + optional ZSV eval | `src/run/run_id/{data}_{split}_{train}_{direct\|adversarial}.py` |
 | `adversarial` | Adversarial panel + random re-split | `src/run/run_id/{data}_{split}_adversarial.py` |
 | `pipeline` | Orchestrate split → train → optional adversarial → train | `src/run/run_id/pipeline.py` (`dry`\|`run`) |
-| `hashfrag` | Homology leakage: MARKED → multi-FASTA → hashFrag+BLAST (filter / stratify / orthogonal) | external `hashFrag` CLI; `MARKED/` + optional `split.csv`; thin `src/run/` FASTA adapters |
+| `hashfrag` | Homology-aware **split strategy** (`type=hashfrag`): MARKED → orthogonal splits → `split.csv` | `splits/hashfrag.md` → `src/splits/hashfrag.py` + `split_predict`; external `hashFrag`+BLAST |
 
 Docs: [wiki/architecture.md](wiki/architecture.md), [wiki/split-generate.md](wiki/split-generate.md). hashFrag: [docs](https://hashfrag.readthedocs.io/en/latest/), [repo](https://github.com/de-Boer-Lab/hashFrag).
 

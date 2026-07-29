@@ -227,12 +227,16 @@ Append **method-decision** for threshold, mode (`lightning`/`pure`), seed, and a
 | Skill / module | Role |
 |----------------|------|
 | `/preprocess`, `adapt` | Produce `MARKED/` — **canonical hashFrag sequence source** |
-| `/split`, `/split-generate` | `split.csv` for train/test membership; hashFrag can **audit** random/SBS splits or **propose** homology-aware alternatives |
-| `/train` | Prefer evaluating on hashFrag-filtered or stratified test sets when leakage is a concern |
+| `/split-generate` | Caption `splits/hashfrag.md` → `src/splits/hashfrag.py` |
+| `/split` | **Primary path:** `split-predict --type hashfrag` → `split.csv` → materialize `SPLIT/` (peer to `random` / `gc`) |
+| `/train` | Train on hashFrag-materialized `SPLIT/` when homology-aware partitions are required |
 | `/dataset-auditor` | Completeness of sequence panels before homology search |
-| `src/splits/sbs` | Similarity-based split family — complementary; reuse `fna_io` for MARKED load; do not duplicate SBS distance logic inside hashFrag skill |
+| `src/splits/hashfrag.py` | Strategy runner: MARKED → `create_orthogonal_splits` → `split.csv` |
+| `src/splits/sbs` | Complementary composition/SBS family (`gc`); reuse `fna_io` for MARKED load |
 
-If integrating results back into universal `split.csv` / `SPLIT/`, write a `src/run/…` adapter that maps hashFrag ID lists → fold labels via existing `src.pipeline` APIs. Do not silently rewrite validated splits.
+**Default project use:** treat hashFrag as a **split strategy** (`type=hashfrag`), not only as a post-hoc filter. Use `filter_existing_splits` / `stratify_test_split` when auditing an already-locked `split.csv` from another strategy.
+
+Do not silently rewrite validated splits from other strategies; write a new `outdir` / run id.
 
 **Not MARKED:** mapped training IDs `sample__region` appear in `SPLIT/` after mapped `parse_target` — those are downstream of MARKED region IDs. Run homology on **region** MARKED unless the user explicitly requests mapped-panel sequences.
 
