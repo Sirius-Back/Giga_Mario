@@ -284,3 +284,8 @@ gtf
 mpra
 random_borzoi_expr_file_mappings.csv
 tpm
+
+# Python virtualenvs
+.venv/
+venv/
+**/venv/

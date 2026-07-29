@@ -67,11 +67,12 @@ def _run_stages(cfg: DictConfig) -> int:
     marked_cfg = cfg.get("marked", None)
     if marked_cfg:
         marked_path: Path | None = _resolve_path(marked_cfg)
-    elif split_type == "gc":
+    elif split_type in {"gc", "hashfrag"}:
         marked_path = panel_root / "MARKED"
         if not marked_path.is_dir():
             raise FileNotFoundError(
-                f"split=gc requires MARKED dir (or marked=… override): {marked_path}"
+                f"split={split_type} requires MARKED dir (or marked=… override): "
+                f"{marked_path}"
             )
     else:
         marked_path = None
@@ -79,6 +80,22 @@ def _run_stages(cfg: DictConfig) -> int:
     max_ids = int(max_ids_cfg) if max_ids_cfg not in (None, "", "null") else None
     plot_split = bool(cfg.get("plot_split", True))
     cluster_method = str(cfg.get("cluster_method", "auto"))
+    threshold_cfg = cfg.get("threshold", None)
+    threshold = (
+        float(threshold_cfg)
+        if threshold_cfg not in (None, "", "null")
+        else None
+    )
+    p_train_cfg = cfg.get("p_train", None)
+    p_test_cfg = cfg.get("p_test", None)
+    p_train = float(p_train_cfg) if p_train_cfg not in (None, "", "null") else None
+    p_test = float(p_test_cfg) if p_test_cfg not in (None, "", "null") else None
+    threads_cfg = cfg.get("threads", None)
+    if threads_cfg in (None, "", "null"):
+        threads = max(2, int(cfg.n_devices) * 2)
+    else:
+        threads = int(threads_cfg)
+    force_split = bool(cfg.get("force", False))
 
     split_csv = run_split_predict(
         outdir=out_root,
@@ -91,6 +108,11 @@ def _run_stages(cfg: DictConfig) -> int:
         max_ids=max_ids,
         plot=plot_split and split_type == "gc",
         cluster_method=cluster_method,
+        threshold=threshold,
+        p_train=p_train,
+        p_test=p_test,
+        threads=threads,
+        force=force_split,
     )
     split_root = run_split(
         split_csv,

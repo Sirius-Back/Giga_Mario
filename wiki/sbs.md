@@ -81,6 +81,19 @@ Plus a combined Altair facet of the first three panels.
 | `GC_pct` | \(100 \times GC/(A+C+G+T)\) |
 | `AAA_pct` | \(100 \times\) overlapping AAA count / \((L-2)\) |
 
+## K-mer features (`type=kmer`)
+
+| Backend | Module |
+|---------|--------|
+| `KmerFeatureBackend` | `src.splits.sbs.backends.kmer` |
+| Strategy wrapper | `src.splits.kmer` → `split-predict type=kmer` |
+
+- **DSK** counts observed k-mers for **`k >= 3`** (`abundance-min=1`); `dsk2ascii` → relative abundance FeatureTable.
+- **`k <= 2`**: GATB DSK rejects these sizes; in-process overlapping ACGT counts with the same FeatureTable contract (documented in `method-decision.md`).
+- Multi-`k` concatenates columns (`k4_…`, `k5_…`); single `k` uses `kmer_…` names.
+- Dense \(4^k\) vocabularies are **not** pre-allocated — only observed k-mers across the panel.
+
 ## Strategy captions
 
-`splits/gc.md` → `src/splits/gc.py` → `split-predict type=gc`.
+`splits/gc.md` → `src/splits/gc.py` → `split-predict type=gc`.  
+`splits/kmer.md` → `src/splits/kmer.py` → `split-predict type=kmer`.

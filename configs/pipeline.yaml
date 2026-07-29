@@ -31,9 +31,17 @@ panel_root: run/${run_id}
 out_root: run/${run_id}
 zsv: true
 conda_env: legnet
-# GC / SBS: MARKED or FNA root (null → panel_root/MARKED when split=gc)
+# GC / SBS / hashfrag: MARKED or FNA root (null → panel_root/MARKED when split=gc|hashfrag)
 marked: null
 max_ids: null
+# hashFrag homology threshold (-t); required when split=hashfrag
+threshold: null
+# Optional hashFrag train/test proportions (must sum to 1); null → Caduceus-like defaults
+p_train: null
+p_test: null
+# BLAST threads for split=hashfrag (null → 2 * n_devices)
+threads: null
+force: false
 plot_split: true
 # After-train visualization (learning curves + SBS PCA on split.csv)
 plot_train: true
