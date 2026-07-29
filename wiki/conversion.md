@@ -15,7 +15,7 @@ raw/
   random_borzoi_expr_file_mappings.csv   # id → genome (GCF) pairing
 ```
 
-Current eukaryotic panel (2026-07-27): **10** RefSeq assemblies under `fna/` + `gtf/`; **9** usable TPM files under `tpm/` (mapping lists `SRX19584896` for `GCF_041296265.1`, but that CSV is absent → genome skipped).
+Current eukaryotic panel (2026-07-29): **11** RefSeq assemblies under `fna/` + `gtf/` with matching TPM under `tpm/` (horse = EquCab3.0 `GCF_002863925.1` + derived `SRX19584896.csv`; goat = ARS1.2 `GCF_001704415.2` + derived `SRX6696967.csv`). TB-T2T horse archived (no GEO for that assembly).
 
 Pairing key: `GCF_########.##` prefix shared by FNA/GTF filenames and the mapping `genome` column.
 

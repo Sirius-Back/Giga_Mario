@@ -345,6 +345,70 @@ def test_parse_target_prefers_raw_target_id_remap_via_id_rule(tmp_path):
     assert float(rows[0]["predict_var1"]) == 9.0
 
 
+def test_parse_target_log10p1_transform(tmp_path):
+    """Optional log10(TPM+1) transform; default none preserves raw values."""
+    import math
+
+    id_csv = tmp_path / "ID.csv"
+    id_csv.write_text(
+        "genome|chr|pos1|pos2|gene_nameORnon_coding_ID|raw_target_ID|ID\n"
+        "GCF_X.1|chr1|1|10|thrL|b0001|1\n"
+        "GCF_X.1|chr1|20|30|orphan|b0099|2\n",
+        encoding="utf-8",
+    )
+    target_dir = tmp_path / "tpm"
+    target_dir.mkdir()
+    (target_dir / "GCF_X.1.csv").write_text("b0001\n9.0\n", encoding="utf-8")
+
+    raw_paths = parse_target.run_parse_target(
+        target_dir, outdir=tmp_path / "raw", id_csv=id_csv, to_type="caduceus"
+    )
+    raw_by = {r["id"]: float(r["predict_var1"]) for r in read_csv(raw_paths["predict_csv"])}
+    assert raw_by == {"1": 9.0, "2": 0.0}
+
+    log_paths = parse_target.run_parse_target(
+        target_dir,
+        outdir=tmp_path / "log",
+        id_csv=id_csv,
+        to_type="caduceus",
+        transform="log10p1",
+    )
+    log_by = {r["id"]: float(r["predict_var1"]) for r in read_csv(log_paths["predict_csv"])}
+    assert log_by["1"] == math.log10(9.0 + 1.0)
+    assert log_by["2"] == 0.0  # log10(0+1)
+    assert float((log_paths["predict_dir"] / "1.ext").read_text().strip()) == log_by["1"]
+
+
+def test_parse_target_log10p1_transform(tmp_path):
+    """transform=log10p1 writes log10(TPM+1); absent→0 stays 0."""
+    import math
+
+    id_csv = tmp_path / "ID.csv"
+    id_csv.write_text(
+        "genome|chr|pos1|pos2|gene_nameORnon_coding_ID|raw_target_ID|ID\n"
+        "GCF_X.1|chr1|1|10|thrL|b0001|1\n"
+        "GCF_X.1|chr1|20|30|orphan|b0099|2\n",
+        encoding="utf-8",
+    )
+    target_dir = tmp_path / "tpm"
+    target_dir.mkdir()
+    (target_dir / "GCF_X.1.csv").write_text("b0001\n9.0\n", encoding="utf-8")
+
+    paths = parse_target.run_parse_target(
+        target_dir,
+        outdir=tmp_path / "out",
+        id_csv=id_csv,
+        to_type="caduceus",
+        transform="log10p1",
+    )
+    by_id = {r["id"]: float(r["predict_var1"]) for r in read_csv(paths["predict_csv"])}
+    assert by_id["1"] == pytest.approx(math.log10(10.0))
+    assert by_id["2"] == pytest.approx(0.0)
+    assert float((paths["predict_dir"] / "1.ext").read_text().strip()) == pytest.approx(
+        math.log10(10.0)
+    )
+
+
 def test_adapt_marked_and_intersect(mini_raw, id_csv, tmp_path):
     outdir = tmp_path / "adapt_gene"
     paths = adapt.run_adapt(

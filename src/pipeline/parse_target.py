@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import argparse
 import csv
+import math
 from pathlib import Path
 from typing import Any
 
@@ -11,6 +12,26 @@ from src.preprocessing import genome_prefix
 
 from .common import ensure_dir, read_csv, sanitize_filename, write_csv
 from .id_rule import run_id_rule
+
+# Additive label transforms (default ``none`` preserves legacy raw TPM / MPRA values).
+VALUE_TRANSFORMS = frozenset({"none", "identity", "log10p1"})
+
+
+def apply_value_transform(value: float, transform: str = "none") -> float:
+    """Apply a scalar label transform. ``log10p1`` → ``log10(TPM+1)``."""
+    key = (transform or "none").strip().lower()
+    if key not in VALUE_TRANSFORMS:
+        raise ValueError(
+            f"transform must be one of {sorted(VALUE_TRANSFORMS)}, got {transform!r}"
+        )
+    x = float(value)
+    if key in {"none", "identity"}:
+        return x
+    if key == "log10p1":
+        if x < 0:
+            raise ValueError(f"Negative target not allowed for log10p1: {x}")
+        return math.log10(x + 1.0)
+    raise ValueError(f"Unhandled transform: {transform!r}")
 
 
 def _load_wide_target(path: Path) -> dict[str, float]:
@@ -123,6 +144,7 @@ def run_parse_target(
     input_type: str = "folder",
     to_type: str = "caduceus",
     mappings: Path | None = None,
+    transform: str = "none",
 ) -> dict[str, Path]:
     """
     Write `{outdir}/PREDICT/ID.ext` and `{outdir}/PREDICT/predict.csv`.
@@ -130,6 +152,10 @@ def run_parse_target(
     `to_type`:
       - caduceus: predict_var1 == scalar target; per-ID `.ext` is one float
       - legnet: predict_var1 == mean_value scalar target; `.ext` is one float
+
+    `transform`:
+      - ``none`` / ``identity`` (default): write raw TARGET values
+      - ``log10p1``: write ``log10(value+1)`` (Caduceus continuous labels)
 
     With mappings, each mapping row is an independent sample.  Its artifacts
     live at `PREDICT/{sample_id}/{ID}.ext`, while `predict.csv` records
@@ -139,6 +165,8 @@ def run_parse_target(
         raise ValueError(f"to_type must be caduceus|legnet, got {to_type!r}")
     if input_type != "folder":
         raise ValueError(f"input_type={input_type!r} not implemented (use folder)")
+    # Validate early so bad CLI fails before I/O.
+    apply_value_transform(0.0, transform)
 
     target_path = Path(target_path)
     if not target_path.is_dir():
@@ -160,7 +188,9 @@ def run_parse_target(
             sample_dir = ensure_dir(predict_dir / sanitize_filename(sample_id))
             for row in _ids_for_genome(id_rows, mapping["genome"]):
                 rid = row["ID"]
-                value = float(by_id.get(str(rid), 0.0))
+                value = apply_value_transform(
+                    float(by_id.get(str(rid), 0.0)), transform
+                )
                 (sample_dir / f"{sanitize_filename(rid)}.ext").write_text(
                     f"{value}\n", encoding="utf-8"
                 )
@@ -186,7 +216,8 @@ def run_parse_target(
                 or by_id_by_genome.get(genome_prefix(genome))
             )
             rid = row["ID"]
-            value = float(by_id.get(str(rid), 0.0)) if by_id is not None else 0.0
+            raw = float(by_id.get(str(rid), 0.0)) if by_id is not None else 0.0
+            value = apply_value_transform(raw, transform)
             (predict_dir / f"{sanitize_filename(rid)}.ext").write_text(
                 f"{value}\n", encoding="utf-8"
             )
@@ -211,6 +242,12 @@ def main(argv: list[str] | None = None) -> int:
         default=None,
         help="Optional comma-delimited sample mapping CSV (id,tpm,genome)",
     )
+    p.add_argument(
+        "--transform",
+        default="none",
+        choices=sorted(VALUE_TRANSFORMS),
+        help="Label transform: none/identity (raw) or log10p1 = log10(TPM+1)",
+    )
     args = p.parse_args(argv)
     out = run_parse_target(
         args.target,
@@ -219,6 +256,7 @@ def main(argv: list[str] | None = None) -> int:
         input_type=args.input_type,
         to_type=args.to_type,
         mappings=args.mappings,
+        transform=args.transform,
     )
     print(out["predict_csv"])
     return 0

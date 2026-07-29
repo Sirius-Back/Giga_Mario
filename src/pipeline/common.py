@@ -215,30 +215,37 @@ def checkout_ids_before_split(
             f"split IDs missing from predict.csv (first: {missing_regions[0]!r})"
         )
 
-    for rid in split_ids:
-        if rid not in present_regions:
-            continue
-        safe = sanitize_filename(rid)
-        parsed_path = Path(parsed_root) / f"{safe}.ext"
-        if not parsed_path.is_file() and not intersect_allow:
-            raise FileNotFoundError(f"PARSED/{safe}.ext missing for ID {rid!r}")
-        if mapped:
-            sample_rows = [r for r in rows if r["id"] == rid]
-            for prow in sample_rows:
-                pred_path = (
-                    Path(predict_root)
-                    / sanitize_filename(prow["sample_id"])
-                    / f"{safe}.ext"
-                )
-                if not pred_path.is_file() and not intersect_allow:
-                    raise FileNotFoundError(
-                        f"PREDICT/{sanitize_filename(prow['sample_id'])}/{safe}.ext "
-                        f"missing for ID {rid!r}"
+    # Index mapped rows by region id once — avoid O(|split| × |predict|) scans.
+    rows_by_region: dict[str, list[dict[str, str]]] = {}
+    if mapped:
+        for row in rows:
+            rows_by_region.setdefault(row["id"], []).append(row)
+
+    # Strict mode only: verify PARSED/PREDICT files exist (intersect_allow skips).
+    if not intersect_allow:
+        for rid in split_ids:
+            if rid not in present_regions:
+                continue
+            safe = sanitize_filename(rid)
+            parsed_path = Path(parsed_root) / f"{safe}.ext"
+            if not parsed_path.is_file():
+                raise FileNotFoundError(f"PARSED/{safe}.ext missing for ID {rid!r}")
+            if mapped:
+                for prow in rows_by_region.get(rid, []):
+                    pred_path = (
+                        Path(predict_root)
+                        / sanitize_filename(prow["sample_id"])
+                        / f"{safe}.ext"
                     )
-        else:
-            pred_path = Path(predict_root) / f"{safe}.ext"
-            if not pred_path.is_file() and not intersect_allow:
-                raise FileNotFoundError(f"PREDICT/{safe}.ext missing for ID {rid!r}")
+                    if not pred_path.is_file():
+                        raise FileNotFoundError(
+                            f"PREDICT/{sanitize_filename(prow['sample_id'])}/{safe}.ext "
+                            f"missing for ID {rid!r}"
+                        )
+            else:
+                pred_path = Path(predict_root) / f"{safe}.ext"
+                if not pred_path.is_file():
+                    raise FileNotFoundError(f"PREDICT/{safe}.ext missing for ID {rid!r}")
 
     return mapped, rows
 

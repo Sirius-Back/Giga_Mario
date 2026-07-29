@@ -6,6 +6,7 @@ import csv
 import json
 import os
 import shutil
+import sys
 from pathlib import Path
 from typing import Any
 
@@ -298,6 +299,8 @@ def run_train(
         if model == "caduceus":
             from src import caduceus
 
+            # Under DDP, src.caduceus forces num_workers=0 (CUDA+fork hang).
+            nw = 0 if int(n_devices) > 1 else int(num_workers)
             argv = [
                 "--splits-dir", str(caduceus_input),
                 "--out", str(outdir),
@@ -307,10 +310,37 @@ def run_train(
                 "--max-length", str(max_length),
                 "--seed", str(seed),
                 "--task", type,
+                "--num-workers", str(nw),
+                "--amp",
+                "--eval-max-samples", "8192",
+                "--train-eval-max-samples", "4096",
             ]
             if max_samples is not None:
                 argv += ["--max-samples", str(max_samples)]
-            if caduceus.main(argv) != 0:
+            # Multi-GPU: Caduceus uses torch.distributed (RANK/WORLD_SIZE), so
+            # launch via torchrun. Single-GPU keeps an in-process call (legacy).
+            if int(n_devices) > 1:
+                import subprocess
+
+                env = os.environ.copy()
+                env.setdefault("MASTER_ADDR", "127.0.0.1")
+                cmd = [
+                    sys.executable,
+                    "-m",
+                    "torch.distributed.run",
+                    "--standalone",
+                    f"--nproc_per_node={int(n_devices)}",
+                    "-m",
+                    "src.caduceus",
+                    *argv,
+                ]
+                print("caduceus torchrun:", " ".join(cmd), flush=True)
+                rc = subprocess.call(cmd, env=env)
+                if rc != 0:
+                    raise RuntimeError(
+                        f"src.caduceus torchrun returned non-zero status {rc}"
+                    )
+            elif caduceus.main(argv) != 0:
                 raise RuntimeError("src.caduceus returned a non-zero status")
             if eval_zsv:
                 from .zsv_eval import eval_zsv_from_train_outdir

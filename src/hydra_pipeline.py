@@ -58,6 +58,10 @@ def _run_stages(cfg: DictConfig) -> int:
     run_training = mode == "run"
     eval_zsv = bool(cfg.zsv)
 
+    # Persist Hydra snapshots before long stages so settings exist mid-run.
+    out_root.mkdir(parents=True, exist_ok=True)
+    _write_hydra_resolved(cfg, out_root)
+
     # --- direct split ---
     split_csv = run_split_predict(
         outdir=out_root,
@@ -90,6 +94,7 @@ def _run_stages(cfg: DictConfig) -> int:
         ",".join(str(i) for i in range(int(cfg.n_devices))),
     )
 
+    max_length = int(cfg.get("max_length", 512))
     run_train(
         model=train_name,
         type=str(cfg.task_type),
@@ -99,6 +104,7 @@ def _run_stages(cfg: DictConfig) -> int:
         smoke=not run_training,
         epochs=epochs,
         batch_size=int(cfg.batch_size),
+        max_length=max_length,
         seed=seed,
         n_devices=int(cfg.n_devices),
         num_workers=int(cfg.num_workers),
@@ -119,6 +125,9 @@ def _run_stages(cfg: DictConfig) -> int:
         print(f"train_monitor[direct] status={mon.get('status')} → {mon.get('outdir')}")
     except Exception as exc:  # noqa: BLE001
         print(f"WARNING: train_monitor[direct] skipped: {type(exc).__name__}: {exc}")
+
+    # Persist resolved Hydra config/commands for every path (including direct-only).
+    _write_hydra_resolved(cfg, out_root)
 
     if not bool(cfg.adversarial):
         print(OmegaConf.to_yaml(cfg))
@@ -180,6 +189,7 @@ def _run_stages(cfg: DictConfig) -> int:
         smoke=not run_training,
         epochs=epochs,
         batch_size=int(cfg.batch_size),
+        max_length=int(cfg.get("max_length", 512)),
         seed=seed,
         n_devices=int(cfg.n_devices),
         num_workers=int(cfg.num_workers),
@@ -221,23 +231,37 @@ def _run_stages(cfg: DictConfig) -> int:
     except Exception as exc:  # noqa: BLE001
         print(f"WARNING: pipeline_monitors skipped: {type(exc).__name__}: {exc}")
 
-    # Persist resolved commands for audit
+    _write_hydra_resolved(cfg, out_root)
+
+    print(f"Hydra pipeline {mode} complete → {out_root}")
+    print(
+        "Model launch templates:\n"
+        + OmegaConf.to_yaml(
+            {
+                "direct_cmd": str(cfg.train.direct_cmd),
+                "adversarial_cmd": str(cfg.train.adversarial_cmd),
+                "zsv_cmd": str(cfg.train.zsv_cmd),
+            }
+        )
+    )
+    return 0
+
+
+def _write_hydra_resolved(cfg: DictConfig, out_root: Path) -> None:
+    """Write reproducible Hydra snapshots into the run outdir."""
+    out_root = Path(out_root)
+    out_root.mkdir(parents=True, exist_ok=True)
     cmds = {
         "direct_cmd": str(cfg.train.direct_cmd),
         "adversarial_cmd": str(cfg.train.adversarial_cmd),
         "zsv_cmd": str(cfg.train.zsv_cmd),
     }
-    out_root.mkdir(parents=True, exist_ok=True)
     (out_root / "hydra_resolved_commands.yaml").write_text(
         OmegaConf.to_yaml(cmds), encoding="utf-8"
     )
     (out_root / "hydra_resolved_config.yaml").write_text(
         OmegaConf.to_yaml(cfg), encoding="utf-8"
     )
-
-    print(f"Hydra pipeline {mode} complete → {out_root}")
-    print(f"Model launch templates:\n{OmegaConf.to_yaml(cmds)}")
-    return 0
 
 
 def main(argv: list[str] | None = None) -> int:

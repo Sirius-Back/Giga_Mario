@@ -38,11 +38,11 @@ def test_read_htseq_skips_meta(tmp_path: Path) -> None:
 def test_horse_counts_to_symbol_tpm(tmp_path: Path) -> None:
     ens_lines = [
         '1\tensembl\tgene\t1\t1000\t.\t+\t.\tgene_id "ENSECAG00000000001"; gene_name "GENEA";\n',
-        '1\tensembl\tgene\t1\t2000\t.\t+\t.\tgene_id "ENSECAG00000000002"; gene_name "GENEB";\n',
+        '1\tensembl\tgene\t1\t1000\t.\t+\t.\tgene_id "ENSECAG00000000002"; gene_name "GENEB";\n',
     ]
     ref_lines = [
         'NC_1\tGnomon\tgene\t1\t1000\t.\t+\t.\tgene_id "GENEA"; gene "GENEA"; db_xref "GeneID:1";\n',
-        'NC_1\tGnomon\tgene\t1\t2000\t.\t+\t.\tgene_id "GENEB"; gene "GENEB"; db_xref "GeneID:2";\n',
+        'NC_1\tGnomon\tgene\t1\t1000\t.\t+\t.\tgene_id "GENEB"; gene "GENEB"; db_xref "GeneID:2";\n',
     ]
     count_lines = ["ENSECAG00000000001\t1000\n", "ENSECAG00000000002\t2000\n"]
     for i in range(3, 1103):

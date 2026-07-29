@@ -310,6 +310,12 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         help="Cap train-split epoch eval (default: full on 1 GPU; 8192 under DDP)",
     )
     p.add_argument(
+        "--eval-max-samples",
+        type=int,
+        default=None,
+        help="Cap val/test epoch eval sample count (default: full fold)",
+    )
+    p.add_argument(
         "--resume",
         action="store_true",
         help="Resume from out/best_model if best_meta.json exists",
@@ -435,20 +441,31 @@ def run(args: argparse.Namespace) -> int:
             task=task,
             max_samples=cap,
         )
+        # drop_last keeps equal batch counts across ranks (required for DDP sync).
         sampler = (
-            DistributedSampler(ds, shuffle=shuffle, seed=args.seed)
+            DistributedSampler(
+                ds, shuffle=shuffle, seed=args.seed, drop_last=bool(shuffle)
+            )
             if (world > 1 and distributed)
             else None
         )
-        loader = DataLoader(
-            ds,
-            batch_size=batch_size,
-            shuffle=(sampler is None and shuffle),
-            sampler=sampler,
-            num_workers=args.num_workers,
-            pin_memory=torch.cuda.is_available(),
-            collate_fn=lambda b: collate_pad(b, pad_id),
-        )
+        # CUDA is initialized before DataLoader workers; fork + CUDA often deadlocks
+        # under DDP (one rank waits on workers, the other blocks on NCCL). Prefer
+        # in-process loading for multi-GPU; optional spawn if workers > 0.
+        nw = int(args.num_workers)
+        if world > 1 and nw > 0:
+            nw = 0
+        loader_kw: dict[str, Any] = {
+            "batch_size": batch_size,
+            "shuffle": (sampler is None and shuffle),
+            "sampler": sampler,
+            "num_workers": nw,
+            "pin_memory": torch.cuda.is_available(),
+            "collate_fn": lambda b: collate_pad(b, pad_id),
+        }
+        if nw > 0:
+            loader_kw["persistent_workers"] = False
+        loader = DataLoader(ds, **loader_kw)
         return loader, ds, sampler
 
     train_loader, train_ds, train_sampler = make_loader(
@@ -460,8 +477,13 @@ def run(args: argparse.Namespace) -> int:
         train_eval_loader, _, _ = make_loader(
             "train", args.eval_batch_size, False, False, max_samples=train_eval_cap
         )
-        val_loader, val_ds, _ = make_loader("val", args.eval_batch_size, False, False)
-        test_loader, test_ds, _ = make_loader("test", args.eval_batch_size, False, False)
+        eval_cap = args.eval_max_samples
+        val_loader, val_ds, _ = make_loader(
+            "val", args.eval_batch_size, False, False, max_samples=eval_cap
+        )
+        test_loader, test_ds, _ = make_loader(
+            "test", args.eval_batch_size, False, False, max_samples=eval_cap
+        )
 
     optim = torch.optim.AdamW(model.parameters(), lr=args.lr)
     writer = None
@@ -493,6 +515,7 @@ def run(args: argparse.Namespace) -> int:
             "batch_size": args.batch_size,
             "eval_batch_size": args.eval_batch_size,
             "train_eval_max_samples": train_eval_cap,
+            "eval_max_samples": args.eval_max_samples,
             "world_size": world,
             "max_length": args.max_length,
             "amp": bool(args.amp),
@@ -527,7 +550,19 @@ def run(args: argparse.Namespace) -> int:
             train_sampler.set_epoch(epoch_idx)
         model.train()
         running_loss, seen = 0.0, 0
-        for batch in train_loader:
+        n_train_batches = len(train_loader)
+        if rank == 0:
+            print(
+                json.dumps(
+                    {
+                        "epoch_start": epoch,
+                        "train_batches_per_rank": n_train_batches,
+                        "world_size": world,
+                    }
+                ),
+                flush=True,
+            )
+        for step_in_epoch, batch in enumerate(train_loader, start=1):
             batch = {k: v.to(device) for k, v in batch.items()}
             optim.zero_grad(set_to_none=True)
             with torch.cuda.amp.autocast(enabled=use_amp):
@@ -544,6 +579,19 @@ def run(args: argparse.Namespace) -> int:
             running_loss += float(loss.item()) * bs
             seen += bs
             global_step += 1
+            if rank == 0 and (step_in_epoch == 1 or step_in_epoch % 50 == 0):
+                print(
+                    json.dumps(
+                        {
+                            "epoch": epoch,
+                            "step": step_in_epoch,
+                            "steps": n_train_batches,
+                            "batch_loss": float(loss.item()),
+                            "elapsed_sec": time.perf_counter() - t0,
+                        }
+                    ),
+                    flush=True,
+                )
             if rank == 0 and writer is not None and global_step % 50 == 0:
                 log_scalar_pair(
                     writer, tb_logger, "train/batch_loss", float(loss.item()), global_step

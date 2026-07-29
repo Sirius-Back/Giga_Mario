@@ -204,9 +204,10 @@ def run_split_predict(
         assignable, seed=seed, strat_map=strat_map, ratios=ratios
     )
 
+    zsv_set = set(zsv_ids)
     rows: list[dict[str, Any]] = []
     for i in ids:
-        if i in zsv_ids:
+        if i in zsv_set:
             rows.append({"ID": i, "train_test": "zsv", "fold": "zsv"})
         else:
             rows.append(

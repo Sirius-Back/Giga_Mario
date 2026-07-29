@@ -306,17 +306,10 @@ def run(
 
     env = os.environ.copy()
     env["LEGNET_N_DEVICES"] = str(max(1, n_devices))
-    if n_devices > 1:
-        cmd = [
-            sys.executable,
-            "-m",
-            "torch.distributed.run",
-            "--standalone",
-            f"--nproc_per_node={n_devices}",
-            *cmd_core,
-        ]
-    else:
-        cmd = [sys.executable, *cmd_core]
+    # Single process entry: Lightning Trainer(devices=N, strategy=ddp) spawns
+    # workers. Do not wrap with torchrun — that double-launches DDP and hangs
+    # or IndexErrors depending on devices=N vs devices=1.
+    cmd = [sys.executable, *cmd_core]
 
     t0 = time.time()
     print(
