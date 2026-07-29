@@ -405,7 +405,9 @@ def run(
     # Single process entry: Lightning Trainer(devices=N, strategy=ddp) spawns
     # workers. Do not wrap with torchrun — that double-launches DDP and hangs
     # or IndexErrors depending on devices=N vs devices=1.
-    cmd = [sys.executable, *cmd_core]
+    # Launch via numpy-compat wrapper (LegNet-only; does not affect Caduceus).
+    launcher = Path(__file__).resolve().parent / "legnet_core_launcher.py"
+    cmd = [sys.executable, str(launcher), *cmd_core]
 
     t0 = time.time()
     print(

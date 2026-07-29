@@ -31,15 +31,19 @@ panel_root: run/${run_id}
 out_root: run/${run_id}
 zsv: true
 conda_env: legnet
-# GC / SBS / hashfrag: MARKED or FNA root (null → panel_root/MARKED when split=gc|hashfrag)
+# GC / SBS / hashfrag / kmer: MARKED or FNA root (null → panel_root/MARKED when needed)
 marked: null
 max_ids: null
+# k-mer SBS (split=kmer): size(s) and counting engine (auto|native|cpp|python|dsk)
+kmer_size: 5
+kmer_engine: auto
+log_transform: false
 # hashFrag homology threshold (-t); required when split=hashfrag
 threshold: null
 # Optional hashFrag train/test proportions (must sum to 1); null → Caduceus-like defaults
 p_train: null
 p_test: null
-# BLAST threads for split=hashfrag (null → 2 * n_devices)
+# BLAST threads for split=hashfrag (null → 2 * n_devices); also kmer feature threads
 threads: null
 force: false
 plot_split: true
@@ -48,7 +52,7 @@ plot_train: true
 plot_sbs: true
 # Interpreter for matplotlib/cnsplots/altair when train conda_env lacks them
 viz_conda_env: caduceus_env
-# GC/SBS clustering: dbscan | kmeans | kmeans_elbow | pca_kmeans | auto
+# GC/SBS/kmer clustering: dbscan | kmeans | kmeans_elbow | pca_kmeans | auto
 # (auto/dbscan on n>50k falls back to MiniBatchKMeans elbow)
 cluster_method: auto
 

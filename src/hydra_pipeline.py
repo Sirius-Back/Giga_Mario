@@ -67,7 +67,7 @@ def _run_stages(cfg: DictConfig) -> int:
     marked_cfg = cfg.get("marked", None)
     if marked_cfg:
         marked_path: Path | None = _resolve_path(marked_cfg)
-    elif split_type in {"gc", "hashfrag"}:
+    elif split_type in {"gc", "kmer", "hashfrag"}:
         marked_path = panel_root / "MARKED"
         if not marked_path.is_dir():
             raise FileNotFoundError(
@@ -96,6 +96,16 @@ def _run_stages(cfg: DictConfig) -> int:
     else:
         threads = int(threads_cfg)
     force_split = bool(cfg.get("force", False))
+    kmer_size_cfg = cfg.get("kmer_size", None)
+    if kmer_size_cfg in (None, "", "null"):
+        kmer_size: int | tuple[int, ...] = 5
+    elif OmegaConf.is_list(kmer_size_cfg) or isinstance(kmer_size_cfg, (list, tuple)):
+        ks = tuple(int(x) for x in kmer_size_cfg)
+        kmer_size = ks[0] if len(ks) == 1 else ks
+    else:
+        kmer_size = int(kmer_size_cfg)
+    kmer_engine = str(cfg.get("kmer_engine", cfg.get("engine", "auto")) or "auto")
+    log_transform = bool(cfg.get("log_transform", False))
 
     split_csv = run_split_predict(
         outdir=out_root,
@@ -106,13 +116,16 @@ def _run_stages(cfg: DictConfig) -> int:
         ratios=ratios,
         marked_fasta=marked_path,
         max_ids=max_ids,
-        plot=plot_split and split_type == "gc",
+        plot=plot_split and split_type in {"gc", "kmer"},
         cluster_method=cluster_method,
         threshold=threshold,
         p_train=p_train,
         p_test=p_test,
         threads=threads,
         force=force_split,
+        kmer_size=kmer_size,
+        log_transform=log_transform,
+        engine=kmer_engine,
     )
     split_root = run_split(
         split_csv,
