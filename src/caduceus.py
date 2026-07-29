@@ -495,6 +495,12 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         help="Stop training after this many epochs without val_loss improvement "
         "(0 disables). Best checkpoint is still promoted to final_model/.",
     )
+    p.add_argument(
+        "--min-epochs",
+        type=int,
+        default=0,
+        help="Do not early-stop before this many completed epochs (0 disables).",
+    )
     return p.parse_args(argv)
 
 
@@ -713,6 +719,7 @@ def run(args: argparse.Namespace) -> int:
     use_amp = bool(args.amp) and device.type == "cuda"
     scaler = torch.cuda.amp.GradScaler(enabled=use_amp)
     patience = int(getattr(args, "early_stopping_patience", 0) or 0)
+    min_epochs = int(getattr(args, "min_epochs", 0) or 0)
     epochs_since_improve = 0
     epochs_completed = start_epoch
     stopped_early = False
@@ -900,13 +907,18 @@ def run(args: argparse.Namespace) -> int:
 
             print(json.dumps(payload), flush=True)
 
-            if patience > 0 and epochs_since_improve >= patience:
+            if (
+                patience > 0
+                and epochs_since_improve >= patience
+                and (min_epochs <= 0 or epoch >= min_epochs)
+            ):
                 stop_flag[0] = 1
                 print(
                     json.dumps(
                         {
                             "early_stopping": True,
                             "patience": patience,
+                            "min_epochs": min_epochs,
                             "epochs_since_improve": epochs_since_improve,
                             "best_val_loss": best_val,
                             "stopped_at_epoch": epoch,

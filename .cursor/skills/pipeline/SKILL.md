@@ -40,7 +40,10 @@ Resolved configs + command templates are written to
 
 Refresh anytime while / after training (reads live Lightning ``metrics.csv`` →
 jsonl → cnsplots + Altair learning curves; refreshes split_compare; exports
-``tensorboard/`` from train metrics):
+``tensorboard/`` from train metrics). **Hydra `/pipeline` auto-runs**
+``src.pipeline.pipeline_viz`` after train: train monitor + **SBS PCA** on
+``split.csv`` (GC%/AAA%; works for ``random`` and ``gc``), via ``viz_conda_env``
+(default ``caduceus_env``) when the train env lacks matplotlib.
 
 ```bash
 # one-shot (single train outdir)
@@ -54,6 +57,11 @@ conda run -n caduceus_env python -m src.train_viz.train_monitor \
 # poll every 60s while the job runs
 watch -n 60 'conda run -n caduceus_env python -m src.train_viz.train_monitor \
   --run-dir run/<run_id>/direct --no-split-compare'
+
+# full pipeline viz stage (train + SBS) — same entry Hydra calls
+conda run -n caduceus_env python -m src.pipeline.pipeline_viz \
+  --out-root runs/<run_id> --panel-root <panel> --train-dir runs/<run_id>/direct \
+  --run-id <run_id>
 ```
 
 TensorBoard (after sync / during train — **both** SummaryWriter + TensorBoardLogger):
@@ -74,6 +82,7 @@ python -m src.hydra_pipeline mode=run train=caduceus run_id=run0
 ```
 
 Outputs: `{run}/figures/train_monitor/Figure_*learning_curves*` (+ Altair HTML),
+`{run}/figures/sbs/` PCA panels, `{run}/figures/split_compare/`,
 synced `logs/train_metrics.jsonl`, and `{run}/tensorboard/` event files.
 Hydra pipeline calls monitor after each `/train` and a final
 `refresh_pipeline_monitors` (direct + adversarial when present).

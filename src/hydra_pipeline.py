@@ -118,6 +118,7 @@ def _run_stages(cfg: DictConfig) -> int:
     max_length = int(cfg.get("max_length", 512))
     ckpt_every = int(cfg.get("checkpoint_every_n_epochs", 10))
     early_stop = int(cfg.get("early_stopping_patience", 0) or 0)
+    min_epochs = int(cfg.get("min_epochs", 0) or 0)
     run_train(
         model=train_name,
         type=str(cfg.task_type),
@@ -136,20 +137,36 @@ def _run_stages(cfg: DictConfig) -> int:
         eval_zsv=eval_zsv and run_training,
         checkpoint_every_n_epochs=ckpt_every,
         early_stopping_patience=early_stop,
+        min_epochs=min_epochs,
     )
-    # During/after-train monitoring figures (learning curves + split compare)
+    # Visualization stage: train monitor (+ split_compare) and SBS PCA diagnostics.
+    # Auto-routes to viz_conda_env when the train env lacks matplotlib/cnsplots.
+    plot_train = bool(cfg.get("plot_train", True))
+    plot_sbs = bool(cfg.get("plot_sbs", plot_split))
+    viz_env = str(cfg.get("viz_conda_env", "caduceus_env") or "caduceus_env")
     try:
-        from src.train_viz.train_monitor import refresh_train_monitor
+        from src.pipeline.pipeline_viz import run_pipeline_viz_auto
 
-        mon = refresh_train_monitor(
-            out_root / "direct",
-            model=f"{cfg.run_id}_direct",
-            title=f"{cfg.run_id} direct — train monitor",
+        viz = run_pipeline_viz_auto(
+            out_root=out_root,
+            panel_root=panel_root,
+            train_dir=out_root / "direct",
+            run_id=str(cfg.run_id),
+            seed=seed,
+            plot_train=plot_train,
+            plot_sbs=plot_sbs,
             include_split_compare=True,
+            max_ids=max_ids,
+            viz_conda_env=viz_env,
         )
-        print(f"train_monitor[direct] status={mon.get('status')} → {mon.get('outdir')}")
+        print(
+            f"pipeline_viz status={viz.get('status')} "
+            f"train={((viz.get('train') or {}).get('status'))} "
+            f"sbs={((viz.get('sbs') or {}).get('status'))} "
+            f"→ {viz.get('manifest') or out_root / 'pipeline_viz_manifest.json'}"
+        )
     except Exception as exc:  # noqa: BLE001
-        print(f"WARNING: train_monitor[direct] skipped: {type(exc).__name__}: {exc}")
+        print(f"WARNING: pipeline_viz skipped: {type(exc).__name__}: {exc}")
 
     # Persist resolved Hydra config/commands for every path (including direct-only).
     _write_hydra_resolved(cfg, out_root)
@@ -223,33 +240,56 @@ def _run_stages(cfg: DictConfig) -> int:
         eval_zsv=eval_zsv and run_training,
         checkpoint_every_n_epochs=ckpt_every,
         early_stopping_patience=early_stop,
+        min_epochs=min_epochs,
     )
     try:
-        from src.train_viz.train_monitor import refresh_train_monitor
+        from src.pipeline.pipeline_viz import run_pipeline_viz_auto
 
-        mon = refresh_train_monitor(
-            adv_root / "train",
-            model=f"{cfg.run_id}_adversarial",
-            title=f"{cfg.run_id} adversarial — train monitor",
+        viz = run_pipeline_viz_auto(
+            out_root=out_root,
+            panel_root=panel_root,
+            train_dir=adv_root / "train",
+            run_id=f"{cfg.run_id}_adversarial",
+            seed=seed,
+            plot_train=plot_train,
+            # SBS PCA already done on direct split.csv; skip duplicate for adv unless requested
+            plot_sbs=False,
             include_split_compare=True,
+            viz_conda_env=viz_env,
         )
         print(
-            f"train_monitor[adversarial] status={mon.get('status')} → {mon.get('outdir')}"
+            f"pipeline_viz[adversarial] status={viz.get('status')} "
+            f"→ {viz.get('manifest')}"
         )
     except Exception as exc:  # noqa: BLE001
         print(
-            f"WARNING: train_monitor[adversarial] skipped: {type(exc).__name__}: {exc}"
+            f"WARNING: pipeline_viz[adversarial] skipped: {type(exc).__name__}: {exc}"
         )
 
     # Final pass: direct + adversarial monitors + TensorBoard export
     try:
         from src.train_viz.train_monitor import refresh_pipeline_monitors
+        from src.pipeline.pipeline_viz import has_viz_deps, resolve_viz_python
+        import subprocess
 
-        pipe_mon = refresh_pipeline_monitors(
-            out_root,
-            run_id=str(cfg.run_id),
-            include_split_compare=True,
-        )
+        if has_viz_deps():
+            pipe_mon = refresh_pipeline_monitors(
+                out_root,
+                run_id=str(cfg.run_id),
+                include_split_compare=True,
+            )
+        else:
+            viz_py = resolve_viz_python(viz_env)
+            if viz_py is None:
+                raise ModuleNotFoundError("viz python missing")
+            # Refresh both dirs via train_monitor CLI
+            for sub in (out_root / "direct", adv_root / "train"):
+                if sub.is_dir():
+                    subprocess.run(
+                        [str(viz_py), "-m", "src.train_viz.train_monitor", "--run-dir", str(sub)],
+                        check=False,
+                    )
+            pipe_mon = {"status": "subprocess", "direct": "refreshed"}
         print(
             f"pipeline_monitors status={pipe_mon.get('status')} "
             f"direct={((pipe_mon.get('direct') or {}).get('status'))} "

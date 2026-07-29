@@ -12,6 +12,7 @@ direct_cmd: >-
   --task ${task_type}
   --checkpoint-every-n-epochs ${checkpoint_every_n_epochs}
   --early-stopping-patience ${early_stopping_patience}
+  --min-epochs ${min_epochs}
 adversarial_cmd: >-
   python -m src.caduceus
   --splits-dir ${out_root}/adversarial/train/caduceus_input
@@ -23,6 +24,7 @@ adversarial_cmd: >-
   --task ${adversarial_task_type}
   --checkpoint-every-n-epochs ${checkpoint_every_n_epochs}
   --early-stopping-patience ${early_stopping_patience}
+  --min-epochs ${min_epochs}
 zsv_cmd: >-
   python -m src.pipeline.zsv_eval
   --model caduceus

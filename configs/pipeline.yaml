@@ -18,8 +18,10 @@ seed: 42
 epochs: 3
 # Periodic weight dumps during train; final_model/ = best validation checkpoint
 checkpoint_every_n_epochs: 10
-# Caduceus early stop on val_loss (0 disables). LegNet ignores unless wired.
+# Early stop patience (0 disables). Caduceus: val_loss; LegNet: val_pearson.
 early_stopping_patience: 0
+# Minimum epochs before early stopping can fire (0 = no floor).
+min_epochs: 0
 n_devices: 4
 batch_size: 1024
 max_length: 512  # Caduceus tokenizer pad/truncate; override for short windows
@@ -33,6 +35,11 @@ conda_env: legnet
 marked: null
 max_ids: null
 plot_split: true
+# After-train visualization (learning curves + SBS PCA on split.csv)
+plot_train: true
+plot_sbs: true
+# Interpreter for matplotlib/cnsplots/altair when train conda_env lacks them
+viz_conda_env: caduceus_env
 # GC/SBS clustering: dbscan | kmeans | kmeans_elbow | pca_kmeans | auto
 # (auto/dbscan on n>50k falls back to MiniBatchKMeans elbow)
 cluster_method: auto

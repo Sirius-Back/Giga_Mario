@@ -262,7 +262,14 @@ def eval_caduceus_zsv(
     amp: bool = True,
 ) -> dict[str, Any]:
     """Caduceus HF checkpoint on universal ZSV trees (same artifacts as LegNet)."""
+    import importlib
+
     from src import caduceus
+
+    # Long pipeline processes may have imported src.caduceus before evaluate_zsv_root
+    # existed; reload once if the attribute is missing.
+    if not hasattr(caduceus, "evaluate_zsv_root"):
+        caduceus = importlib.reload(caduceus)
 
     return caduceus.evaluate_zsv_root(
         model_dir=model_dir,

@@ -114,6 +114,8 @@ def _run(cfg) -> int:
         zsv_root=panel if zsv else None,
         eval_zsv=zsv and not smoke,
         checkpoint_every_n_epochs=int(cfg.get("checkpoint_every_n_epochs", 10)),
+        early_stopping_patience=int(cfg.get("early_stopping_patience", 0) or 0),
+        min_epochs=int(cfg.get("min_epochs", 0) or 0),
     )
 
     outdir.mkdir(parents=True, exist_ok=True)

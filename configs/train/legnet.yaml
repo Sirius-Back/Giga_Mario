@@ -13,6 +13,8 @@ direct_cmd: >-
   --num-workers ${num_workers}
   --seed ${seed}
   --checkpoint-every-n-epochs ${checkpoint_every_n_epochs}
+  --early-stopping-patience ${early_stopping_patience}
+  --min-epochs ${min_epochs}
   --demo
 adversarial_cmd: >-
   python -m src.legnet
@@ -25,6 +27,8 @@ adversarial_cmd: >-
   --num-workers ${num_workers}
   --seed ${seed}
   --checkpoint-every-n-epochs ${checkpoint_every_n_epochs}
+  --early-stopping-patience ${early_stopping_patience}
+  --min-epochs ${min_epochs}
   --demo
 zsv_cmd: >-
   python -m src.pipeline.zsv_eval

@@ -11,30 +11,40 @@ from typing import Iterable, Literal
 
 FastaMode = Literal["directory", "file", "auto"]
 
-_FASTA_SUFFIXES = {".fa", ".fna", ".fasta", ".fas"}
+# Include Caduceus/LegNet PARSED ``.ext`` (raw sequence, one file per region).
+_FASTA_SUFFIXES = {".fa", ".fna", ".fasta", ".fas", ".ext"}
 
 
 def _read_fasta_records(path: Path) -> list[tuple[str, str]]:
-    """Return list of (header_token, sequence) from one FASTA path."""
+    """Return list of (header_token, sequence) from one FASTA path.
+
+    Also accepts raw single-sequence files (no ``>`` header), common for
+    ``PARSED/*.ext`` panels — header falls back to the filename stem.
+    """
     if not path.is_file():
         raise FileNotFoundError(f"FASTA missing: {path}")
     if path.stat().st_size == 0:
         raise ValueError(f"FASTA is empty: {path}")
+    text = path.read_text(encoding="utf-8", errors="replace")
+    if ">" not in text:
+        seq = "".join(text.split()).upper()
+        if not seq:
+            raise ValueError(f"empty sequence in {path}")
+        return [(path.stem, seq)]
     records: list[tuple[str, str]] = []
     header: str | None = None
     chunks: list[str] = []
-    with path.open(encoding="utf-8", errors="replace") as fh:
-        for raw in fh:
-            line = raw.strip()
-            if not line:
-                continue
-            if line.startswith(">"):
-                if header is not None:
-                    records.append((header, "".join(chunks).upper()))
-                header = line[1:].strip()
-                chunks = []
-            else:
-                chunks.append(line)
+    for raw in text.splitlines():
+        line = raw.strip()
+        if not line:
+            continue
+        if line.startswith(">"):
+            if header is not None:
+                records.append((header, "".join(chunks).upper()))
+            header = line[1:].strip()
+            chunks = []
+        else:
+            chunks.append(line)
     if header is not None:
         records.append((header, "".join(chunks).upper()))
     if not records:

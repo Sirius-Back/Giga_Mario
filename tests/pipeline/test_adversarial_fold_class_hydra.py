@@ -217,3 +217,35 @@ def test_hydra_pipeline_gc_caduceus_overrides() -> None:
     assert int(cfg.max_length) == 208
     assert "early-stopping-patience" in str(cfg.train.direct_cmd)
     assert "max-length" in str(cfg.train.direct_cmd)
+
+
+def test_hydra_pipeline_run4_legnet_early_stop_overrides() -> None:
+    pytest.importorskip("hydra")
+    from hydra import compose, initialize_config_dir
+
+    cfg_dir = str((Path(__file__).resolve().parents[2] / "configs").resolve())
+    with initialize_config_dir(version_base=None, config_dir=cfg_dir):
+        cfg = compose(
+            config_name="pipeline",
+            overrides=[
+                "mode=run",
+                "split=gc",
+                "train=legnet",
+                "adversarial=true",
+                "epochs=50",
+                "min_epochs=10",
+                "early_stopping_patience=10",
+                "n_devices=2",
+                "panel_root=ready_legnet",
+                "out_root=runs/run4",
+            ],
+        )
+    assert cfg.split == "gc"
+    assert cfg.train.name == "legnet"
+    assert cfg.adversarial is True
+    assert int(cfg.epochs) == 50
+    assert int(cfg.min_epochs) == 10
+    assert int(cfg.early_stopping_patience) == 10
+    assert "early-stopping-patience" in str(cfg.train.direct_cmd)
+    assert "min-epochs" in str(cfg.train.direct_cmd)
+    assert "early-stopping-patience" in str(cfg.train.adversarial_cmd)

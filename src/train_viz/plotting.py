@@ -573,9 +573,16 @@ def plot_learning_curves(
                 layered = alt.layer(line, points)
             else:
                 layered = line
+            # Faceted layers need data at the facet level (Altair ≥5).
+            # ``columns`` belongs on ``.facet(...)``, not inside ``alt.Facet(...)``.
             chart = (
                 layered.properties(width=220, height=160)
-                .facet(facet=alt.Facet("metric:N", columns=3), title=page_title)
+                .facet(
+                    facet=alt.Facet("metric:N"),
+                    columns=3,
+                    title=page_title,
+                    data=adf,
+                )
                 .interactive()
             )
             written.extend(save_altair_chart(chart, stem.with_name(stem.name + "_altair")))

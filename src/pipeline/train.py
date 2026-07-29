@@ -222,15 +222,34 @@ def _finalize_train_artifacts(outdir: Path) -> None:
     except Exception as exc:  # noqa: BLE001
         print(f"WARNING: tensorboard export skipped: {type(exc).__name__}: {exc}")
     try:
-        from src.train_viz.train_monitor import refresh_train_monitor
+        import os
+        import subprocess
 
-        mon = refresh_train_monitor(
-            outdir,
-            model=outdir.name,
-            title=f"Train monitor — {outdir.name}",
-            include_split_compare=True,
-        )
-        print(f"train_monitor status={mon.get('status')} → {mon.get('outdir')}")
+        from src.pipeline.pipeline_viz import has_viz_deps, resolve_viz_python, run_train_viz
+
+        if has_viz_deps():
+            mon = run_train_viz(train_dir=outdir, include_split_compare=True)
+            print(f"train_monitor status={mon.get('status')} → {mon.get('outdir')}")
+        else:
+            viz_py = resolve_viz_python(
+                os.environ.get("PIPELINE_VIZ_CONDA_ENV", "caduceus_env")
+            )
+            if viz_py is None:
+                raise ModuleNotFoundError(
+                    "matplotlib/cnsplots missing and viz conda python not found"
+                )
+            cmd = [
+                str(viz_py),
+                "-m",
+                "src.train_viz.train_monitor",
+                "--run-dir",
+                str(outdir),
+            ]
+            print(f"train_monitor via {viz_py}", flush=True)
+            proc = subprocess.run(cmd, check=False)
+            if proc.returncode != 0:
+                raise RuntimeError(f"train_monitor exit {proc.returncode}")
+            print(f"train_monitor subprocess exit={proc.returncode}")
     except Exception as exc:  # noqa: BLE001
         print(f"WARNING: train_monitor skipped: {type(exc).__name__}: {exc}")
 
@@ -466,7 +485,13 @@ def main(argv: list[str] | None = None) -> int:
         "--early-stopping-patience",
         type=int,
         default=0,
-        help="Caduceus: stop after N epochs without val_loss improvement (0=off).",
+        help="Caduceus: val_loss patience; LegNet: val_pearson patience (0=off).",
+    )
+    p.add_argument(
+        "--min-epochs",
+        type=int,
+        default=0,
+        help="Minimum epochs before early stopping can end training (0=off).",
     )
     p.add_argument(
         "--tiny-outdir", type=Path, default=None,
@@ -493,6 +518,7 @@ def main(argv: list[str] | None = None) -> int:
         zsv_root=args.zsv_root, eval_zsv=args.eval_zsv,
         checkpoint_every_n_epochs=args.checkpoint_every_n_epochs,
         early_stopping_patience=args.early_stopping_patience,
+        min_epochs=args.min_epochs,
     ))
     return 0
 
