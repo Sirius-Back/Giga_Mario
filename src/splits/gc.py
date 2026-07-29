@@ -57,7 +57,7 @@ def run_gc_split_assign(
     ids: list[str] | None = None,
     fna_mode: FastaMode = "auto",
     n_clusters: int | Literal["auto"] = "auto",
-    cluster_method: ClusterMethod = "dbscan",
+    cluster_method: str | ClusterMethod = "dbscan",
     ratios: tuple[float, float, float] | None = None,
     plot: bool = True,
     plot_max_n: int | None = None,
@@ -67,7 +67,10 @@ def run_gc_split_assign(
     dbscan_min_samples: int = 5,
 ) -> dict[str, Any]:
     """FNA → GC%/AAA% features → SBS assignment → ``split.csv`` (+ PCA diagnostics)."""
-    _ = plot_max_n  # retained for CLI compat; PCA subsamples internally
+    from src.splits.sbs.assign import normalize_cluster_method
+    from src.splits.sbs.visualize import DEFAULT_PLOT_N
+
+    cluster_method = normalize_cluster_method(cluster_method)
     outdir = Path(outdir)
     outdir.mkdir(parents=True, exist_ok=True)
 
@@ -105,6 +108,7 @@ def run_gc_split_assign(
             custom_label_csv=custom_csv,
             custom_label_column=custom_col,
             seed=seed,
+            max_points=int(plot_max_n) if plot_max_n else DEFAULT_PLOT_N,
         )
 
     summary = {

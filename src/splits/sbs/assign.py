@@ -20,6 +20,15 @@ from src.splits.sbs.features import FeatureTable
 
 ASSIGNMENT_COLUMNS = ["region", "cluster", "train_test", "fold", "additional"]
 
+CLUSTER_METHODS: tuple[str, ...] = (
+    "dbscan",
+    "kmeans",
+    "kmeans_elbow",
+    "hierarchical",
+    "pca_kmeans",
+    "auto",
+)
+
 ClusterMethod = Literal[
     "dbscan",
     "kmeans",
@@ -28,6 +37,36 @@ ClusterMethod = Literal[
     "pca_kmeans",
     "auto",
 ]
+
+# Aliases accepted from CLI / Hydra / split captions.
+_CLUSTER_METHOD_ALIASES: dict[str, ClusterMethod] = {
+    "dbscan": "dbscan",
+    "dbs": "dbscan",
+    "kmeans": "kmeans",
+    "k-means": "kmeans",
+    "km": "kmeans",
+    "kmeans_elbow": "kmeans_elbow",
+    "elbow": "kmeans_elbow",
+    "kmeans-elbow": "kmeans_elbow",
+    "hierarchical": "hierarchical",
+    "hclust": "hierarchical",
+    "agglomerative": "hierarchical",
+    "pca_kmeans": "pca_kmeans",
+    "pca-kmeans": "pca_kmeans",
+    "pca+kmeans": "pca_kmeans",
+    "auto": "auto",
+}
+
+
+def normalize_cluster_method(method: str | ClusterMethod) -> ClusterMethod:
+    """Map user / config aliases onto a supported ClusterMethod."""
+    key = str(method).strip().lower().replace(" ", "_")
+    if key not in _CLUSTER_METHOD_ALIASES:
+        raise ValueError(
+            f"Unknown cluster_method={method!r}; "
+            f"supported: {', '.join(CLUSTER_METHODS)}"
+        )
+    return _CLUSTER_METHOD_ALIASES[key]
 
 
 def _standardize(x: np.ndarray) -> np.ndarray:
@@ -89,6 +128,12 @@ def _elbow_k(inertias: dict[int, float]) -> int:
     return ks[int(np.argmax(dists))]
 
 
+# DBSCAN neighbor graphs become memory-hostile well below full-panel MARKED sizes.
+DBSCAN_MAX_N = 50_000
+# Prefer MiniBatchKMeans above this for kmeans / elbow paths.
+MINIBATCH_KMEANS_N = 20_000
+
+
 def _cluster_dbscan(
     x: np.ndarray, *, eps: float | None, min_samples: int, seed: int
 ) -> tuple[np.ndarray, dict[str, Any]]:
@@ -96,11 +141,16 @@ def _cluster_dbscan(
     from sklearn.neighbors import NearestNeighbors
 
     n = x.shape[0]
+    if n > DBSCAN_MAX_N:
+        raise ValueError(
+            f"DBSCAN refused for n={n} (>{DBSCAN_MAX_N}); "
+            "use cluster_method=kmeans_elbow|kmeans|pca_kmeans|auto"
+        )
     meta: dict[str, Any] = {"min_samples": min_samples}
     if eps is None:
         # k-distance heuristic: median distance to min_samples-th neighbor
         k = min(max(min_samples, 2), max(n - 1, 1))
-        nn = NearestNeighbors(n_neighbors=k)
+        nn = NearestNeighbors(n_neighbors=k, algorithm="kd_tree")
         nn.fit(x)
         dists, _ = nn.kneighbors(x)
         eps = float(np.median(dists[:, -1]))
@@ -109,7 +159,7 @@ def _cluster_dbscan(
         meta["eps_auto"] = eps
     else:
         meta["eps"] = eps
-    model = DBSCAN(eps=eps, min_samples=min_samples)
+    model = DBSCAN(eps=eps, min_samples=min_samples, algorithm="kd_tree")
     labels = model.fit_predict(x)
     # Remap noise (-1) to its own singleton-style cluster ids after core labels
     remapped = labels.copy()
@@ -125,13 +175,23 @@ def _cluster_dbscan(
 
 
 def _cluster_kmeans(x: np.ndarray, n_clusters: int, *, seed: int) -> np.ndarray:
-    from sklearn.cluster import KMeans
-
     n = x.shape[0]
     k = min(max(int(n_clusters), 1), n)
     if k >= n:
         return np.arange(n, dtype=int)
-    model = KMeans(n_clusters=k, random_state=seed, n_init=10)
+    if n >= MINIBATCH_KMEANS_N:
+        from sklearn.cluster import MiniBatchKMeans
+
+        model = MiniBatchKMeans(
+            n_clusters=k,
+            random_state=seed,
+            batch_size=min(4096, max(256, n // 50)),
+            n_init=10,
+        )
+    else:
+        from sklearn.cluster import KMeans
+
+        model = KMeans(n_clusters=k, random_state=seed, n_init=10)
     return model.fit_predict(x)
 
 
@@ -142,10 +202,21 @@ def _cluster_kmeans_elbow(
     upper = min(k_max or max(3, int(np.sqrt(n))), n - 1 if n > 1 else 1, 20)
     lower = max(1, min(k_min, upper))
     inertias: dict[int, float] = {}
-    from sklearn.cluster import KMeans
-
     for k in range(lower, upper + 1):
-        model = KMeans(n_clusters=k, random_state=seed, n_init=10)
+        # Reuse _cluster_kmeans path's estimator family via a fit-only call
+        if n >= MINIBATCH_KMEANS_N:
+            from sklearn.cluster import MiniBatchKMeans
+
+            model = MiniBatchKMeans(
+                n_clusters=k,
+                random_state=seed,
+                batch_size=min(4096, max(256, n // 50)),
+                n_init=5,
+            )
+        else:
+            from sklearn.cluster import KMeans
+
+            model = KMeans(n_clusters=k, random_state=seed, n_init=10)
         model.fit(x)
         inertias[k] = float(model.inertia_)
     k_best = _elbow_k(inertias)
@@ -235,25 +306,42 @@ def cluster_feature_table(
     features: FeatureTable,
     *,
     n_clusters: int | Literal["auto"] = "auto",
-    method: ClusterMethod = "dbscan",
+    method: str | ClusterMethod = "dbscan",
     seed: int = 42,
     k_min: int = 2,
     k_max: int | None = None,
     dbscan_eps: float | None = None,
     dbscan_min_samples: int = 5,
 ) -> tuple[dict[str, int], dict[str, Any]]:
-    """Return region→cluster id map from the feature matrix."""
+    """Return region→cluster id map from the feature matrix.
+
+    ``method`` selects the clustering backend (aliases accepted via
+    :func:`normalize_cluster_method`). Large-n guards:
+
+    - ``dbscan`` / ``auto`` with n > ``DBSCAN_MAX_N`` → MiniBatchKMeans elbow
+    - ``hierarchical`` with n > 5000 → ValueError (caller should switch method)
+    """
+    method = normalize_cluster_method(method)
     x = _standardize(features.matrix)
     meta: dict[str, Any] = {
         "method_requested": method,
         "feature_names": list(features.feature_names),
+        "supported_methods": list(CLUSTER_METHODS),
     }
-    used = method
+    used: str
     labels: np.ndarray
     k_info: dict[str, Any] = {}
+    n = int(x.shape[0])
 
-    if method == "auto":
-        # Prefer DBSCAN; fall back to kmeans_elbow if DBSCAN collapses to <2 clusters
+    # --- dispatch by method (with documented large-n fallbacks) ---
+    if method in ("dbscan", "auto") and n > DBSCAN_MAX_N:
+        labels, k_info = _cluster_kmeans_elbow(
+            x, seed=seed, k_min=k_min, k_max=k_max
+        )
+        used = "kmeans_elbow"
+        meta["fallback"] = "dbscan_large_n"
+        meta["dbscan_max_n"] = DBSCAN_MAX_N
+    elif method == "auto":
         labels, db_meta = _cluster_dbscan(
             x, eps=dbscan_eps, min_samples=dbscan_min_samples, seed=seed
         )
@@ -278,27 +366,41 @@ def cluster_feature_table(
             x, seed=seed, k_min=k_min, k_max=k_max
         )
         used = "kmeans_elbow"
-    else:
+    elif method == "hierarchical":
         if n_clusters == "auto":
             k, choice = choose_n_clusters_features(
-                x, method=method, seed=seed, k_min=k_min, k_max=k_max
+                x, method="hierarchical", seed=seed, k_min=k_min, k_max=k_max
             )
             meta["k_selection"] = choice
-            used_for_k = choice.get("best_method", method)
-            if used_for_k in ("kmeans", "pca_kmeans", "hierarchical"):
-                method = used_for_k  # type: ignore[assignment]
         else:
             k = int(n_clusters)
-        if method == "hierarchical":
-            labels = _cluster_hierarchical(x, k)
-            used = "hierarchical"
-        elif method == "pca_kmeans":
-            labels = _cluster_pca_kmeans(x, k, seed=seed)
-            used = "pca_kmeans"
-        else:
-            labels = _cluster_kmeans(x, k, seed=seed)
-            used = "kmeans"
+        labels = _cluster_hierarchical(x, k)
+        used = "hierarchical"
         k_info = {"k": k}
+    elif method == "pca_kmeans":
+        if n_clusters == "auto":
+            k, choice = choose_n_clusters_features(
+                x, method="pca_kmeans", seed=seed, k_min=k_min, k_max=k_max
+            )
+            meta["k_selection"] = choice
+        else:
+            k = int(n_clusters)
+        labels = _cluster_pca_kmeans(x, k, seed=seed)
+        used = "pca_kmeans"
+        k_info = {"k": k}
+    elif method == "kmeans":
+        if n_clusters == "auto":
+            k, choice = choose_n_clusters_features(
+                x, method="kmeans", seed=seed, k_min=k_min, k_max=k_max
+            )
+            meta["k_selection"] = choice
+        else:
+            k = int(n_clusters)
+        labels = _cluster_kmeans(x, k, seed=seed)
+        used = "kmeans"
+        k_info = {"k": k}
+    else:  # pragma: no cover — normalize_cluster_method guards this
+        raise ValueError(f"Unhandled cluster_method={method!r}")
 
     meta["method_used"] = used
     meta["n_clusters"] = int(len(set(int(v) for v in labels.tolist())))
@@ -427,7 +529,7 @@ def assign_from_features(
     stratification_csv: Path | None = None,
     seed: int = 42,
     n_clusters: int | Literal["auto"] = "auto",
-    cluster_method: ClusterMethod = "dbscan",
+    cluster_method: str | ClusterMethod = "dbscan",
     ratios: tuple[float, float, float] | None = None,
     precomputed_clusters: dict[str, int] | None = None,
     additional_by_region: dict[str, Any] | None = None,
@@ -438,6 +540,7 @@ def assign_from_features(
 
     Columns: region|cluster|train_test|fold|additional
     """
+    cluster_method = normalize_cluster_method(cluster_method)
     fold_map = _load_id_fold_map(fold_csv)
     strat_map = _load_strat_map(stratification_csv)
 

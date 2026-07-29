@@ -7,18 +7,22 @@ direct_cmd: >-
   --out ${out_root}/direct
   --epochs ${epochs}
   --batch-size ${batch_size}
+  --max-length ${max_length}
   --seed ${seed}
   --task ${task_type}
   --checkpoint-every-n-epochs ${checkpoint_every_n_epochs}
+  --early-stopping-patience ${early_stopping_patience}
 adversarial_cmd: >-
   python -m src.caduceus
   --splits-dir ${out_root}/adversarial/train/caduceus_input
   --out ${out_root}/adversarial/train
   --epochs ${epochs}
   --batch-size ${batch_size}
+  --max-length ${max_length}
   --seed ${seed}
   --task ${adversarial_task_type}
   --checkpoint-every-n-epochs ${checkpoint_every_n_epochs}
+  --early-stopping-patience ${early_stopping_patience}
 zsv_cmd: >-
   python -m src.pipeline.zsv_eval
   --model caduceus

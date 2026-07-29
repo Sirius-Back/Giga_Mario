@@ -337,6 +337,13 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         "epochs (0 disables). Best val_loss is always tracked in best_model/; "
         "final_model/ is set to best after train.",
     )
+    p.add_argument(
+        "--early-stopping-patience",
+        type=int,
+        default=0,
+        help="Stop training after this many epochs without val_loss improvement "
+        "(0 disables). Best checkpoint is still promoted to final_model/.",
+    )
     return p.parse_args(argv)
 
 
@@ -554,6 +561,10 @@ def run(args: argparse.Namespace) -> int:
     raw_model = model.module if isinstance(model, DDP) else model
     use_amp = bool(args.amp) and device.type == "cuda"
     scaler = torch.cuda.amp.GradScaler(enabled=use_amp)
+    patience = int(getattr(args, "early_stopping_patience", 0) or 0)
+    epochs_since_improve = 0
+    epochs_completed = start_epoch
+    stopped_early = False
 
     for epoch_idx in range(start_epoch, args.epochs):
         epoch = epoch_idx + 1
@@ -639,6 +650,7 @@ def run(args: argparse.Namespace) -> int:
                 )
 
         elapsed = time.perf_counter() - t0
+        stop_flag = torch.zeros(1, device=device, dtype=torch.int32)
         if rank == 0:
             assert train_metrics and val_metrics and test_metrics
             payload = {
@@ -690,6 +702,7 @@ def run(args: argparse.Namespace) -> int:
             vloss = float(val_metrics["loss"])
             if vloss < best_val:
                 best_val = vloss
+                epochs_since_improve = 0
                 best_dir = out / "best_model"
                 best_dir.mkdir(parents=True, exist_ok=True)
                 raw_model.save_pretrained(best_dir)
@@ -708,6 +721,8 @@ def run(args: argparse.Namespace) -> int:
                     + "\n",
                     encoding="utf-8",
                 )
+            else:
+                epochs_since_improve += 1
 
             # Periodic epoch checkpoints (every N epochs; also last epoch if
             # it is not already a multiple — kept only on the every-N grid).
@@ -733,6 +748,30 @@ def run(args: argparse.Namespace) -> int:
                 print(f"Saved periodic checkpoint → {ckpt_dir}", flush=True)
 
             print(json.dumps(payload), flush=True)
+
+            if patience > 0 and epochs_since_improve >= patience:
+                stop_flag[0] = 1
+                print(
+                    json.dumps(
+                        {
+                            "early_stopping": True,
+                            "patience": patience,
+                            "epochs_since_improve": epochs_since_improve,
+                            "best_val_loss": best_val,
+                            "stopped_at_epoch": epoch,
+                        }
+                    ),
+                    flush=True,
+                )
+
+        if dist.is_initialized():
+            dist.broadcast(stop_flag, src=0)
+            dist.barrier()
+
+        epochs_completed = epoch
+        if int(stop_flag.item()) > 0:
+            stopped_early = True
+            break
 
         if dist.is_initialized():
             dist.barrier()
@@ -766,7 +805,10 @@ def run(args: argparse.Namespace) -> int:
         timing = {
             "train_time_sec": total_time,
             "train_time_min": total_time / 60.0,
-            "epochs_completed": args.epochs,
+            "epochs_completed": epochs_completed,
+            "epochs_requested": args.epochs,
+            "early_stopping_patience": patience,
+            "stopped_early": stopped_early,
             "global_step": global_step,
             "world_size": world,
             "seed": args.seed,

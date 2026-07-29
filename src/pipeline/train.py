@@ -254,6 +254,7 @@ def run_train(
     zsv_root: Path | None = None,
     eval_zsv: bool = False,
     checkpoint_every_n_epochs: int = 10,
+    early_stopping_patience: int = 0,
 ) -> Path:
     """
     Wrapper around Caduceus / LegNet trainers.
@@ -266,6 +267,9 @@ def run_train(
 
     ``checkpoint_every_n_epochs`` saves periodic weights (default 10); after
     train the best validation checkpoint is promoted to ``final_model/``.
+
+    ``early_stopping_patience`` (Caduceus): stop after this many epochs without
+    val_loss improvement (0 disables).
     """
     model = model.lower()
     type = type.lower()
@@ -320,6 +324,11 @@ def run_train(
                 "--train-eval-max-samples", "4096",
                 "--checkpoint-every-n-epochs", str(int(checkpoint_every_n_epochs)),
             ]
+            if int(early_stopping_patience) > 0:
+                argv += [
+                    "--early-stopping-patience",
+                    str(int(early_stopping_patience)),
+                ]
             if max_samples is not None:
                 argv += ["--max-samples", str(max_samples)]
             # Multi-GPU: Caduceus uses torch.distributed (RANK/WORLD_SIZE), so
@@ -448,6 +457,12 @@ def main(argv: list[str] | None = None) -> int:
         "After train, best validation checkpoint is promoted to final_model/.",
     )
     p.add_argument(
+        "--early-stopping-patience",
+        type=int,
+        default=0,
+        help="Caduceus: stop after N epochs without val_loss improvement (0=off).",
+    )
+    p.add_argument(
         "--tiny-outdir", type=Path, default=None,
         help="Materialize a deterministic 50/10/10 real SPLIT subset and exit",
     )
@@ -471,6 +486,7 @@ def main(argv: list[str] | None = None) -> int:
         num_workers=args.num_workers, legnet_demo=args.legnet_demo,
         zsv_root=args.zsv_root, eval_zsv=args.eval_zsv,
         checkpoint_every_n_epochs=args.checkpoint_every_n_epochs,
+        early_stopping_patience=args.early_stopping_patience,
     ))
     return 0
 

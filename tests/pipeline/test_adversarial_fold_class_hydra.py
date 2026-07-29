@@ -116,3 +116,31 @@ def test_hydra_pipeline_imports_and_config() -> None:
     assert "src.legnet" in str(cfg.train.direct_cmd)
     assert "src.pipeline.zsv_eval" in str(cfg.train.zsv_cmd)
     assert list(cfg.ratios) == [1, 1, 3]
+
+
+def test_hydra_pipeline_gc_caduceus_overrides() -> None:
+    pytest.importorskip("hydra")
+    from hydra import compose, initialize_config_dir
+
+    cfg_dir = str((Path(__file__).resolve().parents[2] / "configs").resolve())
+    with initialize_config_dir(version_base=None, config_dir=cfg_dir):
+        cfg = compose(
+            config_name="pipeline",
+            overrides=[
+                "mode=run",
+                "split=gc",
+                "train=caduceus",
+                "adversarial=false",
+                "early_stopping_patience=10",
+                "max_length=208",
+                "panel_root=ready_caduceus",
+                "out_root=runs/run3",
+            ],
+        )
+    assert cfg.split == "gc"
+    assert cfg.train.name == "caduceus"
+    assert cfg.adversarial is False
+    assert int(cfg.early_stopping_patience) == 10
+    assert int(cfg.max_length) == 208
+    assert "early-stopping-patience" in str(cfg.train.direct_cmd)
+    assert "max-length" in str(cfg.train.direct_cmd)

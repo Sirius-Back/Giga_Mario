@@ -63,13 +63,34 @@ def _run_stages(cfg: DictConfig) -> int:
     _write_hydra_resolved(cfg, out_root)
 
     # --- direct split ---
+    split_type = str(cfg.split)
+    marked_cfg = cfg.get("marked", None)
+    if marked_cfg:
+        marked_path: Path | None = _resolve_path(marked_cfg)
+    elif split_type == "gc":
+        marked_path = panel_root / "MARKED"
+        if not marked_path.is_dir():
+            raise FileNotFoundError(
+                f"split=gc requires MARKED dir (or marked=… override): {marked_path}"
+            )
+    else:
+        marked_path = None
+    max_ids_cfg = cfg.get("max_ids", None)
+    max_ids = int(max_ids_cfg) if max_ids_cfg not in (None, "", "null") else None
+    plot_split = bool(cfg.get("plot_split", True))
+    cluster_method = str(cfg.get("cluster_method", "auto"))
+
     split_csv = run_split_predict(
         outdir=out_root,
-        type=str(cfg.split),
+        type=split_type,
         seed=seed,
         id_csv=panel_root / "ID.csv",
         fold_csv=panel_root / "fold.csv",
         ratios=ratios,
+        marked_fasta=marked_path,
+        max_ids=max_ids,
+        plot=plot_split and split_type == "gc",
+        cluster_method=cluster_method,
     )
     split_root = run_split(
         split_csv,
@@ -96,6 +117,7 @@ def _run_stages(cfg: DictConfig) -> int:
 
     max_length = int(cfg.get("max_length", 512))
     ckpt_every = int(cfg.get("checkpoint_every_n_epochs", 10))
+    early_stop = int(cfg.get("early_stopping_patience", 0) or 0)
     run_train(
         model=train_name,
         type=str(cfg.task_type),
@@ -113,6 +135,7 @@ def _run_stages(cfg: DictConfig) -> int:
         zsv_root=out_root if eval_zsv else None,
         eval_zsv=eval_zsv and run_training,
         checkpoint_every_n_epochs=ckpt_every,
+        early_stopping_patience=early_stop,
     )
     # During/after-train monitoring figures (learning curves + split compare)
     try:
@@ -199,6 +222,7 @@ def _run_stages(cfg: DictConfig) -> int:
         zsv_root=adv_root if eval_zsv else None,
         eval_zsv=eval_zsv and run_training,
         checkpoint_every_n_epochs=ckpt_every,
+        early_stopping_patience=early_stop,
     )
     try:
         from src.train_viz.train_monitor import refresh_train_monitor

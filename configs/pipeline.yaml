@@ -18,6 +18,8 @@ seed: 42
 epochs: 3
 # Periodic weight dumps during train; final_model/ = best validation checkpoint
 checkpoint_every_n_epochs: 10
+# Caduceus early stop on val_loss (0 disables). LegNet ignores unless wired.
+early_stopping_patience: 0
 n_devices: 4
 batch_size: 1024
 max_length: 512  # Caduceus tokenizer pad/truncate; override for short windows
@@ -27,6 +29,13 @@ panel_root: run/${run_id}
 out_root: run/${run_id}
 zsv: true
 conda_env: legnet
+# GC / SBS: MARKED or FNA root (null → panel_root/MARKED when split=gc)
+marked: null
+max_ids: null
+plot_split: true
+# GC/SBS clustering: dbscan | kmeans | kmeans_elbow | pca_kmeans | auto
+# (auto/dbscan on n>50k falls back to MiniBatchKMeans elbow)
+cluster_method: auto
 
 hydra:
   run:

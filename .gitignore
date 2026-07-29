@@ -5,6 +5,8 @@ anaconda3/
 bin/
 .anaconda/
 .conda/
+.local/
+mag/
 
 # --- Secrets & private shell state ---
 .ssh/
