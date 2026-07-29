@@ -70,9 +70,21 @@ Complex architectures (CV folds, chromosome/species holdout, adversarial panels)
 ## Reuse rules
 
 - Import `assign_folds_random` / `assign_folds_stratified` from `src.splits.random` when ratios match Caduceus-aligned random.
+- **Similarity strategies:** reuse `src.splits.sbs` feature tables + clustering (default DBSCAN). Add a backend under `src.splits.sbs.backends` and a thin `src/splits/<id>.py`; see [sbs.md](sbs.md) and `splits/gc.md`. Do not cluster on dense \(n\times n\) distances.
 - Call `run_id_rule` / `run_generate_fold` instead of copying remap loops.
 - Do not break `src/pipeline` I/O contracts; extend with defaults that preserve legacy behavior.
 - Novel code → pytest before claiming the strategy ready for `/split`.
+
+## SBS checklist (for `/split-generate`)
+
+```
+sbs-strategy:
+- [ ] Caption splits/<id>.md (Description / Split / Implementations / References)
+- [ ] Backend implements DistanceBackend.compute(sequences) → DistanceMatrix
+- [ ] assign_from_distance_matrix handles zsv + fold-level strat aggregation
+- [ ] split_predict type=<id> wired; pytest C1+C2 on mock
+- [ ] Optional: plot_distance_heatmap on diagnostic subset
+```
 
 ## Separation from `/split`
 

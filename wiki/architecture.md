@@ -145,11 +145,14 @@ Example rule: `GCF_000005845.2|genome|zsv` → resolve via `id_rule` (`id_col_1=
 
 | | |
 |--|--|
-| **Input** | `outdir`; `type=random` (only); optional `id_csv`, `fold`, `stratification`, … |
-| **Assignment** | Imports `assign_folds_random` / `assign_folds_stratified` from `src.splits.random` |
-| **Stratification** | Uses **all** stratification columns (composite key); `--stratification-column` deprecated |
-| **fold.csv** | `zsv` / `zeroshotvalidation` → `train_test=zsv` (excluded from random). If omitted: warning `Warning: folds are not included` |
-| **Output** | `{outdir}/split.csv` (`ID|train_test|fold`) |
+| **Input** | `outdir`; `type=random\|gc` (+ future SBS types); optional `id_csv`, `fold`, `stratification`, `marked`/`fna`, … |
+| **Assignment (random)** | Imports `assign_folds_random` / `assign_folds_stratified` from `src.splits.random` |
+| **Assignment (gc)** | SBS: FNA/MARKED → feature table (`GC_pct`, `AAA_pct`) → cluster folds (default DBSCAN) → fold-grain train/test/val (`src.splits.gc` / `src.splits.sbs`) |
+| **Stratification** | Random: all strat columns (composite key). SBS: aggregate strat **per fold** (numeric→sum, categorical→mode) then stratify fold→train/test/val |
+| **fold.csv** | `zsv` / `zeroshotvalidation` → `train_test=zsv` (excluded from assignment). If omitted: warning `Warning: folds are not included` |
+| **Output** | `{outdir}/split.csv` (`ID|train_test|fold`); SBS also writes `feature_table.csv`, `sbs_assignment.csv`, optional PCA figures |
+
+SBS architecture: [sbs.md](sbs.md). Clustering uses feature tables (\(O(n\cdot d)\)), not dense distance matrices.
 
 ### `split`
 
@@ -178,6 +181,9 @@ Unchanged roles: fine-tune on SPLIT trees, plot logs, rebuild adversarial panels
 | ID + prepare_strat → strat (stub) | `generate_stratification` | `src.pipeline.generate_stratification` |
 | Column remap on ID.csv | `id_rule` | `src.pipeline.id_rule` |
 | E2 → split.csv | `split-predict` | `src.pipeline.split_predict` |
+| FNA → features (SBS) | `compute_feature_table` | `src.splits.sbs.features` |
+| features → assignment (SBS) | `assign_from_features` | `src.splits.sbs.assign` |
+| GC strategy | `run_gc_split_assign` | `src.splits.gc` |
 | E3 → SPLIT (+ ZSV trees) | `split` | `src.pipeline.split` |
 | SPLIT → logs | `train` | `src.pipeline.train` |
 | logs → figures | `train-viz` | `src.pipeline.train_viz` |
@@ -191,6 +197,8 @@ Unchanged roles: fine-tune on SPLIT trees, plot logs, rebuild adversarial panels
 | `fold.csv` | at least `ID\|fold` (full genomic columns preferred) |
 | `stratification.csv` | `ID` + one or more strat columns |
 | `split.csv` | `ID\|train_test\|fold` (`train`/`test`/`val`/`zsv`) |
+| `sbs_assignment.csv` | `region\|cluster\|train_test\|fold\|additional` (SBS strategies) |
+| `feature_table.csv` | `region` + SBS feature columns (e.g. `GC_pct\|AAA_pct`) |
 | `predict.csv` (merged) | `id\|predict_var1\|…` |
 | `predict.csv` (mapped) | `id\|sample_id\|predict_var1\|…` |
 | `intersect.csv` | `ID1\|ID2\|intersection_size` |

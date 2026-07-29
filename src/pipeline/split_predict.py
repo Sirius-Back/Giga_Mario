@@ -2,7 +2,11 @@
 
 Random assignment imports Caduceus-aligned fold ratios from
 ``src.splits.common`` (same helpers used by ``src.splits.random``).
-Only ``type=random`` is implemented.
+
+Supported ``type`` values:
+  - ``random`` — independent per-ID random / stratified assignment
+  - ``gc`` — split-by-similarity (SBS) with delta-GC distance
+    (requires ``marked_fasta`` or ``fna`` directory of per-ID FASTA)
 """
 from __future__ import annotations
 
@@ -10,13 +14,15 @@ import argparse
 import random
 import warnings
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 # Import fold assignment from the random split implementation (re-exported helpers).
 from src.splits.random import assign_folds_random, assign_folds_stratified
 
 from .common import SPLIT_CSV_COLUMNS, ensure_dir, read_csv, write_csv
 from .generate_fold import is_zsv_fold, normalize_fold_label
+
+SUPPORTED_SPLIT_TYPES = ("random", "gc")
 
 
 def _load_optional_table(
@@ -119,6 +125,55 @@ def _assign_random_train_test(
     return out
 
 
+def _run_gc_split_predict(
+    *,
+    outdir: Path,
+    seed: int,
+    id_csv: Path | None,
+    fold_csv: Path | None,
+    stratification_csv: Path | None,
+    fna: Path | None,
+    marked_fasta: Path | None,
+    ratios: tuple[float, float, float] | None,
+    max_ids: int | None,
+    n_clusters: int | Literal["auto"],
+    plot: bool,
+    cluster_method: str = "dbscan",
+    custom_label_column: str | None = None,
+) -> Path:
+    """SBS GC path: MARKED/FNA dir → GC%/AAA% features → assignment → split.csv."""
+    from src.splits.gc import run_gc_split_assign
+
+    fna_root = marked_fasta or fna
+    if fna_root is None:
+        raise ValueError(
+            "split-predict type=gc requires --marked (MARKED dir) or --fna"
+        )
+    ids = _load_ids(Path(id_csv)) if id_csv is not None else None
+    summary = run_gc_split_assign(
+        outdir=outdir,
+        fna=Path(fna_root),
+        id_csv=Path(id_csv) if id_csv else None,
+        fold_csv=Path(fold_csv) if fold_csv else None,
+        stratification_csv=Path(stratification_csv) if stratification_csv else None,
+        seed=seed,
+        max_ids=max_ids,
+        ids=ids,
+        ratios=ratios,
+        n_clusters=n_clusters,
+        cluster_method=cluster_method,  # type: ignore[arg-type]
+        plot=plot,
+        custom_label_csv=Path(stratification_csv) if (
+            stratification_csv is not None and custom_label_column
+        ) else None,
+        custom_label_column=custom_label_column,
+    )
+    out = Path(summary["split_csv"])
+    if not out.is_file():
+        raise FileNotFoundError(f"gc split did not write split.csv: {out}")
+    return out
+
+
 def run_split_predict(
     *,
     outdir: Path,
@@ -133,29 +188,55 @@ def run_split_predict(
     gtf: Path | None = None,
     marked_fasta: Path | None = None,
     ratios: tuple[float, float, float] | None = None,
+    max_ids: int | None = None,
+    n_clusters: int | Literal["auto"] = "auto",
+    plot: bool = False,
+    cluster_method: str = "dbscan",
+    custom_label_column: str | None = None,
 ) -> Path:
     """
     Write `{outdir}/split.csv` with columns ID|train_test|fold.
 
-    Only ``type=random`` is implemented (imports assignment from
-    ``src.splits.common``, shared with ``src.splits.random``).
+    ``type=random`` — Caduceus-aligned random / stratified assignment.
+    ``type=gc`` — SBS on GC% + AAA% feature table (``src.splits.sbs`` / ``gc``).
 
     When ``fold.csv`` is present:
       - folds labeled zsv / zeroshotvalidation → train_test=zsv (excluded from
-        random assignment; materialize moves them to zero-shot-validation/)
-      - other IDs get train/test/val via random/stratified import; fold column
-        keeps the fold.csv value (or ``0``)
+        random / SBS assignment; materialize moves them to zero-shot-validation/)
+      - other IDs get train/test/val; fold column keeps fold.csv value (random)
+        or SBS cluster id (gc)
 
     When ``fold.csv`` is omitted, emits:
       ``Warning: folds are not included``
     """
-    _ = (fna, gtf, marked_fasta, intersect_csv, stratification_column)
-    if type != "random":
+    _ = (gtf, intersect_csv)
+    if type not in SUPPORTED_SPLIT_TYPES:
         raise ValueError(
-            f"split-predict type={type!r} not implemented yet "
-            "(only random is available; other strategies removed for now)"
+            f"split-predict type={type!r} not implemented; "
+            f"supported: {', '.join(SUPPORTED_SPLIT_TYPES)}"
         )
     outdir = ensure_dir(Path(outdir))
+
+    if type == "gc":
+        if fold_csv is None:
+            warnings.warn("Warning: folds are not included", UserWarning, stacklevel=2)
+        # Deprecated single-column flag still accepted as custom PCA label column
+        custom_col = custom_label_column or stratification_column
+        return _run_gc_split_predict(
+            outdir=outdir,
+            seed=seed,
+            id_csv=id_csv,
+            fold_csv=fold_csv,
+            stratification_csv=stratification_csv,
+            fna=fna,
+            marked_fasta=marked_fasta,
+            ratios=ratios,
+            max_ids=max_ids,
+            n_clusters=n_clusters,
+            plot=plot,
+            cluster_method=cluster_method,
+            custom_label_column=custom_col,
+        )
 
     fold_map = _load_optional_table(fold_csv, min_cols=["ID", "fold"], label="fold.csv")
     strat_map = _load_optional_table(
@@ -254,7 +335,46 @@ def main(argv: list[str] | None = None) -> int:
         default=None,
         help="Optional train:test:val split weights; default preserves Caduceus ratios",
     )
+    p.add_argument(
+        "--max-ids",
+        type=int,
+        default=None,
+        help="Optional cap on sequences for SBS strategies (gc)",
+    )
+    p.add_argument(
+        "--n-clusters",
+        default="auto",
+        help="SBS cluster count or 'auto' (gc; ignored by dbscan)",
+    )
+    p.add_argument(
+        "--cluster-method",
+        default="dbscan",
+        choices=[
+            "dbscan",
+            "kmeans",
+            "kmeans_elbow",
+            "hierarchical",
+            "pca_kmeans",
+            "auto",
+        ],
+        help="SBS clustering on feature table (default: dbscan)",
+    )
+    p.add_argument(
+        "--custom-label-column",
+        default=None,
+        help="Optional column in --stratification for custom PCA coloring (gc)",
+    )
+    p.add_argument(
+        "--plot",
+        action="store_true",
+        help="Write SBS PCA diagnostics (gc)",
+    )
     args = p.parse_args(argv)
+    n_clusters: int | Literal["auto"]
+    if str(args.n_clusters).lower() == "auto":
+        n_clusters = "auto"
+    else:
+        n_clusters = int(args.n_clusters)
     path = run_split_predict(
         outdir=args.outdir,
         type=args.type,
@@ -268,6 +388,11 @@ def main(argv: list[str] | None = None) -> int:
         gtf=args.gtf,
         marked_fasta=args.marked,
         ratios=tuple(args.ratios) if args.ratios is not None else None,
+        max_ids=args.max_ids,
+        n_clusters=n_clusters,
+        plot=bool(args.plot),
+        cluster_method=str(args.cluster_method),
+        custom_label_column=args.custom_label_column,
     )
     print(path)
     return 0

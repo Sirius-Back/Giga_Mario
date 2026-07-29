@@ -66,6 +66,27 @@ Architecture may be complex (multi-fold CV, chromosome holdout, species holdout)
 
 Do **not** duplicate assignment logic inside `/split` runners. Strategy code belongs under `src/splits/` (or thin pipeline wrappers that import it).
 
+### Split-by-similarity (SBS) family
+
+When the caption is a **similarity** / cluster / feature strategy (GC, MMseqs, hashFrag, …), **reuse** `src.splits.sbs` instead of inventing a parallel pipeline.
+
+| Contract | API | Output |
+|----------|-----|--------|
+| C1 FNA → features | `compute_feature_table(fna, backend)` | `FeatureTable` |
+| C2 features → assignment | `assign_from_features(...)` | `region\|cluster\|train_test\|fold\|additional` |
+| Glue → split.csv | `assignment_rows_to_split_csv` + `split_predict type=<id>` | `ID\|train_test\|fold` |
+
+**Rules for SBS strategies:**
+
+1. Implement a thin `src/splits/<id>.py` that selects a **feature backend** (`src.splits.sbs.backends.*`) and calls SBS assign/viz helpers.
+2. Cluster in **feature space** (default **DBSCAN**; also kmeans / kmeans_elbow / hierarchical / pca_kmeans). Do **not** build dense \(n\times n\) distance matrices for clustering.
+3. Wire `src.pipeline.split_predict` `type=<id>`; do not fork materialize.
+4. FNA default = **directory** of one FASTA per region (MARKED). Keep `fna_mode="file"` hook.
+5. **ZSV:** hold out entire `fold.csv` zsv set.
+6. **Stratification:** aggregate per fold, then stratify **fold→train/test/val**.
+7. **Diagnostics:** `plot_sbs_pca_diagnostics` — PCA by cluster, train/test/val, genome, optional custom strat column (cnsplots + Altair).
+8. Docs: `wiki/sbs.md`; example `splits/gc.md` (features: `GC_pct`, `AAA_pct`).
+
 ### `split_fold` logic
 
 For strategies / panels that need **fold.csv** (including ZSV holdouts):
@@ -132,4 +153,6 @@ split-generate:
 - Human docs: [`wiki/split-generate.md`](../../../wiki/split-generate.md)
 - Architecture: [`wiki/architecture.md`](../../../wiki/architecture.md)
 - Example caption: [`splits/random.md`](../../../splits/random.md)
+- SBS architecture: [`wiki/sbs.md`](../../../wiki/sbs.md)
+- GC caption: [`splits/gc.md`](../../../splits/gc.md)
 - `/split` skill: [`../split/SKILL.md`](../split/SKILL.md)

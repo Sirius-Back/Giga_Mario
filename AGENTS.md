@@ -20,6 +20,9 @@
 | `src/legnet_demo_metrics.py` | LegNet post-hoc test metrics summary |
 | `src/get_mpra.py` | TPM → LegNet 18-bin soft-classification fractions (`python -m src.get_mpra`) |
 | `src/splits/main.py` | `@split` dispatcher (`python -m src.splits.main`) |
+| `src/splits/sbs/` | Split-by-similarity core (FNA→distance→assignment) |
+| `src/splits/gc.py` | GC SBS strategy (`split-predict type=gc`) |
+| `wiki/sbs.md` | SBS architecture contracts |
 | `src/caduceus.py` | `@caduceus` fine-tune (`python -m src.caduceus`) |
 | `src/hydra_pipeline.py` | `/pipeline` Hydra orchestrator |
 | `src/hydra_train.py` | `/train` Hydra entry (LegNet/Caduceus) |

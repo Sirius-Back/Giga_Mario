@@ -20,6 +20,8 @@ from pathlib import Path
 
 STRATEGY_RUNNERS = {
     "random": ("src.splits.random", "run_random_split"),
+    # GC / SBS strategies are assigned via src.pipeline.split_predict (type=gc).
+    # Legacy main dispatcher keeps random materialization for Caduceus-ready trees.
 }
 
 

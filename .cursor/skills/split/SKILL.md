@@ -26,7 +26,7 @@ Stop (missing-data-policy) if any required item is absent or empty.
 | Input | Required | Role |
 |-------|----------|------|
 | **data id** | **yes** | Short slug for the panel (used in run script filename) |
-| **split strategy id** | **yes** | Must match `splits/<id>.md` and a registered pipeline/`src.splits` type (e.g. `random`) |
+| **split strategy id** | **yes** | Must match `splits/<id>.md` and a registered pipeline/`src.splits` type (e.g. `random`, `gc`) |
 | **ID.csv** | **yes** | Panel ID table (`genome\|…\|ID`); join key for assignment |
 | **PREDICT** | **yes** | Root with `PREDICT/` (or the PREDICT dir itself) + `predict.csv` |
 | **PARSED** | **yes** | Root with `PARSED/` (or the PARSED dir itself) |
@@ -76,8 +76,12 @@ If strategy needs fold/strat CSVs that do not exist, build them via `generate_fo
 | ID remap | `src.pipeline.id_rule` | `run_id_rule(...)` |
 | Adversarial copy | `src.pipeline.adversarial` | `run_adversarial(...)` |
 | Random helpers | `src.splits.random` | imported **inside** split-predict already |
+| SBS core | `src.splits.sbs` | distance + assign + heatmap (similarity strategies) |
+| GC strategy | `src.splits.gc` | `type=gc` via split-predict (`--marked` / `--fna`) |
 
 Strategy algorithms live under `src/splits/<id>.py` (produced by `/split-generate`). `/split` only wires them through pipeline `type=` / registered helpers.
+
+For **SBS** strategies (`gc`, future `mmseqs`, …): runners must pass MARKED/FNA into `run_split_predict(..., type=<id>, marked_fasta=...)`. Prefer `--max-ids` on large panels. ZSV comes from `fold.csv`; stratification is fold-aggregated inside SBS assign.
 
 ## Runner skeleton
 
