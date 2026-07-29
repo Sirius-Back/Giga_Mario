@@ -319,7 +319,10 @@ def eval_zsv_from_train_outdir(
             model_dir = outdir / "best_model"
         cfg = _read_run_config(outdir)
         max_length = int(cfg.get("max_length") or 256)
-        batch_size = int(cfg.get("eval_batch_size") or cfg.get("batch_size") or 192)
+        # Train-time eval_batch_size can be huge (DDP headroom); ZSV is single-GPU
+        # forward-only and OOM'd at 480 on V100 — cap unless explicitly overridden.
+        raw_bs = int(cfg.get("zsv_batch_size") or cfg.get("eval_batch_size") or cfg.get("batch_size") or 192)
+        batch_size = min(raw_bs, int(cfg.get("zsv_batch_cap", 128) or 128))
         amp = bool(cfg.get("amp", True))
         return eval_caduceus_zsv(
             model_dir=model_dir,
