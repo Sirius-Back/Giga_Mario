@@ -13,7 +13,9 @@ from .gc import (
 )
 from .kmer import (
     DSK_MIN_K,
+    NATIVE_MAX_K,
     KmerFeatureBackend,
+    count_kmers,
     count_kmers_dsk,
     count_kmers_local,
     find_dsk,
@@ -26,6 +28,7 @@ from .mmseqs import MMseqsDistanceBackend
 __all__ = [
     "DEFAULT_FEATURE_NAMES",
     "DSK_MIN_K",
+    "NATIVE_MAX_K",
     "FEATURE_AAA_PCT",
     "FEATURE_GC_PCT",
     "GcAaaFeatureBackend",
@@ -33,6 +36,7 @@ __all__ = [
     "KmerFeatureBackend",
     "MMseqsDistanceBackend",
     "aaa_percent",
+    "count_kmers",
     "count_kmers_dsk",
     "count_kmers_local",
     "find_dsk",

@@ -37,6 +37,7 @@ def compute_kmer_feature_table(
     max_ids: int | None = None,
     normalize: str = "relative",
     log_transform: bool = False,
+    engine: str = "auto",
     dsk_bin: str | Path | None = None,
     dsk2ascii_bin: str | Path | None = None,
     abundance_min: int = 1,
@@ -47,6 +48,7 @@ def compute_kmer_feature_table(
         k=k,
         normalize=normalize,
         log_transform=log_transform,
+        engine=engine,  # type: ignore[arg-type]
         dsk_bin=dsk_bin,
         dsk2ascii_bin=dsk2ascii_bin,
         abundance_min=abundance_min,
@@ -85,6 +87,7 @@ def run_kmer_split_assign(
     dbscan_min_samples: int = 5,
     normalize: str = "relative",
     log_transform: bool = False,
+    engine: str = "auto",
     dsk_bin: str | Path | None = None,
     dsk2ascii_bin: str | Path | None = None,
     abundance_min: int = 1,
@@ -109,6 +112,7 @@ def run_kmer_split_assign(
         max_ids=max_ids,
         normalize=normalize,
         log_transform=log_transform,
+        engine=engine,
         dsk_bin=dsk_bin,
         dsk2ascii_bin=dsk2ascii_bin,
         abundance_min=abundance_min,
@@ -162,6 +166,7 @@ def run_kmer_split_assign(
         "cluster_method": cluster_method,
         "normalize": normalize,
         "log_transform": log_transform,
+        "engine": (features.extras or {}).get("engine", engine),
     }
     (outdir / "kmer_split_meta.json").write_text(
         json.dumps(summary, indent=2, default=str) + "\n", encoding="utf-8"

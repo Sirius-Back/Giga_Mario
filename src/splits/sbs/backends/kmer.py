@@ -1,8 +1,11 @@
-"""K-mer composition feature backend for SBS (DSK-backed).
+"""K-mer composition feature backend for SBS.
 
-Caption: ``splits/kmer.md``. Observed k-mers only (no dense 4^k allocation).
-DSK (GATB) is used for ``k >= 3``. DSK rejects ``k <= 2``; those sizes use an
-in-process overlapping counter with the same FeatureTable contract.
+Production default (``engine="auto"``): fast in-process counter for ``k >= 2``
+(native C++ when built, else optimized Python). GATB DSK is optional
+(``engine="dsk"``) and only supports ``k >= 3``.
+
+Caption: ``splits/kmer.md``. Observed k-mers only (no dense FeatureTable of
+absent k-mers — dense buffers are an internal counting device).
 """
 from __future__ import annotations
 
@@ -12,7 +15,7 @@ import tempfile
 import warnings
 from collections import Counter
 from pathlib import Path
-from typing import Mapping, Sequence
+from typing import Literal, Mapping, Sequence
 
 import numpy as np
 
@@ -20,9 +23,11 @@ from src.splits.sbs.features import FeatureTable
 
 __all__ = (
     "DSK_MIN_K",
+    "NATIVE_MAX_K",
     "KmerFeatureBackend",
     "count_kmers_dsk",
     "count_kmers_local",
+    "count_kmers",
     "find_dsk",
     "find_dsk2ascii",
     "normalize_k_list",
@@ -30,6 +35,9 @@ __all__ = (
 )
 
 DSK_MIN_K = 3
+NATIVE_MAX_K = 12  # matches C++ KMER_COUNT_MAX_K (dense 4^k)
+
+KmerEngine = Literal["auto", "native", "python", "dsk"]
 
 
 def find_dsk(explicit: str | Path | None = None) -> Path:
@@ -97,7 +105,7 @@ def parse_dsk_ascii(text: str) -> dict[str, int]:
 
 
 def count_kmers_local(sequence: str, k: int) -> dict[str, int]:
-    """Overlapping ACGT-only k-mer counts (observed keys only)."""
+    """Overlapping ACGT-only k-mer counts (observed keys only). Pure Python."""
     if k < 1:
         raise ValueError(f"k must be >= 1; got {k}")
     seq = "".join(ch for ch in sequence.upper() if not ch.isspace())
@@ -126,7 +134,7 @@ def count_kmers_dsk(
     if k < DSK_MIN_K:
         raise ValueError(
             f"DSK does not support k <= {DSK_MIN_K - 1}; got k={k}. "
-            "Use the in-process counter for those sizes."
+            "Use engine='auto'/'native'/'python' for those sizes."
         )
     workdir = Path(workdir)
     workdir.mkdir(parents=True, exist_ok=True)
@@ -163,7 +171,6 @@ def count_kmers_dsk(
         )
     h5 = Path(str(out_prefix) + ".h5")
     if not h5.is_file():
-        # Some builds write without suffix when -out already ends oddly.
         candidates = list(workdir.glob("counts*.h5"))
         if not candidates:
             raise FileNotFoundError(f"dsk did not write HDF5 counts under {workdir}")
@@ -189,6 +196,40 @@ def count_kmers_dsk(
     return parse_dsk_ascii(ascii_path.read_text(encoding="utf-8", errors="replace"))
 
 
+def count_kmers(
+    sequence: str,
+    k: int,
+    *,
+    engine: KmerEngine = "auto",
+) -> dict[str, int]:
+    """Count overlapping ACGT k-mers (abundance, not presence).
+
+    ``auto`` / ``native`` / ``python`` work for any ``k >= 1`` (native dense
+    path covers ``1..12``). ``dsk`` requires ``k >= 3`` and a writable temp dir
+    via ``count_kmers_dsk`` — use ``KmerFeatureBackend(engine='dsk')`` for that.
+    """
+    k = int(k)
+    if k < 1:
+        raise ValueError(f"k must be >= 1; got {k}")
+    if engine == "dsk":
+        raise ValueError(
+            "count_kmers(engine='dsk') needs per-call workdirs; "
+            "use KmerFeatureBackend(engine='dsk') instead"
+        )
+    if engine in {"auto", "native"} and k <= NATIVE_MAX_K:
+        from src.splits.sbs.backends.native import try_get_native_counter
+
+        native = try_get_native_counter()
+        if native is not None:
+            return native.count(sequence, k)
+        if engine == "native":
+            raise RuntimeError(
+                "native k-mer counter unavailable; build with "
+                "`python -m src.splits.sbs.backends.native.build`"
+            )
+    return count_kmers_local(sequence, k)
+
+
 def _feature_name(k: int, kmer: str, *, multi_k: bool) -> str:
     if multi_k:
         return f"k{k}_{kmer}"
@@ -203,7 +244,7 @@ def _relative(counts: Mapping[str, float] | Mapping[str, int]) -> dict[str, floa
 
 
 class KmerFeatureBackend:
-    """Per-region k-mer composition features via DSK (and local for k < 3)."""
+    """Per-region k-mer composition features (abundance counts → FeatureTable)."""
 
     name = "kmer"
 
@@ -213,19 +254,25 @@ class KmerFeatureBackend:
         *,
         normalize: str = "relative",
         log_transform: bool = False,
+        engine: KmerEngine = "auto",
         dsk_bin: str | Path | None = None,
         dsk2ascii_bin: str | Path | None = None,
         abundance_min: int = 1,
         threads: int = 1,
-        allow_local_for_small_k: bool = True,
+        allow_local_for_small_k: bool = True,  # legacy alias; ignored if engine set
     ) -> None:
         self.k_list = normalize_k_list(k)
         if normalize not in {"relative", "none"}:
             raise ValueError(
                 f"normalize must be 'relative' or 'none'; got {normalize!r}"
             )
+        if engine not in {"auto", "native", "python", "dsk"}:
+            raise ValueError(
+                f"engine must be auto|native|python|dsk; got {engine!r}"
+            )
         self.normalize = normalize
         self.log_transform = bool(log_transform)
+        self.engine: KmerEngine = engine
         self.dsk_bin = dsk_bin
         self.dsk2ascii_bin = dsk2ascii_bin
         self.abundance_min = int(abundance_min)
@@ -233,63 +280,90 @@ class KmerFeatureBackend:
             raise ValueError("abundance_min must be >= 1")
         self.threads = max(1, int(threads))
         self.allow_local_for_small_k = bool(allow_local_for_small_k)
+        _ = allow_local_for_small_k  # retained for call-site compatibility
+
+    def _resolve_engine(self) -> KmerEngine:
+        if self.engine != "auto":
+            return self.engine
+        # Prefer native in-process for all supported k (includes k=2).
+        if all(k <= NATIVE_MAX_K for k in self.k_list):
+            from src.splits.sbs.backends.native import try_get_native_counter
+
+            if try_get_native_counter() is not None:
+                return "native"
+            return "python"
+        # Mixed / very large k: python observed Counter (never invent DSK default).
+        return "python"
 
     def _count_one(
         self,
         sequence: str,
         k: int,
         *,
-        work_root: Path,
+        engine: KmerEngine,
+        work_root: Path | None,
         dsk: Path | None,
         dsk2ascii: Path | None,
         region_tag: str,
     ) -> dict[str, int]:
-        if k < DSK_MIN_K:
-            if not self.allow_local_for_small_k:
-                raise ValueError(
-                    f"k={k} requires DSK but DSK rejects k < {DSK_MIN_K}; "
-                    "set allow_local_for_small_k=True or choose k >= 3"
-                )
+        if engine == "dsk":
+            if k < DSK_MIN_K:
+                if not self.allow_local_for_small_k:
+                    raise ValueError(
+                        f"k={k} cannot use DSK (min k={DSK_MIN_K}); "
+                        "use engine='auto' or 'native'"
+                    )
+                return count_kmers(sequence, k, engine="auto")
+            assert work_root is not None and dsk is not None and dsk2ascii is not None
+            region_dir = work_root / f"k{k}_{region_tag}"
+            region_dir.mkdir(parents=True, exist_ok=True)
+            return count_kmers_dsk(
+                sequence,
+                k,
+                workdir=region_dir,
+                dsk_bin=dsk,
+                dsk2ascii_bin=dsk2ascii,
+                abundance_min=self.abundance_min,
+                threads=self.threads,
+            )
+        if engine == "native":
+            return count_kmers(sequence, k, engine="native")
+        if engine == "python":
             return count_kmers_local(sequence, k)
-        assert dsk is not None and dsk2ascii is not None
-        region_dir = work_root / f"k{k}_{region_tag}"
-        region_dir.mkdir(parents=True, exist_ok=True)
-        return count_kmers_dsk(
-            sequence,
-            k,
-            workdir=region_dir,
-            dsk_bin=dsk,
-            dsk2ascii_bin=dsk2ascii,
-            abundance_min=self.abundance_min,
-            threads=self.threads,
-        )
+        # auto already resolved
+        return count_kmers(sequence, k, engine="auto")
 
     def compute(self, sequences: Mapping[str, str]) -> FeatureTable:
         ids = tuple(sorted(sequences))
         if len(ids) < 1:
             raise ValueError("need >=1 sequences for k-mer features")
         multi_k = len(self.k_list) > 1
-        needs_dsk = any(k >= DSK_MIN_K for k in self.k_list)
-        needs_local = any(k < DSK_MIN_K for k in self.k_list)
+        engine = self._resolve_engine()
+
         dsk: Path | None = None
         dsk2ascii: Path | None = None
-        if needs_dsk:
+        if engine == "dsk":
             dsk = find_dsk(self.dsk_bin)
             dsk2ascii = find_dsk2ascii(self.dsk2ascii_bin)
-        if needs_local:
-            warnings.warn(
-                f"DSK does not support k < {DSK_MIN_K}; using in-process "
-                f"overlapping counts for k in "
-                f"{[k for k in self.k_list if k < DSK_MIN_K]}",
-                UserWarning,
-                stacklevel=2,
-            )
+            small = [k for k in self.k_list if k < DSK_MIN_K]
+            if small:
+                warnings.warn(
+                    f"DSK does not support k < {DSK_MIN_K}; using in-process "
+                    f"counts for k in {small} within engine='dsk'",
+                    UserWarning,
+                    stacklevel=2,
+                )
 
         per_id_k_counts: dict[str, dict[int, dict[str, int]]] = {}
         vocab: dict[int, set[str]] = {k: set() for k in self.k_list}
 
-        with tempfile.TemporaryDirectory(prefix="sbs_kmer_dsk_") as tmp:
-            work_root = Path(tmp)
+        tmp_ctx = (
+            tempfile.TemporaryDirectory(prefix="sbs_kmer_dsk_")
+            if engine == "dsk"
+            else None
+        )
+        try:
+            work_root = Path(tmp_ctx.name) if tmp_ctx is not None else None
             for idx, rid in enumerate(ids):
                 tag = f"{idx:06d}"
                 per_id_k_counts[rid] = {}
@@ -297,6 +371,7 @@ class KmerFeatureBackend:
                     counts = self._count_one(
                         sequences[rid],
                         k,
+                        engine=engine,
                         work_root=work_root,
                         dsk=dsk,
                         dsk2ascii=dsk2ascii,
@@ -304,17 +379,16 @@ class KmerFeatureBackend:
                     )
                     per_id_k_counts[rid][k] = counts
                     vocab[k].update(counts)
+        finally:
+            if tmp_ctx is not None:
+                tmp_ctx.cleanup()
 
         feature_names: list[str] = []
-        kmer_index: list[tuple[int, str]] = []
         for k in self.k_list:
             for kmer in sorted(vocab[k]):
                 feature_names.append(_feature_name(k, kmer, multi_k=multi_k))
-                kmer_index.append((k, kmer))
 
         if not feature_names:
-            # All sequences shorter than min k — still return a valid empty-feature
-            # table shape is invalid for clustering; raise early.
             raise ValueError(
                 f"no observed k-mers for k={list(self.k_list)}; "
                 "sequences may be shorter than k"
@@ -345,7 +419,9 @@ class KmerFeatureBackend:
                 "k": list(self.k_list),
                 "normalize": self.normalize,
                 "log_transform": self.log_transform,
+                "engine": engine,
                 "dsk_min_k": DSK_MIN_K,
+                "native_max_k": NATIVE_MAX_K,
                 "n_features": len(feature_names),
             },
         )

@@ -86,12 +86,19 @@ Plus a combined Altair facet of the first three panels.
 | Backend | Module |
 |---------|--------|
 | `KmerFeatureBackend` | `src.splits.sbs.backends.kmer` |
+| Native counter (C++) | `src.splits.sbs.backends.native` |
 | Strategy wrapper | `src.splits.kmer` → `split-predict type=kmer` |
 
-- **DSK** counts observed k-mers for **`k >= 3`** (`abundance-min=1`); `dsk2ascii` → relative abundance FeatureTable.
-- **`k <= 2`**: GATB DSK rejects these sizes; in-process overlapping ACGT counts with the same FeatureTable contract (documented in `method-decision.md`).
+- **Production default (`engine=auto`)**: in-process abundance counter for **any `k >= 2`** (and `k=1`). Uses the **C++** library when built (`libkmer_count.so`, dense counts for `k <= 12`), else pure Python. Suitable for full-panel runs including **2-mers**.
+- **Optional `engine=dsk`**: GATB DSK + `dsk2ascii` for `k >= 3` only (slow per-sequence subprocess; not the default).
 - Multi-`k` concatenates columns (`k4_…`, `k5_…`); single `k` uses `kmer_…` names.
-- Dense \(4^k\) vocabularies are **not** pre-allocated — only observed k-mers across the panel.
+- FeatureTable stores **observed** k-mers only (relative abundance by default); counting is multiplicity, not presence/absence.
+
+Build native lib:
+
+```bash
+python -m src.splits.sbs.backends.native.build
+```
 
 ## Strategy captions
 

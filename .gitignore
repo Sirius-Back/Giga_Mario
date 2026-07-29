@@ -258,6 +258,9 @@ models--*/
 .eggs/
 dist/
 build/
+*.so
+*.dylib
+*.dll
 
 .sudo_as_admin_successful
 

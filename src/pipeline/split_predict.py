@@ -177,6 +177,18 @@ def _run_gc_split_predict(
     return out
 
 
+def _normalize_kmer_engine(engine: str) -> str:
+    """Map CLI/Hydra aliases onto ``KmerFeatureBackend`` engines."""
+    e = str(engine).strip().lower()
+    if e in {"cpp", "c++", "cxx"}:
+        return "native"
+    if e in {"auto", "native", "python", "dsk"}:
+        return e
+    raise ValueError(
+        f"kmer engine must be auto|native|cpp|python|dsk; got {engine!r}"
+    )
+
+
 def _run_kmer_split_predict(
     *,
     outdir: Path,
@@ -194,8 +206,10 @@ def _run_kmer_split_predict(
     custom_label_column: str | None = None,
     kmer_size: Sequence[int] | int = 5,
     log_transform: bool = False,
+    engine: str = "auto",
+    threads: int = 1,
 ) -> Path:
-    """SBS k-mer path: MARKED/FNA → DSK k-mer features → assignment → split.csv."""
+    """SBS k-mer path: MARKED/FNA → k-mer features → assignment → split.csv."""
     from src.splits.kmer import run_kmer_split_assign
 
     fna_root = marked_fasta or fna
@@ -223,6 +237,8 @@ def _run_kmer_split_predict(
         custom_label_column=custom_label_column,
         k=kmer_size,
         log_transform=log_transform,
+        engine=_normalize_kmer_engine(engine),
+        threads=threads,
     )
     out = Path(summary["split_csv"])
     if not out.is_file():
@@ -305,6 +321,7 @@ def run_split_predict(
     force: bool = False,
     kmer_size: Sequence[int] | int = 5,
     log_transform: bool = False,
+    engine: str = "auto",
 ) -> Path:
     """
     Write `{outdir}/split.csv` with columns ID|train_test|fold.
@@ -373,6 +390,8 @@ def run_split_predict(
             custom_label_column=custom_col,
             kmer_size=kmer_size,
             log_transform=log_transform,
+            engine=engine,
+            threads=threads,
         )
 
     if type == "hashfrag":
@@ -560,13 +579,19 @@ def main(argv: list[str] | None = None) -> int:
         type=int,
         nargs="+",
         default=None,
-        help="K-mer size(s) for type=kmer (default: 5). Use k>=3 for DSK; "
-        "k<=2 uses in-process counts (DSK unsupported).",
+        help="K-mer size(s) for type=kmer (default: 5). Any k>=2 supported via "
+        "native/Python in-process counter; optional DSK via strategy API.",
     )
     p.add_argument(
         "--log-transform",
         action="store_true",
         help="Apply log1p to k-mer features after normalization (type=kmer)",
+    )
+    p.add_argument(
+        "--engine",
+        default="auto",
+        choices=["auto", "native", "cpp", "python", "dsk"],
+        help="K-mer counting engine for type=kmer (cpp ≡ native C++)",
     )
     args = p.parse_args(argv)
     n_clusters: int | Literal["auto"]
@@ -604,6 +629,7 @@ def main(argv: list[str] | None = None) -> int:
         force=bool(args.force),
         kmer_size=kmer_size,
         log_transform=bool(args.log_transform),
+        engine=str(args.engine),
     )
     print(path)
     return 0
