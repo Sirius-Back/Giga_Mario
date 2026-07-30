@@ -82,7 +82,8 @@ def main(argv: list[str] | None = None) -> int:
         fold_csv=PANEL_ROOT / "fold.csv",
         ratios=RATIOS,
         marked_fasta=marked,
-        plot=True,
+        plot=False,  # k=7 full panel: skip PCA RAM spike
+        
         cluster_method=cluster_method,
         kmer_size=kmer_size,
         engine=kmer_engine,

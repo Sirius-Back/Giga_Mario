@@ -70,10 +70,14 @@ def normalize_cluster_method(method: str | ClusterMethod) -> ClusterMethod:
 
 
 def _standardize(x: np.ndarray) -> np.ndarray:
+    x = np.asarray(x)
     mu = x.mean(axis=0)
     sd = x.std(axis=0)
     sd = np.where(sd < 1e-12, 1.0, sd)
-    return (x - mu) / sd
+    out = (x - mu) / sd
+    if x.dtype == np.float32:
+        return np.asarray(out, dtype=np.float32)
+    return out
 
 
 def _pairwise_euclidean(x: np.ndarray) -> np.ndarray:

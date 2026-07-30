@@ -21,7 +21,12 @@ class FeatureTable:
     extras: Mapping[str, object] | None = None
 
     def __post_init__(self) -> None:
-        mat = np.asarray(self.matrix, dtype=float)
+        # Preserve float32 when callers pass it (large k-mer panels); else float64.
+        src = np.asarray(self.matrix)
+        if src.dtype == np.float32:
+            mat = np.asarray(src, dtype=np.float32, order="C")
+        else:
+            mat = np.asarray(src, dtype=float)
         if mat.ndim != 2:
             raise ValueError(f"feature matrix must be 2D; got shape {mat.shape}")
         if mat.shape[0] != len(self.ids):
@@ -76,16 +81,21 @@ class FeatureTable:
         return (x - mu) / sd
 
     def write_csv(self, path: Path) -> Path:
-        from src.pipeline.common import write_csv
+        """Stream CSV to disk (avoids holding n×d Python dicts — OOM on large k)."""
+        import csv
 
-        rows = []
-        for i, rid in enumerate(self.ids):
-            row = {"region": rid}
-            for j, name in enumerate(self.feature_names):
-                row[name] = f"{float(self.matrix[i, j]):.8g}"
-            rows.append(row)
         path = Path(path)
-        write_csv(path, rows, ["region", *self.feature_names])
+        path.parent.mkdir(parents=True, exist_ok=True)
+        header = ["region", *self.feature_names]
+        with path.open("w", encoding="utf-8", newline="") as fh:
+            w = csv.writer(fh, delimiter="|")
+            w.writerow(header)
+            names = self.feature_names
+            mat = self.matrix
+            for i, rid in enumerate(self.ids):
+                row = [rid]
+                row.extend(f"{float(mat[i, j]):.8g}" for j in range(len(names)))
+                w.writerow(row)
         return path
 
 

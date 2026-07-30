@@ -118,7 +118,25 @@ def run_kmer_split_assign(
         abundance_min=abundance_min,
         threads=threads,
     )
-    feat_csv = features.write_csv(outdir / "feature_table.csv")
+    # Large panels: skip dense CSV (n×d text OOMs); keep npz for audit + assign in-RAM.
+    import numpy as np
+
+    n_cells = int(features.n) * int(features.n_features)
+    if n_cells >= 20_000_000:
+        npz_path = outdir / "feature_table.npz"
+        np.savez_compressed(
+            npz_path,
+            ids=np.asarray(features.ids),
+            feature_names=np.asarray(features.feature_names),
+            matrix=features.matrix,
+        )
+        feat_csv: Path | str = npz_path
+        print(
+            f"kmer: skipped feature_table.csv (n_cells={n_cells}); wrote {npz_path}",
+            flush=True,
+        )
+    else:
+        feat_csv = features.write_csv(outdir / "feature_table.csv")
 
     rows, meta = assign_from_features(
         features,

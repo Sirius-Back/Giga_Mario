@@ -394,7 +394,11 @@ class KmerFeatureBackend:
                 "sequences may be shorter than k"
             )
 
-        mat = np.zeros((len(ids), len(feature_names)), dtype=float)
+        # float32 for large panels (k=7 full ready_legnet ~ n×16k would OOM as f64+CSV dicts)
+        n_cells = len(ids) * len(feature_names)
+        dtype = np.float32 if n_cells >= 5_000_000 else float
+        mat = np.zeros((len(ids), len(feature_names)), dtype=dtype)
+        sorted_vocab = {k: sorted(vocab[k]) for k in self.k_list}
         for i, rid in enumerate(ids):
             col = 0
             for k in self.k_list:
@@ -406,9 +410,12 @@ class KmerFeatureBackend:
                 )
                 if self.log_transform:
                     values = {kk: float(np.log1p(vv)) for kk, vv in values.items()}
-                for kmer in sorted(vocab[k]):
+                for kmer in sorted_vocab[k]:
                     mat[i, col] = float(values.get(kmer, 0.0))
                     col += 1
+        # Drop per-id dicts before clustering / CSV (peak RAM)
+        per_id_k_counts.clear()
+        vocab.clear()
 
         return FeatureTable(
             ids=ids,
@@ -423,5 +430,6 @@ class KmerFeatureBackend:
                 "dsk_min_k": DSK_MIN_K,
                 "native_max_k": NATIVE_MAX_K,
                 "n_features": len(feature_names),
+                "dtype": str(np.dtype(dtype)),
             },
         )

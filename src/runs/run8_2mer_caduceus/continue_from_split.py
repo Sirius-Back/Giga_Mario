@@ -56,6 +56,7 @@ def main(argv: list[str] | None = None) -> int:
     n_devices = N_DEVICES
     max_length = MAX_LENGTH
     skip_direct = False
+    skip_adv_setup = False
     for tok in list(argv):
         if tok.startswith("batch_size="):
             batch = int(tok.split("=", 1)[1])
@@ -77,6 +78,9 @@ def main(argv: list[str] | None = None) -> int:
             argv.remove(tok)
         elif tok in {"skip_direct=true", "--skip-direct"}:
             skip_direct = True
+            argv.remove(tok)
+        elif tok in {"skip_adv_setup=true", "--skip-adv-setup"}:
+            skip_adv_setup = True
             argv.remove(tok)
 
     os.environ.setdefault("CUDA_VISIBLE_DEVICES", "0,1")
@@ -163,37 +167,72 @@ def main(argv: list[str] | None = None) -> int:
         print("skip_direct: using existing direct/final_model + ZSV", flush=True)
 
     adv_root = OUT_ROOT / "adversarial"
-    if adv_root.exists():
-        shutil.rmtree(adv_root)
-    run_adversarial(
-        outdir_new=adv_root,
-        split_csv=split_csv,
-        parsed_target=PANEL_ROOT / "PREDICT",
-        parsed_data=PANEL_ROOT / "PARSED",
-        intersect_allow=True,
-    )
-    adv_seed = SEED + 1
-    adv_split_csv = run_split_predict(
-        outdir=adv_root,
-        type="random",
-        seed=adv_seed,
-        id_csv=PANEL_ROOT / "ID.csv",
-        fold_csv=PANEL_ROOT / "fold.csv",
-        ratios=RATIOS,
-    )
-    apply_fold_class_targets(
-        predict_root=adv_root / "PREDICT",
-        label_split_csv=split_csv,
-    )
-    adv_split_root = run_split(
-        adv_split_csv,
-        parsed_target=adv_root / "PREDICT",
-        parsed_data=adv_root / "PARSED",
-        outdir=adv_root,
-        strategy="traintestval",
-        intersect_allow=True,
-        id_csv=PANEL_ROOT / "ID.csv",
-    )
+    adv_split_root = adv_root / "SPLIT"
+    adv_input = adv_root / "train" / "caduceus_input"
+    if skip_adv_setup or (
+        (adv_split_root / "train").is_dir()
+        and (adv_input / "train").is_dir()
+        and (adv_root / "split.csv").is_file()
+    ):
+        if not ((adv_split_root / "train").is_dir() and (adv_root / "split.csv").is_file()):
+            raise RuntimeError(
+                "skip_adv_setup requested but adversarial SPLIT/split.csv missing"
+            )
+        print(
+            f"skip_adv_setup: reusing {adv_root} (SPLIT + optional caduceus_input)",
+            flush=True,
+        )
+        # Drop failed/empty train weights but keep caduceus_input if present
+        train_dir = adv_root / "train"
+        if train_dir.is_dir():
+            for name in (
+                "final_model",
+                "best_model",
+                "checkpoints",
+                "logs",
+                "tensorboard",
+                "figures",
+                "train_time.json",
+                "run_config.json",
+            ):
+                p = train_dir / name
+                if p.is_dir():
+                    shutil.rmtree(p)
+                elif p.is_file():
+                    p.unlink(missing_ok=True)
+    else:
+        if adv_root.exists():
+            shutil.rmtree(adv_root)
+        run_adversarial(
+            outdir_new=adv_root,
+            split_csv=split_csv,
+            parsed_target=PANEL_ROOT / "PREDICT",
+            parsed_data=PANEL_ROOT / "PARSED",
+            intersect_allow=True,
+        )
+        adv_seed = SEED + 1
+        adv_split_csv = run_split_predict(
+            outdir=adv_root,
+            type="random",
+            seed=adv_seed,
+            id_csv=PANEL_ROOT / "ID.csv",
+            fold_csv=PANEL_ROOT / "fold.csv",
+            ratios=RATIOS,
+        )
+        apply_fold_class_targets(
+            predict_root=adv_root / "PREDICT",
+            label_split_csv=split_csv,
+        )
+        adv_split_root = run_split(
+            adv_split_csv,
+            parsed_target=adv_root / "PREDICT",
+            parsed_data=adv_root / "PARSED",
+            outdir=adv_root,
+            strategy="traintestval",
+            intersect_allow=True,
+            id_csv=PANEL_ROOT / "ID.csv",
+        )
+
     run_train(
         model="caduceus",
         type="classification",
