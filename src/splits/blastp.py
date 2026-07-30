@@ -12,6 +12,7 @@ window translation. Materialize for LegNet still uses panel PARSED/PREDICT.
 """
 from __future__ import annotations
 
+import hashlib
 import json
 import random
 import shutil
@@ -294,7 +295,11 @@ def translate_cds_proteins(
                     region_to_prot[rid] = None
                     n_nocds += 1
                     continue
-                pid = f"p_{genome}_{chrom}_{raw}".replace("|", "_").replace(" ", "_")
+                # BLAST -parse_seqids caps local ids at 50 chars; keep ids short.
+                digest = hashlib.md5(
+                    f"{genome}|{chrom}|{raw}".encode("utf-8")
+                ).hexdigest()[:16]
+                pid = f"p{digest}"
                 # Collapse identical gene keys to one protein record.
                 if pid not in proteins:
                     proteins[pid] = aa
@@ -404,7 +409,6 @@ def run_sparse_blastp(
                 "prot",
                 "-out",
                 str(db_prefix),
-                "-parse_seqids",
             ],
             check=True,
             cwd=str(work),
@@ -845,15 +849,25 @@ def run_blastp_split_assign(
     )
 
     faa = outdir / "proteins.faa"
-    mapping = translate_cds_proteins(
-        id_csv=Path(id_csv),
-        gtf_dir=Path(gtf_dir),
-        fna_dir=Path(fna_dir),
-        ids=kept,
-        out_faa=faa,
-        genetic_code=genetic_code,
-        mapping_path=outdir / "protein_mapping.json",
-    )
+    mapping_path = outdir / "protein_mapping.json"
+    if (
+        faa.is_file()
+        and faa.stat().st_size > 0
+        and mapping_path.is_file()
+        and not force
+    ):
+        mapping = json.loads(mapping_path.read_text(encoding="utf-8"))
+        print(f"RESUME: reusing proteins {faa} + {mapping_path}", flush=True)
+    else:
+        mapping = translate_cds_proteins(
+            id_csv=Path(id_csv),
+            gtf_dir=Path(gtf_dir),
+            fna_dir=Path(fna_dir),
+            ids=kept,
+            out_faa=faa,
+            genetic_code=genetic_code,
+            mapping_path=mapping_path,
+        )
     region_to_prot: dict[str, str | None] = mapping["region_to_protein"]
 
     blast_work = outdir / "blastp_work"
