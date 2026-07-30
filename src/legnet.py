@@ -323,6 +323,7 @@ def run(
     checkpoint_every_n_epochs: int = 10,
     early_stopping_patience: int = 0,
     min_epochs: int = 0,
+    resume_ckpt: Path | None = None,
 ) -> int:
     data_path = data_path.resolve()
     out_dir = out_dir.resolve()
@@ -359,6 +360,7 @@ def run(
         "checkpoint_every_n_epochs": checkpoint_every_n_epochs,
         "early_stopping_patience": early_stopping_patience,
         "min_epochs": min_epochs,
+        "resume_ckpt": str(resume_ckpt) if resume_ckpt is not None else None,
         "data_stats": stats,
         "started_at": datetime.now(timezone.utc).isoformat(),
     }
@@ -391,6 +393,11 @@ def run(
         "--min_epochs",
         str(int(min_epochs)),
     ]
+    if resume_ckpt is not None:
+        ckpt = Path(resume_ckpt).resolve()
+        if not ckpt.is_file():
+            raise FileNotFoundError(f"LegNet resume checkpoint missing: {ckpt}")
+        cmd_core.extend(["--resume_ckpt", str(ckpt)])
     if demo:
         cmd_core.append("--demo")
     if use_shift:
@@ -513,6 +520,12 @@ def main(argv: list[str] | None = None) -> int:
         default=0,
         help="Minimum epochs before early stopping can end training (0=off).",
     )
+    ap.add_argument(
+        "--resume-ckpt",
+        type=Path,
+        default=None,
+        help="Lightning .ckpt to resume from (weights + epoch); does not modify source.",
+    )
     args = ap.parse_args(argv)
 
     out = args.out
@@ -537,6 +550,7 @@ def main(argv: list[str] | None = None) -> int:
         checkpoint_every_n_epochs=args.checkpoint_every_n_epochs,
         early_stopping_patience=args.early_stopping_patience,
         min_epochs=args.min_epochs,
+        resume_ckpt=args.resume_ckpt,
     )
 
 

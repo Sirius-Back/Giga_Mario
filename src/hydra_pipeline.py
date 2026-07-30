@@ -112,7 +112,7 @@ def _run_stages(cfg: DictConfig) -> int:
     fna_dir_cfg = cfg.get("fna_dir", None)
     gtf_dir = _resolve_path(gtf_dir_cfg) if gtf_dir_cfg not in (None, "", "null") else None
     fna_dir = _resolve_path(fna_dir_cfg) if fna_dir_cfg not in (None, "", "null") else None
-    if split_type == "blastp":
+    if split_type in {"blastp", "pangenome"}:
         if gtf_dir is None:
             gtf_dir = ROOT / "raw" / "gtf"
         if fna_dir is None:
@@ -120,7 +120,7 @@ def _run_stages(cfg: DictConfig) -> int:
     environment = cfg.get("environment", None)
     if environment in ("", "null"):
         environment = None
-    if split_type == "blastp" and environment is None:
+    if split_type in {"blastp", "pangenome"} and environment is None:
         environment = "gene"
     window_cfg = cfg.get("window", None)
     window: dict[str, int] | None = None
@@ -133,6 +133,9 @@ def _run_stages(cfg: DictConfig) -> int:
             window = {str(k): int(v) for k, v in dict(window_cfg).items()}
     elif split_type == "blastp":
         window = {"pos1": 0, "pos2": 0}
+    elif split_type == "pangenome":
+        # CDS-oriented default when caller omitted window (override via window=…).
+        window = {"pos1": 0, "pos2": 100}
     genetic_code = str(cfg.get("genetic_code", "universal") or "universal")
     parsed_path = panel_root / "PARSED" if split_type in {"blastp", "pangenome"} else None
 

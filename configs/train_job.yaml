@@ -16,10 +16,13 @@ split: random
 task_type: regression
 adversarial_task_type: classification
 seed: 42
-epochs: 20
+# Max epochs (ceiling); early stop may end sooner after min_epochs.
+epochs: 50
 checkpoint_every_n_epochs: 10
-early_stopping_patience: 0
-min_epochs: 0
+# Early stop patience (0 disables). Caduceus: val_loss; LegNet: val_pearson.
+early_stopping_patience: 10
+# Minimum epochs before early stopping can fire.
+min_epochs: 25
 n_devices: 1
 batch_size: 1024
 num_workers: 8

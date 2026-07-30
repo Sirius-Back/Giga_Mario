@@ -21,15 +21,21 @@ OUT_ROOT = ROOT / "runs" / RUN_ID
 SEED = 42
 RATIOS = (1, 1, 3)
 KMER_SIZE = 7
-CLUSTER_METHOD = "kmeans_elbow"
+CLUSTER_METHOD = "kmeans"  # single MiniBatch fit — elbow OOM'd after k=8/8
+N_CLUSTERS = 8
 
 
 def main(argv: list[str] | None = None) -> int:
     argv = list(sys.argv[1:] if argv is None else argv)
     cluster_method = CLUSTER_METHOD
+    n_clusters: int | str = N_CLUSTERS
     for tok in list(argv):
         if tok.startswith("cluster_method="):
             cluster_method = tok.split("=", 1)[1]
+            argv.remove(tok)
+        elif tok.startswith("n_clusters="):
+            raw = tok.split("=", 1)[1]
+            n_clusters = "auto" if raw.lower() == "auto" else int(raw)
             argv.remove(tok)
 
     if str(ROOT) not in sys.path:
@@ -62,6 +68,7 @@ def main(argv: list[str] | None = None) -> int:
         seed=SEED,
         k=KMER_SIZE,
         cluster_method=cluster_method,
+        n_clusters=n_clusters,  # type: ignore[arg-type]
         ratios=RATIOS,
         plot=False,
         features_npz=npz,
