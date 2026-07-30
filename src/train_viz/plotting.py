@@ -130,13 +130,29 @@ def save_cns_figure(stem: Path, dpi: int) -> list[Path]:
 
     stem.parent.mkdir(parents=True, exist_ok=True)
     written: list[Path] = []
+    fig = plt.gcf()
+    extras = [obj for obj in fig.legends] if getattr(fig, "legends", None) else []
     for ext in ("pdf", "svg", "png"):
         path = stem.with_suffix(f".{ext}")
         if ext == "png":
-            # Explicit DPI for QC; cns.savefig delegates to matplotlib.
-            plt.savefig(path, dpi=dpi, bbox_inches="tight", pad_inches=0.05)
+            plt.savefig(
+                path,
+                dpi=dpi,
+                bbox_inches="tight",
+                pad_inches=0.15,
+                bbox_extra_artists=extras or None,
+            )
         else:
-            cns.savefig(path)
+            # Prefer matplotlib save so figure legends outside axes are kept.
+            try:
+                fig.savefig(
+                    path,
+                    bbox_inches="tight",
+                    pad_inches=0.15,
+                    bbox_extra_artists=extras or None,
+                )
+            except Exception:
+                cns.savefig(path)
         written.append(path)
     plt.close("all")
     return written
@@ -588,7 +604,7 @@ def plot_learning_curves(
                     color=alt.Color(
                         f"{color_field}:N",
                         scale=alt.Scale(domain=domain, range=crange),
-                        legend=alt.Legend(orient="bottom-right", title=color_field),
+                        legend=alt.Legend(title=color_field),
                     ),
                     tooltip=[x_key, "value", color_field, "metric"],
                 )
