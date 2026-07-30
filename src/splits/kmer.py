@@ -190,7 +190,26 @@ def run_kmer_split_assign(
                 "split_csv": str(split_csv),
                 "cluster_method": cluster_method,
                 "n_clusters": n_clusters,
-                "assign_meta": meta,
+                "assign_meta": {
+                    "n_total": (meta or {}).get("n_total"),
+                    "n_zsv": (meta or {}).get("n_zsv"),
+                    "n_assignable": (meta or {}).get("n_assignable"),
+                    "n_features": (meta or {}).get("n_features"),
+                    "cluster": {
+                        k: (meta.get("cluster") or {}).get(k)
+                        for k in (
+                            "method_used",
+                            "n_clusters",
+                            "k_info",
+                            "standardize_inplace",
+                            "method_requested",
+                        )
+                    },
+                    "train_test_by_fold": (meta or {}).get("train_test_by_fold"),
+                    "additional_embeds_features": (meta or {}).get(
+                        "additional_embeds_features"
+                    ),
+                },
             },
             indent=2,
             default=str,
@@ -222,7 +241,7 @@ def run_kmer_split_assign(
         "fna": str(fna),
         "k": list(k_list),
         "n_ids": features.n,
-        "feature_names": list(features.feature_names),
+        "n_features": len(features.feature_names),
         "split_csv": str(split_csv),
         "assignment_csv": str(assign_path),
         "feature_table": str(feat_csv),
@@ -233,6 +252,8 @@ def run_kmer_split_assign(
         "log_transform": log_transform,
         "engine": (features.extras or {}).get("engine", engine),
     }
+    if len(features.feature_names) <= 512:
+        summary["feature_names"] = list(features.feature_names)
     (outdir / "kmer_split_meta.json").write_text(
         json.dumps(summary, indent=2, default=str) + "\n", encoding="utf-8"
     )

@@ -23,7 +23,7 @@ SEED = 42
 RATIOS = (1, 1, 3)
 KMER_SIZE = 7
 CLUSTER_METHOD = "kmeans"
-N_CLUSTERS = 8
+N_CLUSTERS = 512
 # Wait for sibling 7-mer LegNet split before loading another ~30–50 GiB matrix.
 WAIT_FOR = ROOT / "runs" / "run13_7mer_legnet" / "split_cpu_done.json"
 
@@ -101,7 +101,14 @@ def main(argv: list[str] | None = None) -> int:
     (OUT_ROOT / "split_cpu_done.json").write_text(
         json.dumps(done, indent=2, default=str) + "\n", encoding="utf-8"
     )
-    print(f"run14 continue_from_features COMPLETED → {done}", flush=True)
+    am = done.get("assign_meta") or {}
+    cl = (am.get("cluster") or {}) if isinstance(am, dict) else {}
+    print(
+        f"run14 continue_from_features COMPLETED split_csv={done.get('split_csv')} "
+        f"method={cl.get('method_used')} n_clusters={cl.get('n_clusters')} "
+        f"n_features={am.get('n_features')}",
+        flush=True,
+    )
     return 0
 
 

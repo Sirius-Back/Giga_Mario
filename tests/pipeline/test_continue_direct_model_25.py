@@ -102,5 +102,5 @@ def test_discover_under_25_only(tmp_path: Path) -> None:
     assert "run_probe" not in ids
     leg = next(c for c in found if c.run_id == "run_leg")
     assert leg.model == "legnet"
-    assert leg.batch_size == 2048  # 8192 / 4 devices
+    assert leg.batch_size == 8192  # scaled at launch by n_devices
     assert leg.resume_ckpt is not None

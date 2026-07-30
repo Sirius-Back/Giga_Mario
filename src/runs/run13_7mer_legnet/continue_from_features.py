@@ -21,8 +21,9 @@ OUT_ROOT = ROOT / "runs" / RUN_ID
 SEED = 42
 RATIOS = (1, 1, 3)
 KMER_SIZE = 7
-CLUSTER_METHOD = "kmeans"  # single MiniBatch fit — elbow OOM'd after k=8/8
-N_CLUSTERS = 8
+CLUSTER_METHOD = "kmeans"
+# Hundreds of SBS folds (not 8): ~sqrt(n_assignable) capped — user expects hundreds.
+N_CLUSTERS = 512
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -101,7 +102,14 @@ def main(argv: list[str] | None = None) -> int:
     (OUT_ROOT / "split_cpu_done.json").write_text(
         json.dumps(done, indent=2, default=str) + "\n", encoding="utf-8"
     )
-    print(f"run13 continue_from_features COMPLETED → {done}", flush=True)
+    am = done.get("assign_meta") or {}
+    cl = (am.get("cluster") or {}) if isinstance(am, dict) else {}
+    print(
+        f"run13 continue_from_features COMPLETED split_csv={done.get('split_csv')} "
+        f"method={cl.get('method_used')} n_clusters={cl.get('n_clusters')} "
+        f"n_features={am.get('n_features')}",
+        flush=True,
+    )
     return 0
 
 

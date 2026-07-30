@@ -148,6 +148,8 @@ def _elbow_k(inertias: dict[int, float]) -> int:
 DBSCAN_MAX_N = 50_000
 # Prefer MiniBatchKMeans above this for kmeans / elbow paths.
 MINIBATCH_KMEANS_N = 20_000
+# Default large-panel k when caller asks for a high cluster count.
+DEFAULT_LARGE_N_CLUSTERS = 512
 
 
 def _cluster_dbscan(
@@ -201,8 +203,10 @@ def _cluster_kmeans(x: np.ndarray, n_clusters: int, *, seed: int) -> np.ndarray:
         model = MiniBatchKMeans(
             n_clusters=k,
             random_state=seed,
-            batch_size=min(4096, max(256, n // 50)),
+            batch_size=min(8192, max(1024, n // 20)),
             n_init=10,
+            max_iter=200,
+            reassignment_ratio=0.01,
         )
     else:
         from sklearn.cluster import KMeans
@@ -394,10 +398,13 @@ def cluster_feature_table(
     x = _standardize(features.matrix, inplace=inplace)
     meta: dict[str, Any] = {
         "method_requested": method,
-        "feature_names": list(features.feature_names),
+        "n_features": len(features.feature_names),
         "supported_methods": list(CLUSTER_METHODS),
         "standardize_inplace": inplace,
     }
+    # Avoid dumping tens of thousands of k-mer names into logs/JSON.
+    if len(features.feature_names) <= 512:
+        meta["feature_names"] = list(features.feature_names)
     used: str
     labels: np.ndarray
     k_info: dict[str, Any] = {}
@@ -575,7 +582,13 @@ def _assign_folds_to_train_test(
     seed: int,
     fold_strata: dict[str, str] | None,
     ratios: tuple[float, float, float] | None,
+    fold_sizes: dict[str, int] | None = None,
 ) -> dict[str, str]:
+    """Map SBS folds → train/val/test.
+
+    When ``fold_sizes`` is provided, assign largest folds first into the most
+    under-filled split by **region count** (avoids train≈2 when k-means collapses).
+    """
     if not fold_ids:
         return {}
     if len(fold_ids) < 3:
@@ -589,6 +602,34 @@ def _assign_folds_to_train_test(
         strata = [fold_strata[f] for f in fold_ids]
         labels = assign_folds_stratified(fold_ids, strata, rng, ratios=ratios)
         return dict(zip(fold_ids, labels))
+    if fold_sizes:
+        r = ratios or (1.0, 1.0, 3.0)
+        w = {"train": float(r[0]), "val": float(r[1]), "test": float(r[2])}
+        tw = sum(w.values()) or 1.0
+        target = {k: w[k] / tw for k in w}
+        totals = {"train": 0, "val": 0, "test": 0}
+        out: dict[str, str] = {}
+        order = sorted(fold_ids, key=lambda f: (-int(fold_sizes.get(f, 1)), f))
+        for fid in order:
+            size = int(fold_sizes.get(fid, 1))
+            grand = sum(totals.values()) + size
+            # pick split minimizing max deviation from target fractions after add
+            best = "train"
+            best_score = float("inf")
+            for lab in ("train", "val", "test"):
+                trial = dict(totals)
+                trial[lab] += size
+                g = sum(trial.values()) or 1
+                score = sum(abs(trial[x] / g - target[x]) for x in trial)
+                if score < best_score - 1e-15 or (
+                    abs(score - best_score) <= 1e-15 and lab < best
+                ):
+                    best_score = score
+                    best = lab
+            out[fid] = best
+            totals[best] += size
+        _ = rng  # seed retained for API parity when sizes path used
+        return out
     order = list(fold_ids)
     rng.shuffle(order)
     labels = assign_folds_random(len(order), ratios=ratios)
@@ -632,8 +673,10 @@ def assign_from_features(
         "n_zsv": len(zsv_ids),
         "n_assignable": len(assignable_ids),
         "seed": seed,
-        "features": list(features.feature_names),
+        "n_features": len(features.feature_names),
     }
+    if len(features.feature_names) <= 512:
+        meta["features"] = list(features.feature_names)
 
     rows: list[dict[str, str]] = []
     for rid in zsv_ids:
@@ -702,6 +745,7 @@ def assign_from_features(
         seed=seed,
         fold_strata=fold_strata,
         ratios=ratios,
+        fold_sizes={fid: len(members) for fid, members in fold_members.items()},
     )
     meta["train_test_by_fold"] = fold_to_tt
 
