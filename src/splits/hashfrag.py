@@ -3,8 +3,12 @@
 Caption: ``splits/hashfrag.md``. Wired into ``split-predict`` as ``type=hashfrag``.
 
 Flow:
-  MARKED/ (+ optional fold.csv ZSV) → multi-FASTA → ``hashFrag create_orthogonal_splits``
-  → parse train/test TSV → carve val from train pool → ``split.csv``.
+  MARKED/ (+ optional fold.csv ZSV) → multi-FASTA → hashFrag BLAST modules
+  → homologous groups → **project orthogonal assigner** (fixes upstream
+  ``round(N*p_train)+round(N*p_test)`` off-by-one) → carve val → ``split.csv``.
+
+When ``force=false`` and ``hashFrag.homologous_groups.tsv`` already exists,
+BLAST/process/identify are skipped (resume path).
 """
 from __future__ import annotations
 
@@ -14,6 +18,7 @@ import random
 import shutil
 import subprocess
 import textwrap
+from collections import defaultdict
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -29,6 +34,7 @@ __all__ = (
     "run_hashfrag_split_assign",
     "marked_to_multifasta",
     "parse_hashfrag_split_tsv",
+    "assign_orthogonal_from_groups",
     "to_fasta_token",
     "from_fasta_token",
 )
@@ -130,6 +136,103 @@ def parse_homologous_groups_tsv(path: Path | None) -> dict[str, str]:
     return out
 
 
+def assign_orthogonal_from_groups(
+    homology_path: Path,
+    *,
+    p_train: float,
+    p_test: float,
+    seed: int,
+) -> dict[str, str]:
+    """Assign train/test from hashFrag homologous groups (forward IDs only).
+
+    Mirrors ``create_orthogonal_splits_module`` (whole group → one split) but
+    fixes the upstream off-by-one::
+
+        n_train = round(N * p_train)
+        n_test = N - n_train   # not round(N * p_test)
+
+    ``N`` counts all tokens in the groups file (including ``_Reversed``), matching
+    hashFrag's size targets; returned labels map **region ids** (RC dropped).
+    """
+    if abs((p_train + p_test) - 1.0) > 1e-6:
+        raise ValueError(f"p_train + p_test must equal 1; got {p_train}+{p_test}")
+    homology_path = Path(homology_path)
+    if not homology_path.is_file():
+        raise FileNotFoundError(f"homologous groups missing: {homology_path}")
+
+    groups_map: dict[str, set[str]] = defaultdict(set)
+    n_tokens = 0
+    with homology_path.open(encoding="utf-8") as fh:
+        for line in fh:
+            line = line.strip()
+            if not line:
+                continue
+            parts = line.split("\t")
+            if len(parts) < 2 or parts[0].lower() == "id":
+                continue
+            sample_id, group_id = parts[0].strip(), parts[1].strip()
+            groups_map[group_id].add(sample_id)
+            n_tokens += 1
+    if n_tokens < 3 or len(groups_map) < 1:
+        raise ValueError(f"insufficient homologous groups in {homology_path}")
+
+    # Largest-remainder fix (upstream rounds both halves independently).
+    n_train = int(round(n_tokens * p_train))
+    n_train = min(max(n_train, 1), n_tokens - 1)
+    n_test = n_tokens - n_train
+
+    rng = random.Random(seed)
+    groups: list[set[str]] = list(groups_map.values())
+    test_tokens: set[str] = set()
+    # Same loop as hashFrag: grow test by whole groups until target size.
+    while len(test_tokens) < n_test:
+        if not groups:
+            break
+        idx = rng.randint(0, len(groups) - 1)
+        group = groups.pop(idx)
+        test_tokens.update(group)
+    train_tokens: set[str] = set()
+    for group in groups:
+        train_tokens.update(group)
+
+    if not train_tokens:
+        raise RuntimeError(
+            "orthogonal assign left empty train pool; try another seed or threshold"
+        )
+    if not test_tokens:
+        raise RuntimeError("orthogonal assign left empty test pool")
+
+    labels: dict[str, str] = {}
+    for tok in train_tokens:
+        rid = from_fasta_token(tok)
+        if rid is not None:
+            labels[rid] = "train"
+    for tok in test_tokens:
+        rid = from_fasta_token(tok)
+        if rid is not None:
+            labels[rid] = "test"  # group-grain: test wins if both (should not)
+    if not labels:
+        raise RuntimeError(f"no forward IDs labeled from {homology_path}")
+    return labels
+
+
+def write_orthogonal_split_tsv(
+    labels: dict[str, str],
+    work_dir: Path,
+) -> Path:
+    """Write hashFrag-compatible ``hashFrag.train_X.test_Y.split_001.tsv``."""
+    work_dir = Path(work_dir)
+    work_dir.mkdir(parents=True, exist_ok=True)
+    n_train = sum(1 for v in labels.values() if v == "train")
+    n_test = sum(1 for v in labels.values() if v == "test")
+    out_path = work_dir / f"hashFrag.train_{n_train}.test_{n_test}.split_001.tsv"
+    with out_path.open("w", encoding="utf-8") as fh:
+        fh.write("id\tsplit\n")
+        for rid, lab in sorted(labels.items(), key=lambda kv: (kv[1], kv[0])):
+            fh.write(f"{to_fasta_token(rid)}\t{lab}\n")
+    return out_path
+
+
 def _find_split_tsv(work_dir: Path) -> Path:
     matches = sorted(Path(work_dir).glob("hashFrag.*.split_*.tsv"))
     if not matches:
@@ -137,6 +240,103 @@ def _find_split_tsv(work_dir: Path) -> Path:
             f"no hashFrag.*.split_*.tsv under {work_dir}; hashFrag may have failed"
         )
     return matches[0]
+
+
+def _run_hashfrag_cmd(
+    cmd: list[str],
+    log_path: Path,
+    *,
+    append: bool = False,
+) -> None:
+    proc = subprocess.run(cmd, capture_output=True, text=True, check=False)
+    mode = "a" if append else "w"
+    with log_path.open(mode, encoding="utf-8") as fh:
+        fh.write("CMD: " + " ".join(cmd) + "\n\nSTDOUT:\n" + (proc.stdout or ""))
+        fh.write("\n\nSTDERR:\n" + (proc.stderr or "") + "\n---\n")
+    if proc.returncode != 0:
+        raise RuntimeError(
+            f"hashFrag command failed (rc={proc.returncode}): {' '.join(cmd)}; "
+            f"see {log_path}"
+        )
+
+
+def ensure_homologous_groups(
+    *,
+    hashfrag_bin: str,
+    work: Path,
+    all_fa: Path,
+    threshold_cli: int,
+    threads: int,
+    force: bool,
+    log_path: Path,
+) -> Path:
+    """Ensure ``hashFrag.homologous_groups.tsv`` exists; reuse BLAST when possible."""
+    work = Path(work)
+    work.mkdir(parents=True, exist_ok=True)
+    groups_path = work / "hashFrag.homologous_groups.tsv"
+    blast_out = work / "hashFrag.blastn.out"
+    processed = work / "hashFrag.blastn.processed.tsv"
+
+    if groups_path.is_file() and groups_path.stat().st_size > 0 and not force:
+        log_path.write_text(
+            f"RESUME: reusing existing homologous groups: {groups_path}\n",
+            encoding="utf-8",
+        )
+        return groups_path
+
+    if force or not blast_out.is_file() or blast_out.stat().st_size == 0:
+        cmd = [
+            hashfrag_bin,
+            "blastn_module",
+            "-f",
+            str(all_fa),
+            "-T",
+            str(max(1, int(threads))),
+            "-o",
+            str(work),
+            "--blastdb-label",
+            "hashFrag",
+        ]
+        if force:
+            cmd.append("--force")
+        _run_hashfrag_cmd(cmd, log_path, append=False)
+    else:
+        log_path.write_text(
+            f"RESUME: reusing existing BLAST results: {blast_out}\n",
+            encoding="utf-8",
+        )
+
+    if force or not processed.is_file() or processed.stat().st_size == 0:
+        _run_hashfrag_cmd(
+            [
+                hashfrag_bin,
+                "process_blast_results_module",
+                "--blastn-path",
+                str(blast_out),
+                "--processed-blastn-path",
+                str(processed),
+            ],
+            log_path,
+            append=True,
+        )
+
+    _run_hashfrag_cmd(
+        [
+            hashfrag_bin,
+            "identify_homologous_groups_module",
+            "-i",
+            str(processed),
+            "-t",
+            str(threshold_cli),
+            "-o",
+            str(groups_path),
+        ],
+        log_path,
+        append=True,
+    )
+    if not groups_path.is_file() or groups_path.stat().st_size == 0:
+        raise FileNotFoundError(f"homologous groups not written: {groups_path}")
+    return groups_path
 
 
 def _require_tools() -> tuple[str, str, str]:
@@ -287,46 +487,33 @@ def run_hashfrag_split_assign(
     if abs((p_train + p_test) - 1.0) > 1e-6:
         raise ValueError(f"p_train + p_test must equal 1; got {p_train}+{p_test}")
 
-    all_fa = marked_to_multifasta(marked, fasta_dir / "all.fa", ids=assignable)
-
-    cmd = [
-        hashfrag_bin,
-        "create_orthogonal_splits",
-        "-f",
-        str(all_fa),
-        "-t",
-        str(threshold_cli),
-        "--p-train",
-        str(p_train),
-        "--p-test",
-        str(p_test),
-        "-n",
-        "1",
-        "-s",
-        str(seed),
-        "-T",
-        str(max(1, int(threads))),
-        "-o",
-        str(work),
-    ]
-    if force:
-        cmd.append("--force")
+    all_fa = fasta_dir / "all.fa"
+    if force or not all_fa.is_file() or all_fa.stat().st_size == 0:
+        all_fa = marked_to_multifasta(marked, all_fa, ids=assignable)
 
     log_path = outdir / "hashfrag_cli.log"
-    proc = subprocess.run(cmd, capture_output=True, text=True, check=False)
-    log_path.write_text(
-        "CMD: " + " ".join(cmd) + "\n\nSTDOUT:\n" + (proc.stdout or "")
-        + "\n\nSTDERR:\n" + (proc.stderr or ""),
-        encoding="utf-8",
+    groups_path = ensure_homologous_groups(
+        hashfrag_bin=hashfrag_bin,
+        work=work,
+        all_fa=all_fa,
+        threshold_cli=threshold_cli,
+        threads=threads,
+        force=force,
+        log_path=log_path,
     )
-    if proc.returncode != 0:
-        raise RuntimeError(
-            f"hashFrag create_orthogonal_splits failed (rc={proc.returncode}); "
-            f"see {log_path}"
+
+    # Project assigner — bypasses upstream create_orthogonal_splits_module off-by-one.
+    hf_labels = assign_orthogonal_from_groups(
+        groups_path, p_train=p_train, p_test=p_test, seed=seed
+    )
+    split_tsv = write_orthogonal_split_tsv(hf_labels, work)
+    with log_path.open("a", encoding="utf-8") as fh:
+        fh.write(
+            f"\nPROJECT_ASSIGN: wrote {split_tsv} "
+            f"(train={sum(1 for v in hf_labels.values() if v=='train')}, "
+            f"test={sum(1 for v in hf_labels.values() if v=='test')})\n"
         )
 
-    split_tsv = _find_split_tsv(work)
-    hf_labels = parse_hashfrag_split_tsv(split_tsv)
     missing = [i for i in assignable if i not in hf_labels]
     if missing:
         raise RuntimeError(
@@ -343,7 +530,7 @@ def run_hashfrag_split_assign(
     test_ids = sorted(i for i, lab in hf_labels.items() if lab == "test")
     carved = _carve_val_from_train(train_pool, seed=seed)
 
-    groups = parse_homologous_groups_tsv(work / "hashFrag.homologous_groups.tsv")
+    groups = parse_homologous_groups_tsv(groups_path)
 
     rows: list[dict[str, str]] = []
     for rid in ids:
@@ -377,11 +564,13 @@ def run_hashfrag_split_assign(
         "marked": str(marked),
         "all_fa": str(all_fa),
         "hashfrag_work": str(work),
+        "homologous_groups": str(groups_path),
         "split_tsv": str(split_tsv),
         "split_csv": str(split_csv),
         "n_ids": len(ids),
         "n_assignable": len(assignable),
         "counts": counts,
+        "assigner": "src.splits.hashfrag.assign_orthogonal_from_groups",
         "tools": {
             "hashFrag": _tool_version(hashfrag_bin),
             "blastn": _tool_version(blastn_bin),

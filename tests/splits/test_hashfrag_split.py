@@ -81,6 +81,40 @@ def test_fasta_token_roundtrip() -> None:
     assert from_fasta_token("100000") is None
 
 
+def test_assign_orthogonal_off_by_one_fix(tmp_path: Path) -> None:
+    """Upstream round(N*0.9)+round(N*0.1) fails for some N; our assigner always sums to N."""
+    from src.splits.hashfrag import assign_orthogonal_from_groups
+
+    path = tmp_path / "groups.tsv"
+    lines = []
+    for i in range(1, 6):
+        lines.append(f"{to_fasta_token(str(i))}\t{i}")
+        lines.append(f"{to_fasta_token(str(i))}_Reversed\t{i}")
+    # N=5 (.5 rounding case for 0.9/0.1)
+    path.write_text("\n".join(lines[:5]) + "\n", encoding="utf-8")
+    labels = assign_orthogonal_from_groups(path, p_train=0.9, p_test=0.1, seed=42)
+    assert set(labels.values()) <= {"train", "test"}
+    assert "train" in labels.values() and "test" in labels.values()
+    assert len(labels) >= 2
+
+
+def test_assign_orthogonal_group_grain(tmp_path: Path) -> None:
+    from src.splits.hashfrag import assign_orthogonal_from_groups
+
+    path = tmp_path / "groups.tsv"
+    rows = []
+    for i in range(1, 7):
+        gid = "0" if i <= 3 else "1"
+        rows.append(f"{to_fasta_token(str(i))}\t{gid}")
+        rows.append(f"{to_fasta_token(str(i))}_Reversed\t{gid}")
+    path.write_text("\n".join(rows) + "\n", encoding="utf-8")
+    labels = assign_orthogonal_from_groups(path, p_train=0.5, p_test=0.5, seed=0)
+    assert set(labels) == {str(i) for i in range(1, 7)}
+    assert labels["1"] == labels["2"] == labels["3"]
+    assert labels["4"] == labels["5"] == labels["6"]
+    assert labels["1"] != labels["4"]
+
+
 def test_marked_to_multifasta_headers(tmp_path: Path) -> None:
     marked, id_csv, _ = _mock_panel(tmp_path, n=5)
     ids = [r["ID"] for r in read_csv(id_csv)]

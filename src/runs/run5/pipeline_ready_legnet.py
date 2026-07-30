@@ -115,7 +115,9 @@ def main(argv: list[str] | None = None) -> int:
         "plot_sbs=false",
         f"threshold={threshold}",
         f"threads={threads}",
-        "force=true",
+        # Default false: reuse existing hashFrag.blastn.out (full-panel BLAST is costly).
+        # Pass force=true on the CLI to rebuild BLAST from scratch.
+        "force=false",
         *argv,
     ]
     print("run5 hydra overrides:", overrides, flush=True)
