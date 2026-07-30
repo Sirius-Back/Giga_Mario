@@ -955,6 +955,12 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--patience", type=int, default=None)
     ap.add_argument("--dpi", type=int, default=None)
     ap.add_argument("--column", choices=("single", "double"), default="double")
+    ap.add_argument(
+        "--max-epoch",
+        type=float,
+        default=None,
+        help="Clip learning curves to epoch<=N (default: config compare_max_epoch when multi-model)",
+    )
     ap.add_argument("--config", type=Path, default=DEFAULT_CONFIG_PATH)
     args = ap.parse_args(argv)
 
@@ -1121,6 +1127,7 @@ def main(argv: list[str] | None = None) -> int:
             patience=args.patience,
             dpi=dpi,
             best_epochs=best_epochs,
+            max_epoch=args.max_epoch,
         )
     )
     if n_models >= 2:
@@ -1134,6 +1141,7 @@ def main(argv: list[str] | None = None) -> int:
                 x_key=args.x,
                 ribbon=ribbon if n_seeds >= 2 else "none",
                 dpi=dpi,
+                max_epoch=args.max_epoch,
             )
         )
     written.extend(

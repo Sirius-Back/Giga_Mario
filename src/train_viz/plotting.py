@@ -196,6 +196,169 @@ def _palette_for_splits(splits: list[str], cfg: dict[str, Any]) -> dict[str, str
     return {split_label(s): split_color(s, cfg) for s in splits}
 
 
+def filter_rows_max_epoch(
+    rows: list[dict[str, Any]],
+    max_epoch: int | float | None,
+    *,
+    x_key: str = "epoch",
+) -> list[dict[str, Any]]:
+    """Keep rows with ``x_key <= max_epoch`` (non-finite / missing x kept out)."""
+    if max_epoch is None:
+        return rows
+    out: list[dict[str, Any]] = []
+    lim = float(max_epoch)
+    for r in rows:
+        raw = r.get(x_key)
+        try:
+            x = float(raw)
+        except (TypeError, ValueError):
+            continue
+        if math.isfinite(x) and x <= lim + 1e-12:
+            out.append(r)
+    return out
+
+
+def _model_palette(models: list[str], cfg: dict[str, Any]) -> dict[str, str]:
+    return {m: model_color(i, cfg) for i, m in enumerate(models)}
+
+
+def _facet_split_order(present: list[str], cfg: dict[str, Any]) -> list[str]:
+    preferred = list(cfg.get("facet_splits") or ["train", "validation", "test"])
+    ordered = [s for s in preferred if s in present]
+    for s in present:
+        if s not in ordered and s in ("train", "validation", "test"):
+            ordered.append(s)
+    return ordered or list(present)
+
+
+def _dedupe_legend_entries(
+    handles: list[Any], labels: list[str]
+) -> tuple[list[Any], list[str]]:
+    seen: set[str] = set()
+    out_h: list[Any] = []
+    out_l: list[str] = []
+    for h, lab in zip(handles, labels):
+        if lab in seen or lab.startswith("_"):
+            continue
+        seen.add(lab)
+        out_h.append(h)
+        out_l.append(lab)
+    return out_h, out_l
+
+
+def place_legend_lower_right(
+    fig: Any,
+    axes: Any,
+    *,
+    cfg: dict[str, Any],
+    position: str = "lower right",
+) -> Any:
+    """Figure-level matplotlib legend; remove axes legends to avoid overlap.
+
+    ``position``:
+      - ``\"lower right\"`` — bottom-right of the figure (faceted metric plots)
+      - ``\"bottom\"`` — centered under panels (Figure_01 learning curves)
+    """
+    ax_list = list(np.atleast_1d(axes).ravel())
+    handles: list[Any] = []
+    labels: list[str] = []
+    for ax in ax_list:
+        h, lab = ax.get_legend_handles_labels()
+        handles.extend(h)
+        labels.extend(lab)
+        leg = ax.get_legend()
+        if leg is not None:
+            leg.remove()
+    handles, labels = _dedupe_legend_entries(handles, labels)
+    if not handles:
+        return None
+    leg_cfg = cfg.get("legend") or {}
+    ncol = 1
+    thr = int(leg_cfg.get("ncol_auto_threshold", 6))
+    if len(labels) >= thr:
+        ncol = 2 if len(labels) < 12 else 3
+    if position == "bottom":
+        # Wide bottom strip under multipanel grid — does not cover curves.
+        ncol = max(ncol, min(4, len(labels)))
+        legend = fig.legend(
+            handles,
+            labels,
+            loc="upper center",
+            bbox_to_anchor=(0.5, 0.0),
+            frameon=bool(leg_cfg.get("frameon", True)),
+            framealpha=float(leg_cfg.get("framealpha", 0.92)),
+            fontsize=cfg.get("font", {}).get("legend_pt", 8),
+            ncol=ncol,
+            borderaxespad=0.4,
+        )
+        fig.subplots_adjust(bottom=0.18 if ncol <= 3 else 0.22)
+        return legend
+    bbox = leg_cfg.get("bbox_to_anchor", [0.99, 0.02])
+    if isinstance(bbox, (list, tuple)) and len(bbox) >= 2:
+        bbox_t = (float(bbox[0]), float(bbox[1]))
+    else:
+        bbox_t = (0.99, 0.02)
+    legend = fig.legend(
+        handles,
+        labels,
+        loc=str(leg_cfg.get("loc", "lower right")),
+        bbox_to_anchor=bbox_t,
+        frameon=bool(leg_cfg.get("frameon", True)),
+        framealpha=float(leg_cfg.get("framealpha", 0.92)),
+        fontsize=cfg.get("font", {}).get("legend_pt", 8),
+        ncol=ncol,
+        borderaxespad=0.2,
+    )
+    fig.subplots_adjust(bottom=0.20 if ncol >= 2 else 0.14, right=0.98)
+    return legend
+
+
+def _altair_faceted_by_split(
+    df: pd.DataFrame,
+    *,
+    x_key: str,
+    title: str,
+    models: list[str],
+    color_range: list[str],
+    split_order: list[str],
+) -> Any:
+    """One color per model; columns = train / validation / test."""
+    import altair as alt
+
+    split_labels = [split_label(s) for s in split_order]
+    chart = (
+        alt.Chart(df)
+        .mark_line(strokeWidth=2.2)
+        .encode(
+            x=alt.X(f"{x_key}:Q", title=x_key.replace("_", " ")),
+            y=alt.Y("value:Q", title="value"),
+            color=alt.Color(
+                "model:N",
+                scale=alt.Scale(domain=models, range=color_range),
+                legend=alt.Legend(title="run", orient="bottom-right"),
+            ),
+            tooltip=[
+                alt.Tooltip(f"{x_key}:Q"),
+                alt.Tooltip("value:Q", format=".4g"),
+                alt.Tooltip("model:N"),
+                alt.Tooltip("split_label:N"),
+            ],
+        )
+        .properties(width=220, height=240)
+        .facet(
+            column=alt.Column(
+                "split_label:N",
+                title=None,
+                sort=split_labels,
+            ),
+            title=title,
+        )
+        .resolve_scale(y="independent")
+        .interactive()
+    )
+    return chart
+
+
 def _altair_line(
     df: pd.DataFrame,
     *,
@@ -214,7 +377,7 @@ def _altair_line(
         "color": alt.Color(
             f"{color_field}:N",
             scale=alt.Scale(domain=color_domain, range=color_range),
-            legend=alt.Legend(title=color_field),
+            legend=alt.Legend(title=color_field, orient="bottom-right"),
         ),
         "tooltip": [
             alt.Tooltip(f"{x_key}:Q"),
@@ -226,6 +389,357 @@ def _altair_line(
         enc["strokeDash"] = alt.StrokeDash(f"{stroke_dash_field}:N")
     base = alt.Chart(df).mark_line(strokeWidth=2.2).encode(**enc)
     return base.properties(title=title, width=420, height=280).interactive()
+
+
+def plot_learning_curves(
+    rows: list[dict[str, Any]],
+    metrics: list[str],
+    cfg: dict[str, Any],
+    outdir: Path,
+    idx: FigureIndex,
+    *,
+    x_key: str,
+    title: str | None,
+    column: str,
+    ribbon: str,
+    smooth: bool,
+    patience: int | None,
+    dpi: int,
+    best_epochs: dict[str, float] | None = None,
+    max_epoch: int | float | None = None,
+) -> list[Path]:
+    import matplotlib.pyplot as plt
+    import cnsplots as cns
+
+    apply_pub_style(cfg, dpi=dpi)
+    written: list[Path] = []
+    if max_epoch is None and cfg.get("compare_max_epoch") is not None:
+        # Only auto-apply config cap for multi-model combined figures.
+        if len({r["model"] for r in rows}) > 1:
+            max_epoch = cfg.get("compare_max_epoch")
+    rows = filter_rows_max_epoch(rows, max_epoch, x_key=x_key)
+    models = sorted({r["model"] for r in rows})
+    n_seeds = len({r["seed"] for r in rows})
+    multi_model = len(models) > 1
+    metrics = metrics_with_data(rows, metrics)
+    if not metrics:
+        return written
+    best_epochs = best_epochs or {}
+    model_pal = _model_palette(models, cfg)
+
+    pages: list[list[str]] = []
+    if len(metrics) <= 9:
+        pages = [metrics]
+    else:
+        for i in range(0, len(metrics), 9):
+            pages.append(metrics[i : i + 9])
+
+    layout_w, layout_h = cns_layout_px(cfg, column)
+    panel_w = max(120, int(layout_w / 3))
+    panel_h = max(110, int(layout_h / 2))
+
+    for page_i, page_metrics in enumerate(pages):
+        apply_pub_style(cfg, dpi=dpi)
+        page_title = title or "Learning curves"
+        if len(pages) > 1:
+            page_title = f"{page_title} ({page_i + 1}/{len(pages)})"
+        if max_epoch is not None:
+            page_title = f"{page_title} (epochs ≤ {int(max_epoch)})"
+        mp = cns.multipanel(max_width=int(layout_w), title=page_title, title_fontweight="regular")
+        page_axes: list[Any] = []
+        for mi, metric in enumerate(page_metrics):
+            metric_splits = splits_for_metric(rows, metric)
+            df = _metric_long(
+                rows,
+                metric,
+                models=models,
+                splits=metric_splits,
+                x_key=x_key,
+                n_seeds=n_seeds,
+                ribbon=ribbon,
+            )
+            label = chr(ord("A") + mi) if mi < 26 else str(mi + 1)
+            mp.panel(
+                label,
+                width=panel_w,
+                height=panel_h,
+                pad_left=36,
+                pad_top=14,
+                margin_right=8,
+                margin_bottom=8,
+            )
+            if df.empty:
+                continue
+            if multi_model:
+                hue = "model"
+                style = None
+                palette = model_pal
+            else:
+                hue = "split_label"
+                style = None
+                palette = _palette_for_splits(metric_splits, cfg)
+            err = ("ci", 95) if (n_seeds >= 2 and ribbon == "ci95") else (
+                ("sd", 1) if (n_seeds >= 2 and ribbon == "std") else None
+            )
+            ax = cns.lineplot(
+                data=df,
+                x=x_key,
+                y="value",
+                hue=hue,
+                style=style,
+                palette=palette,
+                hue_order=models if multi_model else None,
+                errorbar=err,
+                seed=42,
+                legend=False,
+                linewidth=cfg.get("line_width", 2.2),
+            )
+            ax.set_xlabel(x_key.replace("_", " "))
+            ax.set_ylabel(metric.replace("_", " "))
+            cns.setup_ax(ax)
+            page_axes.append(ax)
+            for model in models:
+                mark_splits = (
+                    ["validation"]
+                    if "validation" in metric_splits
+                    else list(metric_splits)
+                )
+                for split in mark_splits:
+                    sub = df[(df["model"] == model) & (df["split"] == split)]
+                    if sub.empty:
+                        continue
+                    grp = sub.groupby(x_key, as_index=False)["value"].mean()
+                    color = (
+                        model_pal[model]
+                        if multi_model
+                        else split_color(split, cfg)
+                    )
+                    _mark_selected_best(
+                        ax,
+                        grp,
+                        x_key=x_key,
+                        metric=metric,
+                        cfg=cfg,
+                        color=color,
+                        best_epoch=best_epochs.get(model),
+                        patience=patience,
+                        annotate=(split == "validation" and not multi_model),
+                    )
+                    if smooth and len(grp) >= 4:
+                        sm = _lowess(
+                            grp[x_key].to_numpy(dtype=float),
+                            grp["value"].to_numpy(dtype=float),
+                            cfg.get("lowess_frac", 0.35),
+                        )
+                        if sm is not None:
+                            ax.plot(
+                                grp[x_key],
+                                sm,
+                                color=color,
+                                linewidth=1.0,
+                                alpha=0.55,
+                                zorder=2,
+                            )
+                    break
+        if page_axes:
+            place_legend_lower_right(plt.gcf(), page_axes, cfg=cfg)
+        stem = idx.next_stem(
+            outdir, f"learning_curves_p{page_i + 1}" if len(pages) > 1 else "learning_curves"
+        )
+        written.extend(save_cns_figure(stem, dpi))
+
+        altair_frames = []
+        for metric in page_metrics:
+            df = _metric_long(
+                rows,
+                metric,
+                models=models,
+                splits=splits_for_metric(rows, metric),
+                x_key=x_key,
+                n_seeds=n_seeds,
+                ribbon="none",
+            )
+            if not df.empty:
+                d = df.copy()
+                d["metric"] = metric
+                altair_frames.append(d)
+        if altair_frames:
+            adf = pd.concat(altair_frames, ignore_index=True)
+            import altair as alt
+
+            if multi_model:
+                domain = models
+                crange = [model_pal[m] for m in models]
+                color_field = "model"
+            else:
+                color_field = "split_label"
+                domain = sorted(adf[color_field].unique())
+                crange = [
+                    split_color(next((s for s in SPLIT_ORDER if split_label(s) == d), "_run"), cfg)
+                    for d in domain
+                ]
+            line = (
+                alt.Chart(adf)
+                .mark_line(strokeWidth=2)
+                .encode(
+                    x=alt.X(f"{x_key}:Q", title=x_key.replace("_", " ")),
+                    y=alt.Y("value:Q", title="value"),
+                    color=alt.Color(
+                        f"{color_field}:N",
+                        scale=alt.Scale(domain=domain, range=crange),
+                        legend=alt.Legend(orient="bottom-right", title=color_field),
+                    ),
+                    tooltip=[x_key, "value", color_field, "metric"],
+                )
+            )
+            chart = (
+                line.properties(width=220, height=160)
+                .facet(facet=alt.Facet("metric:N"), columns=3, title=page_title, data=adf)
+                .interactive()
+            )
+            written.extend(save_altair_chart(chart, stem.with_name(stem.name + "_altair")))
+
+    # Per-metric figures (Figure_02_loss, …): multi-model → facets train/val/test
+    for metric in metrics:
+        metric_splits = splits_for_metric(rows, metric)
+        if not metric_splits:
+            continue
+        facet_splits = _facet_split_order(metric_splits, cfg) if multi_model else metric_splits
+        df = _metric_long(
+            rows,
+            metric,
+            models=models,
+            splits=facet_splits,
+            x_key=x_key,
+            n_seeds=n_seeds,
+            ribbon=ribbon,
+        )
+        if df.empty:
+            continue
+        apply_pub_style(cfg, dpi=dpi)
+        err = ("ci", 95) if (n_seeds >= 2 and ribbon == "ci95") else (
+            ("sd", 1) if (n_seeds >= 2 and ribbon == "std") else None
+        )
+        sw, sh = cns_layout_px(cfg, "single" if not multi_model else "double")
+
+        if multi_model:
+            n_fac = max(len(facet_splits), 1)
+            fig_w = max(6.0, (sw / 72.0) * max(n_fac, 1) * 0.55)
+            fig_h = max(3.2, sh / 72.0 * 0.85)
+            fig, axes = plt.subplots(
+                1,
+                n_fac,
+                figsize=(fig_w, fig_h),
+                sharey=False,
+                squeeze=False,
+            )
+            axes_flat = list(axes.ravel())
+            for ax, split in zip(axes_flat, facet_splits):
+                sub = df[df["split"] == split]
+                if sub.empty:
+                    ax.set_visible(False)
+                    continue
+                cns.lineplot(
+                    data=sub,
+                    x=x_key,
+                    y="value",
+                    hue="model",
+                    hue_order=models,
+                    palette=model_pal,
+                    errorbar=err,
+                    seed=42,
+                    legend=False,
+                    linewidth=cfg.get("line_width", 2.2),
+                    ax=ax,
+                )
+                ax.set_title(split_label(split))
+                ax.set_xlabel(x_key.replace("_", " "))
+                ax.set_ylabel(metric.replace("_", " "))
+                cns.setup_ax(ax)
+                for model in models:
+                    msub = sub[sub["model"] == model]
+                    if msub.empty:
+                        continue
+                    grp = msub.groupby(x_key, as_index=False)["value"].mean()
+                    _mark_selected_best(
+                        ax,
+                        grp,
+                        x_key=x_key,
+                        metric=metric,
+                        cfg=cfg,
+                        color=model_pal[model],
+                        best_epoch=best_epochs.get(model),
+                        patience=None,
+                        annotate=False,
+                    )
+            fig.suptitle(metric.replace("_", " "), fontsize=cfg.get("font", {}).get("title_pt", 10))
+            place_legend_lower_right(fig, axes_flat, cfg=cfg)
+            stem = idx.next_stem(outdir, metric)
+            written.extend(save_cns_figure(stem, dpi))
+            chart = _altair_faceted_by_split(
+                df,
+                x_key=x_key,
+                title=metric.replace("_", " "),
+                models=models,
+                color_range=[model_pal[m] for m in models],
+                split_order=facet_splits,
+            )
+            written.extend(save_altair_chart(chart, stem.with_name(stem.name + "_altair")))
+            continue
+
+        cns.figure(width=int(sw * 1.15), height=int(sh * 1.05))
+        palette = _palette_for_splits(metric_splits, cfg)
+        ax = cns.lineplot(
+            data=df,
+            x=x_key,
+            y="value",
+            hue="split_label",
+            palette=palette,
+            errorbar=err,
+            seed=42,
+            linewidth=cfg.get("line_width", 2.2),
+        )
+        ax.set_title(metric.replace("_", " "))
+        ax.set_xlabel(x_key.replace("_", " "))
+        ax.set_ylabel(metric.replace("_", " "))
+        cns.setup_ax(ax)
+        place_legend_lower_right(plt.gcf(), [ax], cfg=cfg)
+        for model in models:
+            mark_splits = (
+                ["validation"] if "validation" in metric_splits else list(metric_splits)
+            )
+            for split in mark_splits:
+                sub = df[(df["model"] == model) & (df["split"] == split)]
+                if sub.empty:
+                    continue
+                grp = sub.groupby(x_key, as_index=False)["value"].mean()
+                _mark_selected_best(
+                    ax,
+                    grp,
+                    x_key=x_key,
+                    metric=metric,
+                    cfg=cfg,
+                    color=split_color(split, cfg),
+                    best_epoch=best_epochs.get(model),
+                    patience=None,
+                    annotate=True,
+                )
+                break
+        stem = idx.next_stem(outdir, metric)
+        written.extend(save_cns_figure(stem, dpi))
+        domain = sorted(df["split_label"].unique())
+        crange = [palette.get(d, "#000000") for d in domain]
+        chart = _altair_line(
+            df,
+            x_key=x_key,
+            title=metric.replace("_", " "),
+            color_field="split_label",
+            color_domain=domain,
+            color_range=crange,
+        )
+        written.extend(save_altair_chart(chart, stem.with_name(stem.name + "_altair")))
+
+    return written
 
 
 def _metric_long(
@@ -344,341 +858,6 @@ def _mark_selected_best(
         ax.axvline(stop, color=color, linestyle="--", linewidth=1.0, alpha=0.7)
 
 
-def plot_learning_curves(
-    rows: list[dict[str, Any]],
-    metrics: list[str],
-    cfg: dict[str, Any],
-    outdir: Path,
-    idx: FigureIndex,
-    *,
-    x_key: str,
-    title: str | None,
-    column: str,
-    ribbon: str,
-    smooth: bool,
-    patience: int | None,
-    dpi: int,
-    best_epochs: dict[str, float] | None = None,
-) -> list[Path]:
-    import cnsplots as cns
-
-    apply_pub_style(cfg, dpi=dpi)
-    written: list[Path] = []
-    models = sorted({r["model"] for r in rows})
-    n_seeds = len({r["seed"] for r in rows})
-    multi_model = len(models) > 1
-    metrics = metrics_with_data(rows, metrics)
-    if not metrics:
-        return written
-    best_epochs = best_epochs or {}
-
-    pages: list[list[str]] = []
-    if len(metrics) <= 9:
-        pages = [metrics]
-    else:
-        for i in range(0, len(metrics), 9):
-            pages.append(metrics[i : i + 9])
-
-    layout_w, layout_h = cns_layout_px(cfg, column)
-    panel_w = max(120, int(layout_w / 3))
-    panel_h = max(110, int(layout_h / 2))
-
-    for page_i, page_metrics in enumerate(pages):
-        apply_pub_style(cfg, dpi=dpi)
-        page_title = title or "Learning curves"
-        if len(pages) > 1:
-            page_title = f"{page_title} ({page_i + 1}/{len(pages)})"
-        mp = cns.multipanel(max_width=int(layout_w), title=page_title, title_fontweight="regular")
-        for mi, metric in enumerate(page_metrics):
-            metric_splits = splits_for_metric(rows, metric)
-            df = _metric_long(
-                rows,
-                metric,
-                models=models,
-                splits=metric_splits,
-                x_key=x_key,
-                n_seeds=n_seeds,
-                ribbon=ribbon,
-            )
-            label = chr(ord("A") + mi) if mi < 26 else str(mi + 1)
-            mp.panel(
-                label,
-                width=panel_w,
-                height=panel_h,
-                pad_left=36,
-                pad_top=14,
-                margin_right=8,
-                margin_bottom=8,
-            )
-            if df.empty:
-                continue
-            hue = "series" if multi_model else "split_label"
-            style = "split_label" if multi_model else None
-            palette = None
-            if not multi_model:
-                palette = _palette_for_splits(metric_splits, cfg)
-            else:
-                # stable colors by series order
-                series_order = sorted(df["series"].unique())
-                palette = {
-                    s: model_color(models.index(s.split("/", 1)[0]) % len(models), cfg)
-                    if "/" in s and s.split("/", 1)[0] in models
-                    else model_color(i, cfg)
-                    for i, s in enumerate(series_order)
-                }
-            err = ("ci", 95) if (n_seeds >= 2 and ribbon == "ci95") else (
-                ("sd", 1) if (n_seeds >= 2 and ribbon == "std") else None
-            )
-            ax = cns.lineplot(
-                data=df,
-                x=x_key,
-                y="value",
-                hue=hue,
-                style=style,
-                palette=palette,
-                errorbar=err,
-                seed=42,
-                legend="auto" if mi == 0 else False,
-                linewidth=cfg.get("line_width", 2.2),
-            )
-            ax.set_xlabel(x_key.replace("_", " "))
-            ax.set_ylabel(metric.replace("_", " "))
-            cns.setup_ax(ax)
-            # Selected final/best checkpoint markers (prefer recorded best_meta epoch)
-            for model in models:
-                # Prefer validation for the final-model marker; fall back to first split
-                mark_splits = (
-                    ["validation"]
-                    if "validation" in metric_splits
-                    else list(metric_splits)
-                )
-                for split in mark_splits:
-                    sub = df[(df["model"] == model) & (df["split"] == split)]
-                    if sub.empty:
-                        continue
-                    grp = sub.groupby(x_key, as_index=False)["value"].mean()
-                    color = split_color(split, cfg) if not multi_model else model_color(
-                        models.index(model), cfg
-                    )
-                    _mark_selected_best(
-                        ax,
-                        grp,
-                        x_key=x_key,
-                        metric=metric,
-                        cfg=cfg,
-                        color=color,
-                        best_epoch=best_epochs.get(model),
-                        patience=patience,
-                        annotate=(split == "validation"),
-                    )
-                    if smooth and len(grp) >= 4:
-                        sm = _lowess(
-                            grp[x_key].to_numpy(dtype=float),
-                            grp["value"].to_numpy(dtype=float),
-                            cfg.get("lowess_frac", 0.35),
-                        )
-                        if sm is not None:
-                            ax.plot(
-                                grp[x_key],
-                                sm,
-                                color=color,
-                                linewidth=1.0,
-                                alpha=0.55,
-                                zorder=2,
-                            )
-                    break  # one marker per model/metric panel
-        stem = idx.next_stem(
-            outdir, f"learning_curves_p{page_i + 1}" if len(pages) > 1 else "learning_curves"
-        )
-        written.extend(save_cns_figure(stem, dpi))
-
-        # Combined Altair facet (first page metrics)
-        altair_frames = []
-        for metric in page_metrics:
-            df = _metric_long(
-                rows,
-                metric,
-                models=models,
-                splits=splits_for_metric(rows, metric),
-                x_key=x_key,
-                n_seeds=n_seeds,
-                ribbon="none",
-            )
-            if not df.empty:
-                d = df.copy()
-                d["metric"] = metric
-                altair_frames.append(d)
-        if altair_frames:
-            adf = pd.concat(altair_frames, ignore_index=True)
-            color_field = "series" if multi_model else "split_label"
-            domain = sorted(adf[color_field].unique())
-            if multi_model:
-                crange = [model_color(i % max(len(models), 1), cfg) for i in range(len(domain))]
-            else:
-                crange = [
-                    split_color(next((s for s in SPLIT_ORDER if split_label(s) == d), "_run"), cfg)
-                    for d in domain
-                ]
-            import altair as alt
-
-            line = (
-                alt.Chart(adf)
-                .mark_line(strokeWidth=2)
-                .encode(
-                    x=alt.X(f"{x_key}:Q", title=x_key.replace("_", " ")),
-                    y=alt.Y("value:Q", title="value"),
-                    color=alt.Color(
-                        f"{color_field}:N",
-                        scale=alt.Scale(domain=domain, range=crange),
-                    ),
-                    tooltip=[x_key, "value", color_field, "metric"],
-                )
-            )
-            # Selected final/best checkpoint points (validation when available)
-            best_rows: list[dict[str, Any]] = []
-            for metric in page_metrics:
-                for model in models:
-                    be = best_epochs.get(model)
-                    if be is None or x_key != "epoch":
-                        continue
-                    sub = adf[
-                        (adf["metric"] == metric)
-                        & (adf["model"] == model)
-                        & (adf["split"] == "validation")
-                    ]
-                    if sub.empty:
-                        sub = adf[(adf["metric"] == metric) & (adf["model"] == model)]
-                    if sub.empty:
-                        continue
-                    xs = sub[x_key].to_numpy(dtype=float)
-                    j = int(np.nanargmin(np.abs(xs - float(be))))
-                    row = sub.iloc[j].to_dict()
-                    row["point_label"] = "final/best"
-                    best_rows.append(row)
-            if best_rows:
-                points = (
-                    alt.Chart(pd.DataFrame(best_rows))
-                    .mark_point(size=90, shape="triangle-up", filled=True)
-                    .encode(
-                        x=alt.X(f"{x_key}:Q"),
-                        y=alt.Y("value:Q"),
-                        color=alt.Color(
-                            f"{color_field}:N",
-                            scale=alt.Scale(domain=domain, range=crange),
-                            legend=None,
-                        ),
-                        tooltip=[x_key, "value", "point_label", "metric"],
-                    )
-                )
-                layered = alt.layer(line, points)
-            else:
-                layered = line
-            # Faceted layers need data at the facet level (Altair ≥5).
-            # ``columns`` belongs on ``.facet(...)``, not inside ``alt.Facet(...)``.
-            chart = (
-                layered.properties(width=220, height=160)
-                .facet(
-                    facet=alt.Facet("metric:N"),
-                    columns=3,
-                    title=page_title,
-                    data=adf,
-                )
-                .interactive()
-            )
-            written.extend(save_altair_chart(chart, stem.with_name(stem.name + "_altair")))
-
-    # Per-metric figures
-    for metric in metrics:
-        metric_splits = splits_for_metric(rows, metric)
-        if not metric_splits:
-            continue
-        df = _metric_long(
-            rows,
-            metric,
-            models=models,
-            splits=metric_splits,
-            x_key=x_key,
-            n_seeds=n_seeds,
-            ribbon=ribbon,
-        )
-        if df.empty:
-            continue
-        apply_pub_style(cfg, dpi=dpi)
-        sw, sh = cns_layout_px(cfg, "single")
-        cns.figure(width=int(sw * 1.15), height=int(sh * 1.05))
-        hue = "series" if multi_model else "split_label"
-        style = "split_label" if multi_model else None
-        palette = (
-            {
-                s: model_color(models.index(s.split("/", 1)[0]) % len(models), cfg)
-                if "/" in s and s.split("/", 1)[0] in models
-                else model_color(i, cfg)
-                for i, s in enumerate(sorted(df["series"].unique()))
-            }
-            if multi_model
-            else _palette_for_splits(metric_splits, cfg)
-        )
-        err = ("ci", 95) if (n_seeds >= 2 and ribbon == "ci95") else (
-            ("sd", 1) if (n_seeds >= 2 and ribbon == "std") else None
-        )
-        ax = cns.lineplot(
-            data=df,
-            x=x_key,
-            y="value",
-            hue=hue,
-            style=style,
-            palette=palette,
-            errorbar=err,
-            seed=42,
-            linewidth=cfg.get("line_width", 2.2),
-        )
-        ax.set_title(metric.replace("_", " "))
-        ax.set_xlabel(x_key.replace("_", " "))
-        ax.set_ylabel(metric.replace("_", " "))
-        cns.setup_ax(ax)
-        for model in models:
-            mark_splits = (
-                ["validation"] if "validation" in metric_splits else list(metric_splits)
-            )
-            for split in mark_splits:
-                sub = df[(df["model"] == model) & (df["split"] == split)]
-                if sub.empty:
-                    continue
-                grp = sub.groupby(x_key, as_index=False)["value"].mean()
-                color = (
-                    split_color(split, cfg)
-                    if not multi_model
-                    else model_color(models.index(model), cfg)
-                )
-                _mark_selected_best(
-                    ax,
-                    grp,
-                    x_key=x_key,
-                    metric=metric,
-                    cfg=cfg,
-                    color=color,
-                    best_epoch=best_epochs.get(model),
-                    patience=None,
-                    annotate=True,
-                )
-                break
-        stem = idx.next_stem(outdir, metric)
-        written.extend(save_cns_figure(stem, dpi))
-        domain = sorted(df[hue].unique())
-        crange = [palette.get(d, "#000000") for d in domain]
-        chart = _altair_line(
-            df,
-            x_key=x_key,
-            title=metric.replace("_", " "),
-            color_field=hue,
-            color_domain=domain,
-            color_range=crange,
-            stroke_dash_field="split_label" if multi_model else None,
-        )
-        written.extend(save_altair_chart(chart, stem.with_name(stem.name + "_altair")))
-
-    return written
-
 
 def plot_multimodel_split_isolated(
     rows: list[dict[str, Any]],
@@ -690,17 +869,27 @@ def plot_multimodel_split_isolated(
     x_key: str,
     ribbon: str,
     dpi: int,
+    max_epoch: int | float | None = None,
 ) -> list[Path]:
     models = sorted({r["model"] for r in rows})
     if len(models) < 2:
         return []
+    import matplotlib.pyplot as plt
     import cnsplots as cns
+
+    if max_epoch is None and cfg.get("compare_max_epoch") is not None:
+        max_epoch = cfg.get("compare_max_epoch")
+    rows = filter_rows_max_epoch(rows, max_epoch, x_key=x_key)
+    models = sorted({r["model"] for r in rows})
+    if len(models) < 2:
+        return []
 
     apply_pub_style(cfg, dpi=dpi)
     written: list[Path] = []
     splits = [s for s in ("train", "validation", "test") if any(r["split"] == s for r in rows)]
     n_seeds = len({r["seed"] for r in rows})
     sw, sh = cns_layout_px(cfg, "single")
+    palette = _model_palette(models, cfg)
 
     for metric in metrics:
         for split in splits:
@@ -717,7 +906,6 @@ def plot_multimodel_split_isolated(
                 continue
             apply_pub_style(cfg, dpi=dpi)
             cns.figure(width=int(sw * 1.2), height=int(sh * 1.05))
-            palette = {m: model_color(i, cfg) for i, m in enumerate(models)}
             err = ("ci", 95) if (n_seeds >= 2 and ribbon == "ci95") else (
                 ("sd", 1) if (n_seeds >= 2 and ribbon == "std") else None
             )
@@ -726,21 +914,27 @@ def plot_multimodel_split_isolated(
                 x=x_key,
                 y="value",
                 hue="model",
+                hue_order=models,
                 palette=palette,
                 errorbar=err,
                 seed=42,
+                legend=False,
                 linewidth=cfg.get("line_width", 2.2),
             )
-            ax.set_title(f"{metric.replace('_', ' ')} — {split}")
+            title = f"{metric.replace('_', ' ')} — {split}"
+            if max_epoch is not None:
+                title = f"{title} (epochs ≤ {int(max_epoch)})"
+            ax.set_title(title)
             ax.set_xlabel(x_key.replace("_", " "))
             ax.set_ylabel(metric.replace("_", " "))
             cns.setup_ax(ax)
+            place_legend_lower_right(plt.gcf(), [ax], cfg=cfg)
             stem = idx.next_stem(outdir, f"multimodel_{metric}_{split}")
             written.extend(save_cns_figure(stem, dpi))
             chart = _altair_line(
                 df,
                 x_key=x_key,
-                title=f"{metric} — {split}",
+                title=title,
                 color_field="model",
                 color_domain=models,
                 color_range=[palette[m] for m in models],

@@ -51,6 +51,15 @@ seed_aggregation: mean_ci95  # mean + 95% CI ribbons (alt: mean_std)
 ribbon_default: ci95
 never_smooth_stored_values: true
 lowess_frac: 0.35
+# Combined multi-run figures (compare_completed_runs / --max-epoch)
+compare_max_epoch: 23
+legend:
+  loc: lower right
+  bbox_to_anchor: [0.99, 0.02]
+  frameon: true
+  framealpha: 0.92
+  ncol_auto_threshold: 6
+facet_splits: [train, validation, test]
 metric_direction:
   lower_is_better:
     - loss

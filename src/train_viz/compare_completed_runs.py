@@ -168,6 +168,8 @@ def _run_unified(
             title,
             "--ribbon",
             "none",
+            "--max-epoch",
+            "23",
         ]
     )
     rc = train_viz_main(argv)
