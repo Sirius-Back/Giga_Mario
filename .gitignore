@@ -6,7 +6,15 @@ bin/
 .anaconda/
 .conda/
 .local/
-mag/
+
+# mag/ source is tracked; bulky downloads / venvs stay local
+mag/**/data/
+mag/**/logs/
+mag/**/venv/
+mag/**/__pycache__/
+mag/**/*.gz
+mag/orthoDB/
+mag/orthodb/**/data/
 
 # --- Secrets & private shell state ---
 .ssh/

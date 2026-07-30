@@ -1,0 +1,6 @@
+# OrthoDB Downloader Configuration (заглушка)
+# Будет заполнена при реализации
+
+orthodb_url: https://www.orthodb.org/
+output_dir: ./data
+log_dir: ./logs

@@ -1,0 +1,4 @@
+# Зависимости OrthoDB Downloader (заглушка)
+requests>=2.31.0
+tqdm>=4.65.0
+PyYAML>=6.0
