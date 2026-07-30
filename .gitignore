@@ -33,6 +33,7 @@ credentials*
 .env.*
 .gitpush
 .codex/
+queue.md
 
 # --- Editor / IDE / tooling caches ---
 # Track project Agent Skills + rules; ignore Cursor IDE state
