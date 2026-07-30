@@ -8,7 +8,9 @@ import pytest
 from src.pipeline.common import read_csv, write_csv
 from src.pipeline.split_predict import run_split_predict
 from src.splits.pangenome import (
+    PangenomeAdaptRequiredError,
     build_contingency_clusters,
+    ensure_marked_pangenome,
     intersect_pangenome,
     run_pangenome_split_assign,
 )
@@ -117,7 +119,7 @@ def test_pangenome_split_on_mock(tmp_path: Path) -> None:
     marked, parsed, id_csv, fold_csv, _ = _mock_panel(tmp_path)
     summary = run_pangenome_split_assign(
         outdir=tmp_path / "pg_out",
-        marked=marked,
+        marked_pangenome=marked,
         parsed=parsed,
         id_csv=id_csv,
         fold_csv=fold_csv,
@@ -129,7 +131,8 @@ def test_pangenome_split_on_mock(tmp_path: Path) -> None:
     by_id = {r["ID"]: r for r in split_rows}
     assert "24" not in by_id  # filtered (no PARSED)
     assert by_id["1"]["train_test"] == "zsv"
-    assert Path(summary["marked_pangenome"]).is_dir()
+    assert Path(summary["marked_parsed"]).is_dir()
+    assert summary["marked_source"]["source"] == "marked_pangenome"
     figs = tmp_path / "pg_out" / "figures"
     assert (figs / "contingency_graph.json").is_file()
     assert (figs / "contingency_graph.dot").is_file()
@@ -142,6 +145,50 @@ def test_pangenome_split_on_mock(tmp_path: Path) -> None:
     assert len(shared_folds) == 1
 
 
+def test_a2a_requires_adapt_when_panel_marked_not_reused(tmp_path: Path) -> None:
+    marked, parsed, id_csv, fold_csv, _ = _mock_panel(tmp_path)
+    with pytest.raises(PangenomeAdaptRequiredError, match="A2A"):
+        run_pangenome_split_assign(
+            outdir=tmp_path / "pg_a2a",
+            panel_marked=marked,
+            parsed=parsed,
+            id_csv=id_csv,
+            fold_csv=fold_csv,
+            reuse_panel_marked=False,
+            seed=42,
+            k=8,
+            plot=False,
+        )
+
+
+def test_reuse_panel_marked_opt_in(tmp_path: Path) -> None:
+    marked, parsed, id_csv, fold_csv, _ = _mock_panel(tmp_path)
+    with pytest.warns(UserWarning, match="reuse_panel_marked"):
+        summary = run_pangenome_split_assign(
+            outdir=tmp_path / "pg_reuse",
+            panel_marked=marked,
+            parsed=parsed,
+            id_csv=id_csv,
+            fold_csv=fold_csv,
+            reuse_panel_marked=True,
+            seed=42,
+            k=8,
+            plot=False,
+        )
+    assert summary["marked_source"]["source"] == "reuse_panel_marked"
+    assert Path(summary["marked_parsed"]).is_dir()
+
+
+def test_ensure_marked_pangenome_prefers_explicit(tmp_path: Path) -> None:
+    marked, _, _, _, _ = _mock_panel(tmp_path, n=6)
+    mp, meta = ensure_marked_pangenome(
+        outdir=tmp_path / "out",
+        marked_pangenome=marked,
+    )
+    assert mp == marked
+    assert meta["source"] == "marked_pangenome"
+
+
 def test_split_predict_type_pangenome_mock(tmp_path: Path) -> None:
     marked, parsed, id_csv, fold_csv, _ = _mock_panel(tmp_path)
     out = run_split_predict(
@@ -149,7 +196,7 @@ def test_split_predict_type_pangenome_mock(tmp_path: Path) -> None:
         type="pangenome",
         id_csv=id_csv,
         fold_csv=fold_csv,
-        marked_fasta=marked,
+        marked_pangenome=marked,
         parsed=parsed,
         seed=42,
         kmer_size=8,
@@ -184,7 +231,9 @@ def test_pangenome_three_genomes_ready_legnet(tmp_path: Path) -> None:
     fold_csv = READY_LEGNET / "fold.csv"
     summary = run_pangenome_split_assign(
         outdir=tmp_path / "pg_3g",
-        marked=READY_LEGNET / "MARKED",
+        # Smoke only: panel LegNet window == intentional reuse (not production default).
+        panel_marked=READY_LEGNET / "MARKED",
+        reuse_panel_marked=True,
         parsed=READY_LEGNET / "PARSED",
         id_csv=id_csv,
         fold_csv=fold_csv if fold_csv.is_file() else None,

@@ -18,7 +18,7 @@ This skill is the primary execution engine of the project. It delegates all spec
 
 This skill must never duplicate functionality implemented by other project skills.
 
-Follow **all active project rules** (including **task-status**, **slurm-execution-policy**). Resume from the latest checkpoint when restarted.
+Follow **all active project rules** (including **task-status**, **local-job-queue**). Resume from the latest checkpoint when restarted.
 
 Prerequisites: prefer a successful `@prepare` run; always run `@verify-todo` before each cycle regardless.
 
@@ -194,9 +194,9 @@ Never bypass this execution cycle.
 
 ## Resource gating (applies before step 4 launches)
 
-Before launching parallel subagents, estimate for **each** executable task: **CPU**, **Memory**, **Runtime** (from task metadata, `#SBATCH`, logs, complexity).
+Before launching parallel subagents, estimate for **each** executable task: **CPU**, **Memory**, **Runtime** (from task metadata, logs, complexity).
 
-Avoid oversubscribing: Σ CPU / Σ memory must fit available resources with headroom; respect SLURM QOS/user limits (**slurm-execution-policy**).
+Avoid oversubscribing: Σ CPU / Σ memory must fit available resources with **≥5% RAM free** (**local-job-queue**). Register large launches in `queue.md`; on high load, wait on queued PIDs until estimated time (and longer if needed).
 
 Prefer maximizing **throughput** rather than maximizing the number of simultaneously running agents — fewer resource-fit agents; defer excess READY tasks to the next cycle.
 

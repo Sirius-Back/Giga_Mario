@@ -144,6 +144,7 @@ split-generate:
 | Path / skill | Role |
 |--------------|------|
 | `/split` | Writes `src/run/run_id/{data}_{split}_{mode}.py` and execs split-predict+split |
+| **A2A `@preprocess` / `adapt`** | **Required for `pangenome` when `MARKED_pangenome` is missing or the pangenome window ≠ panel `MARKED`.** Invoke adapt with pangenome `environment`/`window` → `MARKED_pangenome`; then filter → `MARKED_parsed` (`src.splits.intersect_pangenome`). Do not silently reuse panel MARKED unless `reuse_panel_marked=True`. |
 | `splits/*.md` | Spec captions |
 | `wiki/architecture.md` | Pipeline contracts |
 | `wiki/split-generate.md` | Human mirror of this skill |
@@ -155,4 +156,6 @@ split-generate:
 - Example caption: [`splits/random.md`](../../../splits/random.md)
 - SBS architecture: [`wiki/sbs.md`](../../../wiki/sbs.md)
 - GC caption: [`splits/gc.md`](../../../splits/gc.md)
+- Pangenome caption: [`splits/pangenome.md`](../../../splits/pangenome.md)
 - `/split` skill: [`../split/SKILL.md`](../split/SKILL.md)
+- `/preprocess` skill: [`../preprocess/SKILL.md`](../preprocess/SKILL.md)

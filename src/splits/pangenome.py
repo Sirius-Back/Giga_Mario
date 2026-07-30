@@ -2,20 +2,23 @@
 
 Caption: ``splits/pangenome.md``. Wired into ``split-predict`` as ``type=pangenome``.
 
-Pipeline (strategy-owned steps):
-  1. Filter MARKED IDs to those present in PARSED (intersect).
-  2. Build a k-mer contingency / repeat graph in C++ (no pairwise distances).
-  3. Cluster regions by connected components of shared-k-mer contingency.
-  4. Assign clusters → train/val/test (Caduceus-aligned ratios; ZSV held out).
-  5. Render the region co-occurrence graph (connected nodes only).
-
-Adapt (raw → MARKED) remains outside this module; panels such as
-``ready_legnet`` already provide MARKED + PARSED.
+Pipeline:
+  1. **Adapt (A2A)** — ``raw`` → ``MARKED_pangenome`` via ``src.pipeline.adapt``
+     with the **pangenome window** (may differ from panel ``MARKED`` used for
+     LegNet/Caduceus). Invoke ``@preprocess`` / ``adapt`` when that tree is
+     missing; do not silently reuse panel ``MARKED`` unless
+     ``reuse_panel_marked=True``.
+  2. **Filter** — ``MARKED_pangenome`` ∩ ``PARSED`` → ``MARKED_parsed``.
+  3. Build C++ k-mer contingency / repeat graph on ``MARKED_parsed``.
+  4. Cluster by connected components; assign train/val/test (+ ZSV).
+  5. Render connected nodes only.
 """
 from __future__ import annotations
 
 import json
 import random
+import shutil
+import warnings
 from collections import defaultdict
 from pathlib import Path
 from typing import Any, Sequence
@@ -32,9 +35,14 @@ from src.splits.sbs.fna_io import load_fna_directory
 
 __all__ = (
     "SPLIT_ID",
+    "A2A_ADAPT_HINT",
+    "PangenomeAdaptRequiredError",
     "intersect_pangenome",
     "filter_ids_to_parsed",
+    "materialize_marked_subset",
     "materialize_marked_pangenome",
+    "adapt_pangenome_from_raw",
+    "ensure_marked_pangenome",
     "build_contingency_clusters",
     "render_contingency_graph",
     "run_pangenome_split_assign",
@@ -44,15 +52,31 @@ SPLIT_ID = "pangenome"
 DEFAULT_K = 21
 DEFAULT_MIN_SHARED = 1
 
+A2A_ADAPT_HINT = (
+    "A2A: pangenome windows may differ from panel MARKED. "
+    "Invoke @preprocess / src.pipeline.adapt with the pangenome "
+    "environment+window to write MARKED_pangenome from raw (GTF+FNA+ID.csv), "
+    "then re-run type=pangenome. "
+    "Only pass reuse_panel_marked=True when the panel MARKED window is "
+    "intentionally identical to the pangenome window."
+)
+
+
+class PangenomeAdaptRequiredError(FileNotFoundError):
+    """Raised when MARKED_pangenome is missing and adapt inputs are not provided."""
+
+    def __init__(self, message: str | None = None) -> None:
+        super().__init__(message or A2A_ADAPT_HINT)
+
 
 def intersect_pangenome(
     marked_dir: Path,
     parsed_dir: Path,
     ids: Sequence[str] | None = None,
 ) -> list[str]:
-    """Return IDs that exist in both MARKED (``.fa``) and PARSED (``.ext``).
+    """Return IDs present in both MARKED_pangenome (``.fa``) and PARSED (``.ext``).
 
-    This is the obligatory filter step before repeat-graph construction.
+    Filter step before contingency-graph construction (produces ``MARKED_parsed``).
     """
     marked_dir = Path(marked_dir)
     parsed_dir = Path(parsed_dir)
@@ -115,14 +139,14 @@ def filter_ids_to_parsed(
     return kept
 
 
-def materialize_marked_pangenome(
+def materialize_marked_subset(
     marked_dir: Path,
     out_dir: Path,
     ids: Sequence[str],
     *,
     mode: str = "symlink",
 ) -> Path:
-    """Write filtered ``MARKED_pangenome`` as symlinks (default) or hard copies."""
+    """Write a subset directory of MARKED ``*.fa`` (symlinks by default)."""
     marked_dir = Path(marked_dir)
     out_dir = Path(out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -140,6 +164,154 @@ def materialize_marked_pangenome(
         else:
             dst.write_bytes(src.read_bytes())
     return out_dir
+
+
+def materialize_marked_pangenome(
+    marked_dir: Path,
+    out_dir: Path,
+    ids: Sequence[str],
+    *,
+    mode: str = "symlink",
+) -> Path:
+    """Back-compat alias for ``materialize_marked_subset``."""
+    return materialize_marked_subset(marked_dir, out_dir, ids, mode=mode)
+
+
+def adapt_pangenome_from_raw(
+    *,
+    outdir: Path,
+    gtf_dir: Path,
+    fna_dir: Path,
+    id_csv: Path,
+    environment: str,
+    window: dict[str, int],
+    genomes: Sequence[str] | None = None,
+    max_window: int | None = None,
+    seed: int = 42,
+) -> dict[str, Path]:
+    """A2A adapt: raw GTF+FNA+ID.csv → ``outdir/MARKED_pangenome`` (+ intersect).
+
+    Reuses ``src.pipeline.adapt.run_adapt`` so pangenome windows can differ from
+    the panel ``MARKED`` produced for LegNet/Caduceus.
+    """
+    from src.pipeline.adapt import run_adapt
+
+    outdir = Path(outdir)
+    outdir.mkdir(parents=True, exist_ok=True)
+    stage = outdir / "_adapt_pangenome_stage"
+    if stage.exists():
+        shutil.rmtree(stage)
+    result = run_adapt(
+        Path(gtf_dir),
+        Path(fna_dir),
+        outdir=stage,
+        id_csv=Path(id_csv),
+        environment=environment,
+        window=window,
+        max_window=max_window,
+        genomes=list(genomes) if genomes else None,
+        seed=seed,
+    )
+    marked_src = Path(result["marked_dir"])
+    marked_pg = outdir / "MARKED_pangenome"
+    if marked_pg.exists() or marked_pg.is_symlink():
+        if marked_pg.is_dir() and not marked_pg.is_symlink():
+            shutil.rmtree(marked_pg)
+        else:
+            marked_pg.unlink()
+    marked_src.rename(marked_pg)
+    intersect_src = Path(result["intersect_csv"])
+    intersect_dst = outdir / "intersect_pangenome.csv"
+    if intersect_src.is_file():
+        intersect_src.replace(intersect_dst)
+    if stage.is_dir():
+        shutil.rmtree(stage, ignore_errors=True)
+    return {"marked_pangenome": marked_pg, "intersect_csv": intersect_dst}
+
+
+def ensure_marked_pangenome(
+    *,
+    outdir: Path,
+    marked_pangenome: Path | None = None,
+    panel_marked: Path | None = None,
+    reuse_panel_marked: bool = False,
+    gtf_dir: Path | None = None,
+    fna_dir: Path | None = None,
+    id_csv: Path | None = None,
+    environment: str | None = None,
+    window: dict[str, int] | None = None,
+    genomes: Sequence[str] | None = None,
+    max_window: int | None = None,
+    seed: int = 42,
+) -> tuple[Path, dict[str, Any]]:
+    """Resolve ``MARKED_pangenome`` (adapt from raw, reuse, or fail with A2A hint)."""
+    outdir = Path(outdir)
+    outdir.mkdir(parents=True, exist_ok=True)
+    meta: dict[str, Any] = {"source": None}
+
+    if marked_pangenome is not None:
+        mp = Path(marked_pangenome)
+        if not mp.is_dir():
+            raise FileNotFoundError(f"marked_pangenome missing: {mp}")
+        if not any(mp.glob("*.fa")):
+            raise FileNotFoundError(f"marked_pangenome has no *.fa: {mp}")
+        meta["source"] = "marked_pangenome"
+        return mp, meta
+
+    default_mp = outdir / "MARKED_pangenome"
+    if default_mp.is_dir() and any(default_mp.glob("*.fa")):
+        meta["source"] = "outdir/MARKED_pangenome"
+        return default_mp, meta
+
+    can_adapt = (
+        gtf_dir is not None
+        and fna_dir is not None
+        and id_csv is not None
+        and environment is not None
+        and window is not None
+    )
+    if can_adapt:
+        paths = adapt_pangenome_from_raw(
+            outdir=outdir,
+            gtf_dir=Path(gtf_dir),
+            fna_dir=Path(fna_dir),
+            id_csv=Path(id_csv),
+            environment=str(environment),
+            window=window,
+            genomes=genomes,
+            max_window=max_window,
+            seed=seed,
+        )
+        meta["source"] = "adapt_from_raw"
+        meta["window"] = dict(window)
+        meta["environment"] = environment
+        meta["intersect_csv"] = str(paths["intersect_csv"])
+        return paths["marked_pangenome"], meta
+
+    if reuse_panel_marked:
+        if panel_marked is None:
+            raise ValueError(
+                "reuse_panel_marked=True requires panel_marked=… "
+                "(existing panel MARKED whose window matches pangenome)"
+            )
+        pm = Path(panel_marked)
+        if not pm.is_dir():
+            raise FileNotFoundError(f"panel_marked missing: {pm}")
+        warnings.warn(
+            "reuse_panel_marked=True: using panel MARKED as MARKED_pangenome. "
+            "Only valid when the pangenome window equals the panel adapt window.",
+            UserWarning,
+            stacklevel=2,
+        )
+        meta["source"] = "reuse_panel_marked"
+        meta["panel_marked"] = str(pm)
+        return pm, meta
+
+    raise PangenomeAdaptRequiredError(
+        "MARKED_pangenome not found and adapt inputs incomplete "
+        "(need gtf_dir, fna_dir, id_csv, environment, window). "
+        + A2A_ADAPT_HINT
+    )
 
 
 def build_contingency_clusters(
@@ -335,9 +507,12 @@ def render_contingency_graph(
     json_path = outdir / "contingency_graph.json"
     json_path.write_text(json.dumps(graph_json, indent=2) + "\n", encoding="utf-8")
 
-    # DOT for Graphviz consumers
     dot_path = outdir / "contingency_graph.dot"
-    lines = ["graph G {", "  graph [overlap=false];", "  node [shape=circle, fontsize=8];"]
+    lines = [
+        "graph G {",
+        "  graph [overlap=false];",
+        "  node [shape=circle, fontsize=8];",
+    ]
     for rid in nodes:
         lines.append(f'  "{rid}" [label="{rid}\\nc{cid_map.get(rid, -1)}"];')
     for a, b, w in edges:
@@ -356,7 +531,6 @@ def render_contingency_graph(
         import numpy as np
 
         if nodes and edges:
-            # Spring layout without networkx dependency
             idx = {rid: i for i, rid in enumerate(nodes)}
             m = len(nodes)
             rng = np.random.default_rng(42)
@@ -417,7 +591,6 @@ def render_contingency_graph(
 def run_pangenome_split_assign(
     *,
     outdir: Path,
-    marked: Path,
     parsed: Path | None = None,
     id_csv: Path | None = None,
     fold_csv: Path | None = None,
@@ -431,17 +604,48 @@ def run_pangenome_split_assign(
     ratios: tuple[float, float, float] | None = None,
     plot: bool = True,
     max_edges: int = 100_000,
-    materialize_marked: bool = True,
+    # MARKED_pangenome resolution (A2A adapt vs reuse)
+    marked_pangenome: Path | None = None,
+    panel_marked: Path | None = None,
+    marked: Path | None = None,  # alias for panel_marked
+    reuse_panel_marked: bool = False,
+    gtf_dir: Path | None = None,
+    fna_dir: Path | None = None,
+    environment: str | None = None,
+    window: dict[str, int] | None = None,
+    max_window: int | None = None,
 ) -> dict[str, Any]:
-    """Filter → C++ contingency graph → cluster assign → ``split.csv`` (+ render)."""
+    """Adapt/resolve MARKED_pangenome → MARKED_parsed → contingency → ``split.csv``."""
     outdir = Path(outdir)
     outdir.mkdir(parents=True, exist_ok=True)
-    marked = Path(marked)
-    parsed_dir = Path(parsed) if parsed is not None else marked.parent / "PARSED"
+    panel = panel_marked or marked
+
+    marked_pg, source_meta = ensure_marked_pangenome(
+        outdir=outdir,
+        marked_pangenome=marked_pangenome,
+        panel_marked=panel,
+        reuse_panel_marked=reuse_panel_marked,
+        gtf_dir=gtf_dir,
+        fna_dir=fna_dir,
+        id_csv=id_csv,
+        environment=environment,
+        window=window,
+        genomes=genomes,
+        max_window=max_window,
+        seed=seed,
+    )
+
+    parsed_dir: Path
+    if parsed is not None:
+        parsed_dir = Path(parsed)
+    elif panel is not None and (Path(panel).parent / "PARSED").is_dir():
+        parsed_dir = Path(panel).parent / "PARSED"
+    else:
+        parsed_dir = marked_pg.parent / "PARSED"
 
     if ids is None:
         kept = filter_ids_to_parsed(
-            marked_dir=marked,
+            marked_dir=marked_pg,
             parsed_dir=parsed_dir,
             id_csv=id_csv,
             genomes=genomes,
@@ -449,21 +653,27 @@ def run_pangenome_split_assign(
             seed=seed,
         )
     else:
-        kept = intersect_pangenome(marked, parsed_dir, ids=ids)
+        kept = intersect_pangenome(marked_pg, parsed_dir, ids=ids)
         if max_ids is not None and len(kept) > int(max_ids):
             rng = random.Random(int(seed))
             kept = list(kept)
             rng.shuffle(kept)
             kept = sorted(kept[: int(max_ids)], key=lambda x: (len(x), x))
 
-    marked_pg = outdir / "MARKED_pangenome"
-    if materialize_marked:
-        materialize_marked_pangenome(marked, marked_pg, kept, mode="symlink")
-        seq_root = marked_pg
+    marked_parsed = materialize_marked_subset(
+        marked_pg, outdir / "MARKED_parsed", kept, mode="symlink"
+    )
+    # If we adapted into outdir and source was panel reuse, also expose a
+    # local MARKED_pangenome pointer for consumers (symlink tree of kept IDs).
+    if source_meta.get("source") == "reuse_panel_marked":
+        materialize_marked_subset(
+            marked_pg, outdir / "MARKED_pangenome", kept, mode="symlink"
+        )
+        marked_pg_out = outdir / "MARKED_pangenome"
     else:
-        seq_root = marked
+        marked_pg_out = marked_pg
 
-    seq_map = load_fna_directory(seq_root, ids=kept)
+    seq_map = load_fna_directory(marked_parsed, ids=kept)
     sequences = [seq_map[rid] for rid in kept]
     graph = build_contingency_clusters(
         sequences,
@@ -498,9 +708,11 @@ def run_pangenome_split_assign(
     summary = {
         "split_id": SPLIT_ID,
         "seed": seed,
-        "marked": str(marked),
+        "marked_pangenome": str(marked_pg_out),
+        "marked_parsed": str(marked_parsed),
+        "marked_source": source_meta,
         "parsed": str(parsed_dir),
-        "marked_pangenome": str(marked_pg) if materialize_marked else None,
+        "panel_marked": str(panel) if panel else None,
         "n_ids": len(kept),
         "k": k,
         "min_shared": min_shared,
@@ -511,6 +723,7 @@ def run_pangenome_split_assign(
         "assign_meta": assign_meta,
         "plot": plot_meta,
         "genomes": list(genomes) if genomes else None,
+        "a2a_adapt": A2A_ADAPT_HINT if source_meta.get("source") != "adapt_from_raw" else None,
     }
     (outdir / "pangenome_split_meta.json").write_text(
         json.dumps(summary, indent=2, default=str) + "\n", encoding="utf-8"

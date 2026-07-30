@@ -327,19 +327,22 @@ def _run_pangenome_split_predict(
     kmer_size: Sequence[int] | int,
     genomes: Sequence[str] | None,
     min_shared: int,
+    reuse_panel_marked: bool = False,
+    marked_pangenome: Path | None = None,
+    gtf_dir: Path | None = None,
+    fna_dir: Path | None = None,
+    environment: str | None = None,
+    window: dict[str, int] | None = None,
 ) -> Path:
-    """Pangenome path: MARKED∩PARSED → C++ contingency CC → split.csv."""
+    """Pangenome path: resolve MARKED_pangenome → MARKED_parsed → C++ CC → split.csv."""
     from src.splits.pangenome import run_pangenome_split_assign
 
-    fna_root = marked_fasta or fna
-    if fna_root is None:
-        raise ValueError(
-            "split-predict type=pangenome requires --marked (MARKED dir) or --fna"
-        )
+    panel_marked = marked_fasta or fna
     k = _normalize_pangenome_k(kmer_size)
+    # Default: if caller only passed --marked (panel), require explicit reuse flag
+    # unless they also provided adapt window / marked_pangenome.
     summary = run_pangenome_split_assign(
         outdir=outdir,
-        marked=Path(fna_root),
         parsed=Path(parsed) if parsed is not None else None,
         id_csv=Path(id_csv) if id_csv else None,
         fold_csv=Path(fold_csv) if fold_csv else None,
@@ -351,6 +354,13 @@ def _run_pangenome_split_predict(
         min_shared=int(min_shared),
         ratios=ratios,
         plot=plot,
+        marked_pangenome=Path(marked_pangenome) if marked_pangenome else None,
+        panel_marked=Path(panel_marked) if panel_marked else None,
+        reuse_panel_marked=reuse_panel_marked,
+        gtf_dir=Path(gtf_dir) if gtf_dir else None,
+        fna_dir=Path(fna_dir) if fna_dir else None,
+        environment=environment,
+        window=window,
     )
     out = Path(summary["split_csv"])
     if not out.is_file():
@@ -388,6 +398,12 @@ def run_split_predict(
     genomes: Sequence[str] | None = None,
     min_shared: int = 1,
     parsed: Path | None = None,
+    reuse_panel_marked: bool = False,
+    marked_pangenome: Path | None = None,
+    gtf_dir: Path | None = None,
+    fna_dir: Path | None = None,
+    environment: str | None = None,
+    window: dict[str, int] | None = None,
 ) -> Path:
     """
     Write `{outdir}/split.csv` with columns ID|train_test|fold.
@@ -498,6 +514,12 @@ def run_split_predict(
             kmer_size=kmer_size,
             genomes=genomes,
             min_shared=min_shared,
+            reuse_panel_marked=reuse_panel_marked,
+            marked_pangenome=marked_pangenome,
+            gtf_dir=gtf_dir,
+            fna_dir=fna_dir,
+            environment=environment,
+            window=window,
         )
 
     fold_map = _load_optional_table(fold_csv, min_cols=["ID", "fold"], label="fold.csv")
@@ -700,6 +722,40 @@ def main(argv: list[str] | None = None) -> int:
         default=1,
         help="Min shared k-mers to emit a contingency edge (type=pangenome)",
     )
+    p.add_argument(
+        "--marked-pangenome",
+        type=Path,
+        default=None,
+        help="Existing MARKED_pangenome dir (pangenome window; preferred over panel MARKED)",
+    )
+    p.add_argument(
+        "--reuse-panel-marked",
+        action="store_true",
+        help="Opt-in: reuse --marked as MARKED_pangenome only when windows match",
+    )
+    p.add_argument(
+        "--gtf-dir",
+        type=Path,
+        default=None,
+        help="Raw GTF dir for A2A adapt → MARKED_pangenome (type=pangenome)",
+    )
+    p.add_argument(
+        "--fna-dir",
+        type=Path,
+        default=None,
+        help="Raw FNA dir for A2A adapt → MARKED_pangenome (type=pangenome)",
+    )
+    p.add_argument(
+        "--environment",
+        default=None,
+        choices=["gene", "random"],
+        help="adapt environment for A2A MARKED_pangenome (type=pangenome)",
+    )
+    p.add_argument(
+        "--window",
+        default=None,
+        help='adapt window JSON for A2A MARKED_pangenome, e.g. \'{"pos1":-100,"pos2":100}\'',
+    )
     args = p.parse_args(argv)
     n_clusters: int | Literal["auto"]
     if str(args.n_clusters).lower() == "auto":
@@ -715,6 +771,14 @@ def main(argv: list[str] | None = None) -> int:
         kmer_size = tuple(int(x) for x in args.kmer_size)
         if len(kmer_size) == 1:
             kmer_size = kmer_size[0]
+    window: dict[str, int] | None = None
+    if args.window is not None:
+        import json as _json
+
+        decoded = _json.loads(args.window)
+        if not isinstance(decoded, dict):
+            p.error("--window must decode to a JSON object")
+        window = {str(k): int(v) for k, v in decoded.items()}
     path = run_split_predict(
         outdir=args.outdir,
         type=args.type,
@@ -744,6 +808,12 @@ def main(argv: list[str] | None = None) -> int:
         genomes=list(args.genomes) if args.genomes else None,
         min_shared=int(args.min_shared),
         parsed=args.parsed,
+        reuse_panel_marked=bool(args.reuse_panel_marked),
+        marked_pangenome=args.marked_pangenome,
+        gtf_dir=args.gtf_dir,
+        fna_dir=args.fna_dir,
+        environment=args.environment,
+        window=window,
     )
     print(path)
     return 0

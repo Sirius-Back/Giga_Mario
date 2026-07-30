@@ -168,7 +168,7 @@ Register every written report in `artifact-registry.md` / `docs/artifact-registr
 
 | Decision | Rationale | Logged in |
 |----------|-----------|-----------|
-| SLURM 32 CPU download | slurm-execution-policy | method-decision.md |
+| Local heavy job (PID + ETA in queue.md) | local-job-queue | queue.md |
 | Skip re-download SRR123 | validated manifest | data-preparation-report.md |
 
 **Report path:** docs/execution/<task-id>.md

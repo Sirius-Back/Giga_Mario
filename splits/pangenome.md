@@ -9,14 +9,15 @@ aliases:
 
 # Description
 
-Construct a pangenome-style **repeat / contingency graph** from filtered MARKED
-sequences and assign train / validation / test at **connected-component** grain.
-Highly similar regions that share k-mers fall into the same fold without building
-pairwise distance matrices or fully resolving graph bubbles.
+Construct a pangenome-style **repeat / contingency graph** from
+**pangenome-window** sequences and assign train / validation / test at
+**connected-component** grain. Highly similar regions that share k-mers fall
+into the same fold without pairwise distance matrices or full bubble resolution.
 
-Inspired by Minigraph-Cactus-style pangenome graphs, but scoped to ML dataset
-splitting. Fast path: C++ rolling k-mer contingency + union-find
-(`src/splits/pangenome_native`).
+**Important:** the pangenome genomic window may differ from panel `MARKED`
+(LegNet/Caduceus). Do **not** silently reuse panel `MARKED`. Produce
+`MARKED_pangenome` from raw via adapt (`@preprocess` / `src.pipeline.adapt`) —
+documented **A2A** handoff — then filter to `MARKED_parsed`.
 
 # Split
 
@@ -36,16 +37,19 @@ zero_shot:
 
 # Pipeline
 
-1. **Adapt** (external): `raw` → panel `MARKED` (+ PARSED / PREDICT). Optional
-   materialization of filtered `MARKED_pangenome` under the split outdir.
-2. **Filter / intersect**: retain only IDs present in both MARKED and PARSED
-   (`intersect_pangenome`).
-3. **Repeat / contingency graph** (C++): stream k-mers; collapse identical k-mer
-   keys; union regions that share ≥1 k-mer (no all-pairs distances).
+1. **Adapt (A2A → `@preprocess` / `adapt`)** — `raw` (GTF+FNA+ID.csv) →
+   `MARKED_pangenome` with the **pangenome** `environment`/`window` (may differ
+   from panel MARKED). Writes `intersect_pangenome.csv` when adapting here.
+2. **Filter** — `MARKED_pangenome` ∩ `PARSED` → `MARKED_parsed`
+   (`python -m src.splits.intersect_pangenome`).
+3. **Repeat / contingency graph** (C++) on `MARKED_parsed`: stream k-mers;
+   union regions that share ≥1 k-mer (no all-pairs distances).
 4. **Cluster**: connected components of the region contingency graph.
 5. **Assign** clusters → train / val / test (+ optional ZSV).
-6. **Render**: region co-occurrence graph with **connected nodes only**
-   (JSON, DOT, PDF/PNG).
+6. **Render**: region co-occurrence graph with **connected nodes only**.
+
+Opt-in only: `reuse_panel_marked=True` when the panel MARKED window is
+**intentionally identical** to the pangenome window (smoke tests).
 
 # Graph construction
 
@@ -65,22 +69,31 @@ zero_shot:
 - name: GigaMario pangenome contingency split
   url: https://github.com/ (local toolkit)
   paper: —
-  split_location: `src/splits/pangenome.py` + `src/splits/pangenome_native/`
+  split_location: `src/splits/pangenome.py` + `src/splits/pangenome_native/` + `src/splits/intersect_pangenome.py`
   run: |
+    # Preferred: adapt pangenome window from raw, then split-predict
     python -m src.splits.pangenome_native.build
     python -m src.pipeline.split_predict \
       --outdir output/pangenome_split \
       --type pangenome \
       --id-csv ready_legnet/ID.csv \
       --fold ready_legnet/fold.csv \
-      --marked ready_legnet/MARKED \
+      --parsed ready_legnet/PARSED \
+      --gtf-dir raw/gtf \
+      --fna-dir raw/fna \
+      --environment gene \
+      --window '{"pos1":-100,"pos2":100}' \
       --seed 42 \
       --kmer-size 21 \
       --plot
+
+    # Or pass an existing MARKED_pangenome tree:
+    #   --marked-pangenome path/to/MARKED_pangenome
   notes: |
-    Filter: MARKED ∩ PARSED (PARSED defaults to `<marked>/../PARSED`).
-    Optional genome subset via strategy API `genomes=[...]`.
-    Diagnostics: `figures/contingency_graph.{json,dot,pdf,png}`.
+    A2A: if MARKED_pangenome is missing, agents must invoke @preprocess/adapt
+    with the pangenome window — do not assume ready_*/MARKED matches.
+    Filter: MARKED_pangenome ∩ PARSED → MARKED_parsed.
+    Diagnostics: figures/contingency_graph.{json,dot,pdf,png}.
 
 - name: Minigraph-Cactus
   url: https://github.com/ComparativeGenomicsToolkit/cactus
@@ -95,3 +108,4 @@ zero_shot:
 
 - Minigraph-Cactus (Comparative Genomics Toolkit)
 - Project SBS / split-generate contracts: `wiki/sbs.md`, `wiki/split-generate.md`
+- Adapt stage: `wiki/architecture.md` (`src.pipeline.adapt`)

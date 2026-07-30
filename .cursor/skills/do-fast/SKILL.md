@@ -26,7 +26,7 @@ Execute the prepared scientific project until every reachable task completes or 
 
 This cuts the failure mode seen on short pipelines (e.g. `/split` smoketests): six full audits + six code-reviews for local I/O.
 
-This skill must never duplicate functionality implemented by other project skills. Follow **task-status**, **slurm-execution-policy**, and other active project rules. Resume from the latest checkpoint when restarted — **only for the same run** (see [Checkpoint / new run](#checkpoint--new-run)).
+This skill must never duplicate functionality implemented by other project skills. Follow **task-status**, **local-job-queue**, and other active project rules. Resume from the latest checkpoint when restarted — **only for the same run** (see [Checkpoint / new run](#checkpoint--new-run)).
 
 Prerequisites: prefer a successful `@prepare` run; always run `@verify-todo` before deciding READY work.
 
@@ -87,7 +87,7 @@ MAIN LOOP:
      Executable = Status READY, prerequisites COMPLETED, inputs exist (or this task produces them).
      Never treat TODO|BLOCKED|FAILED|SKIPPED|RUNNING as newly executable.
      If none → go to END GATES (do not EXIT A until end-gates pass).
-  3. Resource-gate the READY set (CPU/mem/runtime; throughput over agent count; no oversubscription; even CPUs; SLURM policy).
+  3. Resource-gate the READY set (CPU/mem/runtime; throughput over agent count; no oversubscription; even CPUs; **local-job-queue**: ≥5% RAM free, register large jobs in `queue.md`).
   4. For each approved task in the batch, launch one execution path that repeatedly:
      4.1 @prompt-orchestrator — assign one task; Status RUNNING; pass task ID, ./todo/<task>.md, I/O, skills.
      4.2 Code-review: SKIP in lean (deferred to END). In strict only: @code-review; Critical|Major → return to 4.1 (max 3) else FAILED|RECOVERABLE.
@@ -198,7 +198,7 @@ Chat: **one short summary per wave**, not per micro-gate.
 
 ## Resource gating
 
-Before parallel launch, estimate **CPU / Memory / Runtime** per task. Avoid oversubscription; prefer **throughput over agent count**; even CPUs; respect **slurm-execution-policy**. If Unknown, reduce concurrency.
+Before parallel launch, estimate **CPU / Memory / Runtime** per task. Avoid oversubscription; prefer **throughput over agent count**; even CPUs; respect **local-job-queue** (≥5% RAM free; wait on `queue.md` PIDs when load is high). If Unknown, reduce concurrency.
 
 ---
 

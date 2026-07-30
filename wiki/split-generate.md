@@ -108,4 +108,6 @@ Pangenome native lib:
 python -m src.splits.pangenome_native.build
 ```
 
+**A2A (pangenome):** when `MARKED_pangenome` is missing or the pangenome window ≠ panel `MARKED`, invoke `@preprocess` / `src.pipeline.adapt` (raw → `MARKED_pangenome`), then `python -m src.splits.intersect_pangenome` → `MARKED_parsed`. Do not silently reuse panel MARKED.
+
 Then assign + materialize with `/split` (runner under `src/run/run_id/`).

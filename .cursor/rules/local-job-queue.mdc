@@ -1,0 +1,89 @@
+---
+description: >-
+  Local heavy-job queue: register large CPU/RAM/GPU jobs in queue.md; wait on
+  high load; keep ≥5% RAM free (no SLURM — full RAM drops the connection).
+alwaysApply: true
+---
+
+# Local Job Queue
+
+There is **no SLURM** on this machine. Heavy jobs run locally. Overloading RAM
+drops the remote connection — treat memory headroom as a hard constraint.
+
+## RAM / CPU headroom (hard)
+
+- Keep **at least 5% of total RAM free at all times** (available / MemAvailable).
+- Do **not** launch or continue stacking jobs that would push free RAM below 5%.
+- Do not overload CPU either: leave headroom for the OS and the agent session.
+- If free RAM is already ≤5% (or CPU is saturated): **do not launch**; follow
+  **Wait on high load** below.
+
+Check before every large launch, e.g.:
+
+```bash
+free -h
+# or: awk '/MemAvailable/ {a=$2} /MemTotal/ {t=$2} END {printf "%.1f%% free\n", 100*a/t}' /proc/meminfo
+```
+
+## Large jobs → write `queue.md`
+
+If the agent launches a **large** CPU / RAM / GPU job, **append** an entry to
+project-root **`queue.md`** (create the file if missing) with at least:
+
+- **launch time** (ISO-8601 local or UTC, stated)
+- **job** (command / script / purpose)
+- **PID** (and related IDs: parent shell, GPU indices, log path, etc.)
+- **estimated time** (wall-clock duration expected until completion)
+
+Also record when useful: CPUs, RAM request, GPUs, cwd, log path, status
+(`RUNNING` / `COMPLETED` / `FAILED`).
+
+Update the same entry to **COMPLETED** / **FAILED** when the job finishes; do
+not delete history — append or mark status in place.
+
+### Entry template
+
+```markdown
+### <job-id-or-short-name> — RUNNING
+- **launch time:** 2026-07-30T16:40:00+03:00
+- **job:** `python -m src.caduceus ...`
+- **PID:** 12345 (parent 12300)
+- **estimated time:** 2h
+- **resources:** 16 CPU, ~32G RAM, 4 GPU
+- **log:** logs/job_%PID%.out
+- **status:** RUNNING
+```
+
+## Wait on high load
+
+If CPU and/or RAM load is **too high** (including free RAM ≤5%, or contention
+with entries still `RUNNING` in `queue.md`):
+
+1. **Read `queue.md`** — identify active heavy jobs (PID, estimated time).
+2. **Wait** for those jobs to finish: use `wait` (shell job wait) and/or poll
+   until the PID exits.
+3. Wait at least until the **estimated time**, and **longer if needed** until
+   the process is actually done and free RAM recovers above 5%.
+4. Only then launch the next large job (and register it in `queue.md`).
+
+Do not busy-loop without backoff; prefer `wait <pid>` or sleep intervals that
+respect the remaining estimated time.
+
+## Examples
+
+```
+❌ BAD
+Launch 4× GPU train + assembly while free RAM is ~2%; no queue.md entry.
+
+✅ GOOD
+free shows 40% free → append queue.md (launch time, job, PID, ETA 3h) → run job.
+Later: load high → read queue.md → wait PID until ETA (+extra) → then next job.
+```
+
+```
+❌ BAD
+Ignore queue.md and start another 64G job; connection dies when RAM hits 100%.
+
+✅ GOOD
+Refuse launch while free RAM ≤5%; wait on queued PIDs; keep ≥5% MemAvailable.
+```

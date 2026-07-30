@@ -2,7 +2,7 @@
 name: prompt-orchestrator
 description: >-
   Single-task executor: run exactly one assigned TODO task by discovering project
-  skills/rules, delegating within that task, selecting SLURM/local environments,
+  skills/rules, delegating within that task, selecting local/cluster environments,
   recovering failures, and writing docs/execution/<task-id>.md. Not a project
   scheduler — use @do for waves, graph order, other TODO tasks, and
   docs/execution-report.md.
@@ -122,7 +122,7 @@ Only ask the user for clarification when execution cannot safely continue (**mis
 
 | Governance | When | Action |
 |------------|------|--------|
-| **Rules only** | Constraints, standards, or policies suffice (e.g. how to write, validate, allocate SLURM, never fabricate) and no specialized multi-step workflow skill is needed | Apply all relevant rules automatically; **invoke no skills** |
+| **Rules only** | Constraints, standards, or policies suffice (e.g. how to write, validate, gate local CPU/RAM via **local-job-queue**, never fabricate) and no specialized multi-step workflow skill is needed | Apply all relevant rules automatically; **invoke no skills** |
 | **Skills only** | Request needs a specialized workflow (acquire data, draft Methods, monitor jobs) and rules are ambient constraints | Apply all relevant rules automatically; invoke the **minimum necessary** skills |
 | **Both** | Specialized skill(s) required **and** rules materially shape the work | Apply all relevant rules automatically; invoke the **minimum necessary** skills under those constraints |
 
@@ -205,19 +205,14 @@ Possible environments:
 - Conda environments
 - Docker
 - Apptainer/Singularity
-- SLURM
 - existing workflow managers (Nextflow, Snakemake, etc.)
 
-**Large computational jobs** should automatically use SLURM per **slurm-execution-policy** unless the user explicitly requests local execution.
+**Large CPU / RAM / GPU jobs** run **locally** under **local-job-queue** (no SLURM on this host):
 
-Whenever SLURM is selected:
-
-- estimate CPUs (16 or 32 default; even; up to 64 if justified)
-- estimate memory
-- estimate wall time
-- generate sbatch scripts
-- submit jobs
-- record job IDs
+- estimate CPUs, memory, wall time, GPUs
+- confirm **≥5% RAM** will remain free before launch
+- launch the job and append **`queue.md`** (launch time, job, PID, estimated time, resources, log)
+- on high load: read `queue.md`, `wait` on PIDs until estimated time (and longer if needed)
 
 Prefer Snakemake/Nextflow when the project already defines the step.
 
@@ -234,7 +229,7 @@ Observe every job/step launched **for the assigned task** with **lightweight** c
 - logs indicate submission succeeded
 - this task’s immediate steps completed or handed off to the scheduler
 
-For SLURM: confirm job was accepted (`sbatch` JobID); do **not** run a long supervision loop.
+For local heavy jobs: confirm the process started and `queue.md` lists PID + ETA; do **not** run a long supervision loop.
 
 **Never invoke `@monitor` from `@prompt-orchestrator`.** Continuous job supervision belongs exclusively to `@do` (step 4.3) after this skill returns.
 
@@ -253,9 +248,9 @@ Possible causes include:
 - software not installed
 - dependency conflicts
 - environment activation failure
-- SLURM submission failure
+- job launch / queue registration failure
 - scheduler limits
-- insufficient memory
+- insufficient memory (free RAM ≤5%)
 - insufficient CPUs
 - timeout
 - incorrect parameters
@@ -323,7 +318,7 @@ Include:
 - execution environments
 - software used
 - jobs submitted
-- SLURM job IDs
+- `queue.md` job entries (PID, ETA)
 - completed within-task steps
 - recovered failures
 - remaining issues

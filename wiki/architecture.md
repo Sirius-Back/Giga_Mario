@@ -145,9 +145,10 @@ Example rule: `GCF_000005845.2|genome|zsv` → resolve via `id_rule` (`id_col_1=
 
 | | |
 |--|--|
-| **Input** | `outdir`; `type=random\|gc` (+ future SBS types); optional `id_csv`, `fold`, `stratification`, `marked`/`fna`, … |
+| **Input** | `outdir`; `type=random\|gc\|kmer\|hashfrag\|pangenome`; optional `id_csv`, `fold`, `stratification`, `marked`/`fna`, … |
 | **Assignment (random)** | Imports `assign_folds_random` / `assign_folds_stratified` from `src.splits.random` |
 | **Assignment (gc)** | SBS: FNA/MARKED → feature table (`GC_pct`, `AAA_pct`) → cluster folds (default DBSCAN) → fold-grain train/test/val (`src.splits.gc` / `src.splits.sbs`) |
+| **Assignment (pangenome)** | A2A adapt → `MARKED_pangenome` (pangenome window; may ≠ panel MARKED) → filter ∩ PARSED → `MARKED_parsed` → C++ contingency CC → fold-grain train/test/val. Opt-in `reuse_panel_marked` only when windows match. |
 | **Stratification** | Random: all strat columns (composite key). SBS: aggregate strat **per fold** (numeric→sum, categorical→mode) then stratify fold→train/test/val |
 | **fold.csv** | `zsv` / `zeroshotvalidation` → `train_test=zsv` (excluded from assignment). If omitted: warning `Warning: folds are not included` |
 | **Output** | `{outdir}/split.csv` (`ID|train_test|fold`); SBS also writes `feature_table.csv`, `sbs_assignment.csv`, optional PCA figures |
@@ -184,6 +185,9 @@ Unchanged roles: fine-tune on SPLIT trees, plot logs, rebuild adversarial panels
 | FNA → features (SBS) | `compute_feature_table` | `src.splits.sbs.features` |
 | features → assignment (SBS) | `assign_from_features` | `src.splits.sbs.assign` |
 | GC strategy | `run_gc_split_assign` | `src.splits.gc` |
+| Pangenome adapt (A2A) | `adapt_pangenome_from_raw` / `ensure_marked_pangenome` | `src.splits.pangenome` → `src.pipeline.adapt` |
+| Pangenome filter | `intersect_pangenome` → `MARKED_parsed` | `src.splits.intersect_pangenome` |
+| Pangenome assign | `run_pangenome_split_assign` | `src.splits.pangenome` |
 | E3 → SPLIT (+ ZSV trees) | `split` | `src.pipeline.split` |
 | SPLIT → logs | `train` | `src.pipeline.train` |
 | ZSV trees → `logs/zero_shot_metrics.json` | `zsv_eval` | `src.pipeline.zsv_eval` (+ `src.caduceus.evaluate_zsv_root` / LegNet) |

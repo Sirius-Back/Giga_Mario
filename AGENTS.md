@@ -7,6 +7,7 @@
 | `todo.md` | Task status (TODO / READY / RUNNING / BLOCKED / FAILED / RECOVERABLE / COMPLETED / SKIPPED) |
 | `method-decision.md` | Method choices + rationale |
 | `artifact-registry.md` | Register every generated deliverable |
+| `queue.md` | Large local CPU/RAM/GPU job registry (PID, ETA); see `local-job-queue` rule |
 | `monitoring-report.md` | Job monitoring output |
 | `docs/adapt.md` | `@adapt` Caduceus-prep overview |
 | `docs/caduceus_format.md` | Caduceus fine-tune format notes |
