@@ -193,6 +193,15 @@ Unchanged roles: fine-tune on SPLIT trees, plot logs, rebuild adversarial panels
 | ZSV trees → `logs/zero_shot_metrics.json` | `zsv_eval` | `src.pipeline.zsv_eval` (+ `src.caduceus.evaluate_zsv_root` / LegNet) |
 | logs → figures | `train-viz` | `src.pipeline.train_viz` |
 
+## SBS large-panel checkpoints (resume without full recount)
+
+Full-panel k-mer (e.g. k=7, ~400k×16k) must not be one all-or-nothing write in RAM only:
+
+1. **Features** — after counting, write **`feature_table.npz` atomically** (`.tmp.npz` → rename) and **`stage_features_done.json`**. If the process dies later, `run_kmer_split_assign` **auto-reuses** the npz when `split.csv` is missing (`continue_from_features` / re-run split).
+2. **Elbow** — each k’s inertia is appended to **`elbow_inertias.json`** (atomic replace) so `kmeans_elbow` can skip completed ks.
+3. **Assign** — large float32 panels standardize **in place** and drop the parent matrix after subset; then **`stage_assign_done.json`** + `sbs_assignment.csv` + `split.csv`.
+4. **Serialize** concurrent `cpu_ram_heavy` assigns (queue politics) so two dense matrices are not clustered at once.
+
 ## Artifact shapes
 
 | Artifact | Required columns / content |
@@ -204,6 +213,10 @@ Unchanged roles: fine-tune on SPLIT trees, plot logs, rebuild adversarial panels
 | `split.csv` | `ID\|train_test\|fold` (`train`/`test`/`val`/`zsv`) |
 | `sbs_assignment.csv` | `region\|cluster\|train_test\|fold\|additional` (SBS strategies) |
 | `feature_table.csv` | `region` + SBS feature columns (e.g. `GC_pct\|AAA_pct`) |
+| `feature_table.npz` | Large SBS panels: durable matrix dump (`ids`, `feature_names`, `matrix`) |
+| `stage_features_done.json` | Marker after atomic npz write (resume without recount) |
+| `elbow_inertias.json` | Per-k inertia checkpoint for `kmeans_elbow` (resume mid-elbow) |
+| `stage_assign_done.json` | Marker after `sbs_assignment.csv` + `split.csv` |
 | `predict.csv` (merged) | `id\|predict_var1\|…` |
 | `predict.csv` (mapped) | `id\|sample_id\|predict_var1\|…` |
 | `intersect.csv` | `ID1\|ID2\|intersection_size` |

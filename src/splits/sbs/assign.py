@@ -69,17 +69,23 @@ def normalize_cluster_method(method: str | ClusterMethod) -> ClusterMethod:
     return _CLUSTER_METHOD_ALIASES[key]
 
 
-def _standardize(x: np.ndarray) -> np.ndarray:
-    """Column z-score; keep float32 and avoid an extra float64 full copy."""
+def _standardize(x: np.ndarray, *, inplace: bool = False) -> np.ndarray:
+    """Column z-score.
+
+    For large float32 matrices, ``inplace=True`` mutates ``x`` and returns it
+    (avoids a second ~n×d resident copy that OOM-killed full-panel k=7 assign).
+    """
     x = np.asarray(x)
     if x.dtype == np.float32:
-        out = np.array(x, dtype=np.float32, copy=True, order="C")
+        out = x if inplace else np.array(x, dtype=np.float32, copy=True, order="C")
         mu = out.mean(axis=0)
         sd = out.std(axis=0)
         sd = np.where(sd < 1e-12, np.float32(1.0), sd.astype(np.float32, copy=False))
         out -= mu
         out /= sd
         return out
+    if inplace:
+        raise ValueError("inplace standardize only supported for float32 matrices")
     mu = x.mean(axis=0)
     sd = x.std(axis=0)
     sd = np.where(sd < 1e-12, 1.0, sd)
@@ -206,7 +212,12 @@ def _cluster_kmeans(x: np.ndarray, n_clusters: int, *, seed: int) -> np.ndarray:
 
 
 def _cluster_kmeans_elbow(
-    x: np.ndarray, *, seed: int, k_min: int, k_max: int | None
+    x: np.ndarray,
+    *,
+    seed: int,
+    k_min: int,
+    k_max: int | None,
+    checkpoint_path: Path | None = None,
 ) -> tuple[np.ndarray, dict[str, Any]]:
     n = x.shape[0]
     # Full-panel elbow: cap k search — many MiniBatch fits × n×d blew RAM (run13/14).
@@ -214,9 +225,24 @@ def _cluster_kmeans_elbow(
     upper = min(k_max or max(3, int(np.sqrt(n))), n - 1 if n > 1 else 1, hard_cap)
     lower = max(1, min(k_min, upper))
     inertias: dict[int, float] = {}
+    if checkpoint_path is not None and checkpoint_path.is_file():
+        try:
+            raw = json.loads(checkpoint_path.read_text(encoding="utf-8"))
+            for kk, vv in (raw.get("inertias") or {}).items():
+                inertias[int(kk)] = float(vv)
+            print(
+                f"[assign] resumed elbow inertias from {checkpoint_path} "
+                f"({len(inertias)} ks)",
+                flush=True,
+            )
+        except (json.JSONDecodeError, TypeError, ValueError) as exc:
+            print(f"[assign] ignoring bad elbow checkpoint: {exc}", flush=True)
+            inertias = {}
     n_init = 3 if n >= 100_000 else (5 if n >= MINIBATCH_KMEANS_N else 10)
     for k in range(lower, upper + 1):
-        # Reuse _cluster_kmeans path's estimator family via a fit-only call
+        if k in inertias:
+            print(f"[assign] kmeans_elbow skip k={k} (checkpointed)", flush=True)
+            continue
         if n >= MINIBATCH_KMEANS_N:
             from sklearn.cluster import MiniBatchKMeans
 
@@ -233,7 +259,25 @@ def _cluster_kmeans_elbow(
         print(f"[assign] kmeans_elbow fit k={k}/{upper} n={n}", flush=True)
         model.fit(x)
         inertias[k] = float(model.inertia_)
+        if checkpoint_path is not None:
+            checkpoint_path.parent.mkdir(parents=True, exist_ok=True)
+            tmp = checkpoint_path.with_suffix(checkpoint_path.suffix + ".tmp")
+            tmp.write_text(
+                json.dumps(
+                    {
+                        "inertias": {str(a): b for a, b in sorted(inertias.items())},
+                        "lower": lower,
+                        "upper": upper,
+                        "n": n,
+                    },
+                    indent=2,
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            tmp.replace(checkpoint_path)
     k_best = _elbow_k(inertias)
+    print(f"[assign] kmeans_elbow best k={k_best}; final fit", flush=True)
     labels = _cluster_kmeans(x, k_best, seed=seed)
     return labels, {
         "k": k_best,
@@ -241,6 +285,7 @@ def _cluster_kmeans_elbow(
         "selection": "elbow",
         "k_max_cap": hard_cap,
         "n_init": n_init,
+        "checkpoint": str(checkpoint_path) if checkpoint_path else None,
     }
 
 
@@ -332,6 +377,7 @@ def cluster_feature_table(
     k_max: int | None = None,
     dbscan_eps: float | None = None,
     dbscan_min_samples: int = 5,
+    elbow_checkpoint_path: Path | None = None,
 ) -> tuple[dict[str, int], dict[str, Any]]:
     """Return region→cluster id map from the feature matrix.
 
@@ -340,24 +386,35 @@ def cluster_feature_table(
 
     - ``dbscan`` / ``auto`` with n > ``DBSCAN_MAX_N`` → MiniBatchKMeans elbow
     - ``hierarchical`` with n > 5000 → ValueError (caller should switch method)
+    - float32 panels with n×d ≥ 5e6: standardize **in place** (no second matrix copy)
     """
     method = normalize_cluster_method(method)
-    x = _standardize(features.matrix)
+    n_cells = int(features.n) * int(features.n_features)
+    inplace = features.matrix.dtype == np.float32 and n_cells >= 5_000_000
+    x = _standardize(features.matrix, inplace=inplace)
     meta: dict[str, Any] = {
         "method_requested": method,
         "feature_names": list(features.feature_names),
         "supported_methods": list(CLUSTER_METHODS),
+        "standardize_inplace": inplace,
     }
     used: str
     labels: np.ndarray
     k_info: dict[str, Any] = {}
     n = int(x.shape[0])
 
+    def _elbow() -> tuple[np.ndarray, dict[str, Any]]:
+        return _cluster_kmeans_elbow(
+            x,
+            seed=seed,
+            k_min=k_min,
+            k_max=k_max,
+            checkpoint_path=elbow_checkpoint_path,
+        )
+
     # --- dispatch by method (with documented large-n fallbacks) ---
     if method in ("dbscan", "auto") and n > DBSCAN_MAX_N:
-        labels, k_info = _cluster_kmeans_elbow(
-            x, seed=seed, k_min=k_min, k_max=k_max
-        )
+        labels, k_info = _elbow()
         used = "kmeans_elbow"
         meta["fallback"] = "dbscan_large_n"
         meta["dbscan_max_n"] = DBSCAN_MAX_N
@@ -368,9 +425,7 @@ def cluster_feature_table(
         meta["dbscan"] = db_meta
         n_lab = len(set(int(v) for v in labels.tolist()))
         if n_lab < 2:
-            labels, k_info = _cluster_kmeans_elbow(
-                x, seed=seed, k_min=k_min, k_max=k_max
-            )
+            labels, k_info = _elbow()
             used = "kmeans_elbow"
             meta["fallback"] = "dbscan_collapsed"
         else:
@@ -382,9 +437,7 @@ def cluster_feature_table(
         meta["dbscan"] = db_meta
         used = "dbscan"
     elif method == "kmeans_elbow":
-        labels, k_info = _cluster_kmeans_elbow(
-            x, seed=seed, k_min=k_min, k_max=k_max
-        )
+        labels, k_info = _elbow()
         used = "kmeans_elbow"
     elif method == "hierarchical":
         if n_clusters == "auto":
@@ -555,6 +608,7 @@ def assign_from_features(
     additional_by_region: dict[str, Any] | None = None,
     dbscan_eps: float | None = None,
     dbscan_min_samples: int = 5,
+    elbow_checkpoint_path: Path | None = None,
 ) -> tuple[list[dict[str, str]], dict[str, Any]]:
     """Contract C2: FeatureTable → assignment rows.
 
@@ -601,6 +655,12 @@ def assign_from_features(
         return rows, meta
 
     sub = features.subset(assignable_ids)
+    # Drop parent matrix after subset copy so we do not hold two full n×d panels.
+    large_panel = int(features.n) * int(features.n_features) >= 5_000_000
+    if large_panel:
+        object.__setattr__(
+            features, "matrix", np.empty((0, 0), dtype=np.float32)
+        )
     if precomputed_clusters is not None:
         cluster_map = {rid: int(precomputed_clusters[rid]) for rid in assignable_ids}
         cluster_meta = {"method_used": "precomputed"}
@@ -612,6 +672,7 @@ def assign_from_features(
             seed=seed,
             dbscan_eps=dbscan_eps,
             dbscan_min_samples=dbscan_min_samples,
+            elbow_checkpoint_path=elbow_checkpoint_path,
         )
     meta["cluster"] = cluster_meta
 
@@ -644,15 +705,19 @@ def assign_from_features(
     )
     meta["train_test_by_fold"] = fold_to_tt
 
-    feat_index = {rid: i for i, rid in enumerate(features.ids)}
+    # Large panels: do NOT embed n×d floats into additional JSON (OOM / huge CSV).
+    embed_features = not large_panel
+    meta["additional_embeds_features"] = embed_features
+    feat_index = {rid: i for i, rid in enumerate(sub.ids)}
     for rid in assignable_ids:
         fold_label = region_fold[rid]
         extra_obj: dict[str, Any] = {"cluster_method": cluster_meta.get("method_used")}
         if additional_by_region and rid in additional_by_region:
             extra_obj["user"] = additional_by_region[rid]
-        ix = feat_index[rid]
-        for j, name in enumerate(features.feature_names):
-            extra_obj[name] = float(features.matrix[ix, j])
+        if embed_features:
+            ix = feat_index[rid]
+            for j, name in enumerate(sub.feature_names):
+                extra_obj[name] = float(sub.matrix[ix, j])
         rows.append(
             {
                 "region": rid,

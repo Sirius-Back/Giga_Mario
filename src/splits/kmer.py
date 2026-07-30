@@ -110,12 +110,22 @@ def run_kmer_split_assign(
     k_arg = kmer_length if kmer_length is not None else k
     k_list = normalize_k_list(k_arg)
 
+    # Auto-resume: durable feature dump present and split.csv not yet written.
+    if features_npz is None:
+        auto_npz = outdir / "feature_table.npz"
+        if auto_npz.is_file() and not (outdir / "split.csv").is_file():
+            features_npz = auto_npz
+            print(
+                f"kmer: auto-resume features from {auto_npz} "
+                "(split.csv missing)",
+                flush=True,
+            )
+
     npz_reuse = Path(features_npz) if features_npz is not None else None
     if npz_reuse is not None:
         print(f"kmer: reusing features from {npz_reuse}", flush=True)
         from src.pipeline.mem_guard import ensure_allocation_fits, wait_for_ram_headroom
 
-        # Rough peak: matrix + standardize copy
         wait_for_ram_headroom(0.95, label="kmer_assign_reuse")
         features = FeatureTable.load_npz(npz_reuse, backend="kmer")
         ensure_allocation_fits(
@@ -169,9 +179,25 @@ def run_kmer_split_assign(
         ratios=ratios,
         dbscan_eps=dbscan_eps,
         dbscan_min_samples=dbscan_min_samples,
+        elbow_checkpoint_path=outdir / "elbow_inertias.json",
     )
     assign_path = write_assignment_table(rows, outdir / "sbs_assignment.csv")
     split_csv = assignment_rows_to_split_csv(rows, outdir)
+    (outdir / "stage_assign_done.json").write_text(
+        json.dumps(
+            {
+                "assignment_csv": str(assign_path),
+                "split_csv": str(split_csv),
+                "cluster_method": cluster_method,
+                "n_clusters": n_clusters,
+                "assign_meta": meta,
+            },
+            indent=2,
+            default=str,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
 
     plot_meta: dict[str, Any] | None = None
     if plot:

@@ -1,6 +1,7 @@
 """Feature-table contract for split-by-similarity (preferred over dense distances)."""
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Mapping, Protocol, Sequence, runtime_checkable
@@ -81,14 +82,30 @@ class FeatureTable:
         return (x - mu) / sd
 
     def write_npz(self, path: Path) -> Path:
-        """Compressed audit dump (ids, feature_names, matrix)."""
+        """Atomic compressed dump (ids, feature_names, matrix) via ``.tmp`` + rename."""
         path = Path(path)
         path.parent.mkdir(parents=True, exist_ok=True)
+        tmp = path.with_suffix(path.suffix + ".tmp.npz")
         np.savez_compressed(
-            path,
+            tmp,
             ids=np.asarray(self.ids),
             feature_names=np.asarray(self.feature_names),
             matrix=self.matrix,
+        )
+        tmp.replace(path)
+        stage = path.parent / "stage_features_done.json"
+        stage.write_text(
+            json.dumps(
+                {
+                    "artifact": str(path),
+                    "n": self.n,
+                    "n_features": self.n_features,
+                    "dtype": str(self.matrix.dtype),
+                },
+                indent=2,
+            )
+            + "\n",
+            encoding="utf-8",
         )
         return path
 
