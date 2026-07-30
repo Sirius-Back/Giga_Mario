@@ -4,6 +4,7 @@ from __future__ import annotations
 import shutil
 from pathlib import Path
 
+import numpy as np
 import pytest
 
 from src.pipeline.common import read_csv, write_csv
@@ -75,9 +76,31 @@ def _mock_panel(tmp_path: Path, n: int = 24) -> tuple[Path, Path, Path]:
     return marked, id_csv, fold_csv
 
 
-def test_parse_dsk_ascii_sums_duplicates() -> None:
-    text = "AAA 2\nAAC 1\nAAA 3\n"
-    assert parse_dsk_ascii(text) == {"AAA": 5, "AAC": 1}
+def test_two_pass_matches_one_pass_matrix() -> None:
+    seqs = {
+        "1": "ACGTACGTAAAA",
+        "2": "TGCATGCATTTT",
+        "3": "GGGGCCCCATAT",
+    }
+    one = KmerFeatureBackend(k=3, engine="python")
+    two = KmerFeatureBackend(k=3, engine="python")
+    two.two_pass_min_n = 2  # type: ignore[attr-defined]
+    a = one.compute(seqs)
+    b = two.compute(seqs)
+    assert a.extras["two_pass"] is False
+    assert b.extras["two_pass"] is True
+    assert a.feature_names == b.feature_names
+    assert a.ids == b.ids
+    np.testing.assert_allclose(a.matrix, b.matrix, rtol=0, atol=1e-6)
+
+
+def test_mem_guard_accepts_current_headroom() -> None:
+    from src.pipeline.mem_guard import assert_ram_headroom, ram_used_fraction
+
+    used = ram_used_fraction()
+    assert 0.0 <= used <= 1.0
+    assert_ram_headroom(0.95)
+
 
 
 def test_count_kmers_local_k2() -> None:

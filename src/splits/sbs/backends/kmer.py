@@ -354,8 +354,14 @@ class KmerFeatureBackend:
                     stacklevel=2,
                 )
 
-        per_id_k_counts: dict[str, dict[int, dict[str, int]]] = {}
+        from src.pipeline.mem_guard import assert_ram_headroom
+
+        # Large panels: two-pass (vocab, then fill matrix) so we never hold
+        # per-id count dicts for all sequences at once (k=7 ready_legnet OOM).
+        two_pass_min_n = int(getattr(self, "two_pass_min_n", 50_000))
+        two_pass = len(ids) >= two_pass_min_n
         vocab: dict[int, set[str]] = {k: set() for k in self.k_list}
+        per_id_k_counts: dict[str, dict[int, dict[str, int]]] = {}
 
         tmp_ctx = (
             tempfile.TemporaryDirectory(prefix="sbs_kmer_dsk_")
@@ -364,11 +370,12 @@ class KmerFeatureBackend:
         )
         try:
             work_root = Path(tmp_ctx.name) if tmp_ctx is not None else None
-            for idx, rid in enumerate(ids):
+
+            def _count_row(idx: int, rid: str) -> dict[int, dict[str, int]]:
                 tag = f"{idx:06d}"
-                per_id_k_counts[rid] = {}
+                row: dict[int, dict[str, int]] = {}
                 for k in self.k_list:
-                    counts = self._count_one(
+                    row[k] = self._count_one(
                         sequences[rid],
                         k,
                         engine=engine,
@@ -377,45 +384,78 @@ class KmerFeatureBackend:
                         dsk2ascii=dsk2ascii,
                         region_tag=tag,
                     )
-                    per_id_k_counts[rid][k] = counts
-                    vocab[k].update(counts)
+                return row
+
+            # Pass 1: vocab (+ optional store for small n)
+            for idx, rid in enumerate(ids):
+                if idx % 2000 == 0:
+                    assert_ram_headroom(0.95)
+                    if two_pass and (idx == 0 or idx % 10000 == 0):
+                        print(
+                            f"[kmer] pass1 vocab {idx}/{len(ids)} "
+                            f"(|vocab|={[len(vocab[k]) for k in self.k_list]})",
+                            flush=True,
+                        )
+                row = _count_row(idx, rid)
+                for k in self.k_list:
+                    vocab[k].update(row[k])
+                if not two_pass:
+                    per_id_k_counts[rid] = row
+
+            feature_names: list[str] = []
+            for k in self.k_list:
+                for kmer in sorted(vocab[k]):
+                    feature_names.append(_feature_name(k, kmer, multi_k=multi_k))
+
+            if not feature_names:
+                raise ValueError(
+                    f"no observed k-mers for k={list(self.k_list)}; "
+                    "sequences may be shorter than k"
+                )
+
+            # float32 for large panels (k=7 full ready_legnet ~ n×16k would OOM as f64)
+            n_cells = len(ids) * len(feature_names)
+            dtype = np.float32 if n_cells >= 5_000_000 else float
+            assert_ram_headroom(0.95)
+            mat = np.zeros((len(ids), len(feature_names)), dtype=dtype)
+            sorted_vocab = {k: sorted(vocab[k]) for k in self.k_list}
+
+            def _fill_row(i: int, rid: str, raw_by_k: dict[int, dict[str, int]]) -> None:
+                col = 0
+                for k in self.k_list:
+                    raw = raw_by_k[k]
+                    values = (
+                        _relative(raw)
+                        if self.normalize == "relative"
+                        else {kk: float(vv) for kk, vv in raw.items()}
+                    )
+                    if self.log_transform:
+                        values = {kk: float(np.log1p(vv)) for kk, vv in values.items()}
+                    for kmer in sorted_vocab[k]:
+                        mat[i, col] = float(values.get(kmer, 0.0))
+                        col += 1
+
+            if two_pass:
+                # Pass 2: recount one sequence at a time into the matrix
+                print(
+                    f"[kmer] pass2 fill matrix n={len(ids)} d={len(feature_names)} "
+                    f"dtype={dtype}",
+                    flush=True,
+                )
+                for i, rid in enumerate(ids):
+                    if i % 2000 == 0:
+                        assert_ram_headroom(0.95)
+                        if i == 0 or i % 10000 == 0:
+                            print(f"[kmer] pass2 fill {i}/{len(ids)}", flush=True)
+                    _fill_row(i, rid, _count_row(i, rid))
+            else:
+                for i, rid in enumerate(ids):
+                    _fill_row(i, rid, per_id_k_counts[rid])
+                per_id_k_counts.clear()
+            vocab.clear()
         finally:
             if tmp_ctx is not None:
                 tmp_ctx.cleanup()
-
-        feature_names: list[str] = []
-        for k in self.k_list:
-            for kmer in sorted(vocab[k]):
-                feature_names.append(_feature_name(k, kmer, multi_k=multi_k))
-
-        if not feature_names:
-            raise ValueError(
-                f"no observed k-mers for k={list(self.k_list)}; "
-                "sequences may be shorter than k"
-            )
-
-        # float32 for large panels (k=7 full ready_legnet ~ n×16k would OOM as f64+CSV dicts)
-        n_cells = len(ids) * len(feature_names)
-        dtype = np.float32 if n_cells >= 5_000_000 else float
-        mat = np.zeros((len(ids), len(feature_names)), dtype=dtype)
-        sorted_vocab = {k: sorted(vocab[k]) for k in self.k_list}
-        for i, rid in enumerate(ids):
-            col = 0
-            for k in self.k_list:
-                raw = per_id_k_counts[rid][k]
-                values = (
-                    _relative(raw)
-                    if self.normalize == "relative"
-                    else {kk: float(vv) for kk, vv in raw.items()}
-                )
-                if self.log_transform:
-                    values = {kk: float(np.log1p(vv)) for kk, vv in values.items()}
-                for kmer in sorted_vocab[k]:
-                    mat[i, col] = float(values.get(kmer, 0.0))
-                    col += 1
-        # Drop per-id dicts before clustering / CSV (peak RAM)
-        per_id_k_counts.clear()
-        vocab.clear()
 
         return FeatureTable(
             ids=ids,
@@ -431,5 +471,6 @@ class KmerFeatureBackend:
                 "native_max_k": NATIVE_MAX_K,
                 "n_features": len(feature_names),
                 "dtype": str(np.dtype(dtype)),
+                "two_pass": two_pass,
             },
         )
