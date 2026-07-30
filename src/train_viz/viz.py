@@ -1028,12 +1028,21 @@ def main(argv: list[str] | None = None) -> int:
     summaries_txt: list[str] = []
     best_epochs: dict[str, float] = {}
 
+    from .plotting import load_zsv_rows
+
     for i, (path, label) in enumerate(zip(log_paths, labels)):
         config, epochs = parse_log(path)
         model = infer_model(label, config, models_arg[i] if models_arg else None)
         seed_raw = seeds_arg[i] if seeds_arg else None
         seed = infer_seed(label, config, int(seed_raw) if seed_raw is not None else None)
         rows, metrics, splits, nan_only = flatten_epochs(label, epochs, model=model, seed=seed)
+        # Attach ZSV point metrics when present beside the log (epochs jsonl omits final).
+        train_dir = path.parent.parent if path.parent.name == "logs" else path.parent
+        zsv_rows = load_zsv_rows(train_dir, model=model, seed=seed, run=label)
+        if zsv_rows:
+            rows.extend(zsv_rows)
+            metrics |= {r["metric"] for r in zsv_rows}
+            splits.add("zero_shot")
         all_rows.extend(rows)
         all_metrics |= metrics
         all_nan_only |= nan_only
@@ -1045,11 +1054,13 @@ def main(argv: list[str] | None = None) -> int:
                 f"- `{path}` → run `{label}` model=`{model}` seed=`{seed}`: "
                 f"{len(epochs)} epochs; metrics={sorted(metrics)}; splits={sorted(splits)}; "
                 f"final/best_epoch={be:g}"
+                + (f"; zsv_metrics={len(zsv_rows)}" if zsv_rows else "")
             )
         else:
             summaries_txt.append(
                 f"- `{path}` → run `{label}` model=`{model}` seed=`{seed}`: "
                 f"{len(epochs)} epochs; metrics={sorted(metrics)}; splits={sorted(splits)}"
+                + (f"; zsv_metrics={len(zsv_rows)}" if zsv_rows else "")
             )
         if nan_only:
             summaries_txt.append(
@@ -1103,6 +1114,7 @@ def main(argv: list[str] | None = None) -> int:
         plot_metric_correlation,
         plot_multimodel_split_isolated,
         plot_seed_variability,
+        plot_zsv_barplots,
     )
 
     idx = FigureIndex()
@@ -1173,6 +1185,7 @@ def main(argv: list[str] | None = None) -> int:
     written.extend(
         plot_learning_rate(all_rows, cfg, args.outdir, idx, x_key=args.x, dpi=dpi)
     )
+    written.extend(plot_zsv_barplots(all_rows, cfg, args.outdir, idx, dpi=dpi))
 
     summary = build_training_summary(
         all_rows,

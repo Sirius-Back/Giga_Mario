@@ -268,24 +268,31 @@ def place_legend_lower_right(
     *,
     cfg: dict[str, Any],
     position: str = "lower right",
+    handles: list[Any] | None = None,
+    labels: list[str] | None = None,
 ) -> Any:
     """Figure-level matplotlib legend; remove axes legends to avoid overlap.
 
     ``position``:
       - ``\"lower right\"`` — bottom-right of the figure (faceted metric plots)
       - ``\"bottom\"`` — centered under panels (Figure_01 learning curves)
+
+    Optional explicit ``handles``/``labels`` (preferred when seaborn ``legend=False``
+    leaves empty ``get_legend_handles_labels``).
     """
     ax_list = list(np.atleast_1d(axes).ravel())
-    handles: list[Any] = []
-    labels: list[str] = []
     for ax in ax_list:
-        h, lab = ax.get_legend_handles_labels()
-        handles.extend(h)
-        labels.extend(lab)
         leg = ax.get_legend()
         if leg is not None:
             leg.remove()
-    handles, labels = _dedupe_legend_entries(handles, labels)
+    if handles is None or labels is None:
+        handles = []
+        labels = []
+        for ax in ax_list:
+            h, lab = ax.get_legend_handles_labels()
+            handles.extend(h)
+            labels.extend(lab)
+        handles, labels = _dedupe_legend_entries(handles, labels)
     if not handles:
         return None
     leg_cfg = cfg.get("legend") or {}
@@ -294,7 +301,6 @@ def place_legend_lower_right(
     if len(labels) >= thr:
         ncol = 2 if len(labels) < 12 else 3
     if position == "bottom":
-        # Wide bottom strip under multipanel grid — does not cover curves.
         ncol = max(ncol, min(4, len(labels)))
         legend = fig.legend(
             handles,
@@ -329,6 +335,17 @@ def place_legend_lower_right(
     return legend
 
 
+def _explicit_model_legend_handles(
+    models: list[str], palette: dict[str, str], *, linewidth: float = 2.2
+) -> tuple[list[Any], list[str]]:
+    from matplotlib.lines import Line2D
+
+    handles = [
+        Line2D([0], [0], color=palette[m], lw=linewidth, label=m) for m in models
+    ]
+    return handles, list(models)
+
+
 def _altair_faceted_by_split(
     df: pd.DataFrame,
     *,
@@ -359,6 +376,7 @@ def _altair_faceted_by_split(
                 alt.Tooltip("model:N"),
                 alt.Tooltip("split_label:N"),
             ],
+            order=alt.Order(f"{x_key}:Q"),
         )
         .properties(width=220, height=240)
         .facet(
@@ -465,11 +483,15 @@ def plot_learning_curves(
         page_axes: list[Any] = []
         for mi, metric in enumerate(page_metrics):
             metric_splits = splits_for_metric(rows, metric)
+            # Prefer train/val/test in overview (ZSV is point-estimate → barplots).
+            overview_splits = [
+                s for s in ("train", "validation", "test") if s in metric_splits
+            ] or metric_splits
             df = _metric_long(
                 rows,
                 metric,
                 models=models,
-                splits=metric_splits,
+                splits=overview_splits,
                 x_key=x_key,
                 n_seeds=n_seeds,
                 ribbon=ribbon,
@@ -487,8 +509,10 @@ def plot_learning_curves(
             if df.empty:
                 continue
             if multi_model:
+                # One color per run; dash encodes split — avoids zigzag from
+                # concatenating train/val/test under a single series.
                 hue = "model"
-                style = None
+                style = "split_label"
                 palette = model_pal
             else:
                 hue = "split_label"
@@ -505,6 +529,7 @@ def plot_learning_curves(
                 style=style,
                 palette=palette,
                 hue_order=models if multi_model else None,
+                style_order=[split_label(s) for s in overview_splits] if multi_model else None,
                 errorbar=err,
                 seed=42,
                 legend=False,
@@ -517,8 +542,8 @@ def plot_learning_curves(
             for model in models:
                 mark_splits = (
                     ["validation"]
-                    if "validation" in metric_splits
-                    else list(metric_splits)
+                    if "validation" in overview_splits
+                    else list(overview_splits)
                 )
                 for split in mark_splits:
                     sub = df[(df["model"] == model) & (df["split"] == split)]
@@ -539,7 +564,7 @@ def plot_learning_curves(
                         color=color,
                         best_epoch=best_epochs.get(model),
                         patience=patience,
-                        annotate=(split == "validation" and not multi_model),
+                        annotate=False,
                     )
                     if smooth and len(grp) >= 4:
                         sm = _lowess(
@@ -559,7 +584,15 @@ def plot_learning_curves(
                     break
         if page_axes:
             # Matplotlib only: bottom strip under the multipanel (Figure_01).
-            place_legend_lower_right(plt.gcf(), page_axes, cfg=cfg, position="bottom")
+            if multi_model:
+                h, lab = _explicit_model_legend_handles(
+                    models, model_pal, linewidth=float(cfg.get("line_width", 2.2))
+                )
+                place_legend_lower_right(
+                    plt.gcf(), page_axes, cfg=cfg, position="bottom", handles=h, labels=lab
+                )
+            else:
+                place_legend_lower_right(plt.gcf(), page_axes, cfg=cfg, position="bottom")
         stem = idx.next_stem(
             outdir, f"learning_curves_p{page_i + 1}" if len(pages) > 1 else "learning_curves"
         )
@@ -567,11 +600,16 @@ def plot_learning_curves(
 
         altair_frames = []
         for metric in page_metrics:
+            m_splits = [
+                s
+                for s in ("train", "validation", "test")
+                if s in splits_for_metric(rows, metric)
+            ] or splits_for_metric(rows, metric)
             df = _metric_long(
                 rows,
                 metric,
                 models=models,
-                splits=splits_for_metric(rows, metric),
+                splits=m_splits,
                 x_key=x_key,
                 n_seeds=n_seeds,
                 ribbon="none",
@@ -588,30 +626,38 @@ def plot_learning_curves(
                 domain = models
                 crange = [model_pal[m] for m in models]
                 color_field = "model"
+                stroke = "split_label"
             else:
                 color_field = "split_label"
+                stroke = None
                 domain = sorted(adf[color_field].unique())
                 crange = [
                     split_color(next((s for s in SPLIT_ORDER if split_label(s) == d), "_run"), cfg)
                     for d in domain
                 ]
-            line = (
-                alt.Chart(adf)
-                .mark_line(strokeWidth=2)
-                .encode(
-                    x=alt.X(f"{x_key}:Q", title=x_key.replace("_", " ")),
-                    y=alt.Y("value:Q", title="value"),
-                    color=alt.Color(
-                        f"{color_field}:N",
-                        scale=alt.Scale(domain=domain, range=crange),
-                        legend=alt.Legend(title=color_field),
-                    ),
-                    tooltip=[x_key, "value", color_field, "metric"],
-                )
-            )
+            enc: dict[str, Any] = {
+                "x": alt.X(f"{x_key}:Q", title=x_key.replace("_", " ")),
+                "y": alt.Y("value:Q", title="value"),
+                "color": alt.Color(
+                    f"{color_field}:N",
+                    scale=alt.Scale(domain=domain, range=crange),
+                    legend=alt.Legend(title=color_field),
+                ),
+                "tooltip": [x_key, "value", color_field, "metric", "split_label"],
+                "order": alt.Order(f"{x_key}:Q"),
+            }
+            if stroke and stroke in adf.columns:
+                enc["strokeDash"] = alt.StrokeDash(f"{stroke}:N", legend=alt.Legend(title="split"))
+                enc["detail"] = alt.Detail(f"{stroke}:N")
+            line = alt.Chart(adf).mark_line(strokeWidth=2).encode(**enc)
             chart = (
                 line.properties(width=220, height=160)
-                .facet(facet=alt.Facet("metric:N"), columns=3, title=page_title, data=adf)
+                .facet(
+                    facet=alt.Facet("metric:N"),
+                    columns=3,
+                    title=page_title,
+                    data=adf,
+                )
                 .interactive()
             )
             written.extend(save_altair_chart(chart, stem.with_name(stem.name + "_altair")))
@@ -690,7 +736,12 @@ def plot_learning_curves(
                         annotate=False,
                     )
             fig.suptitle(metric.replace("_", " "), fontsize=cfg.get("font", {}).get("title_pt", 10))
-            place_legend_lower_right(fig, axes_flat, cfg=cfg)
+            h, lab = _explicit_model_legend_handles(
+                models, model_pal, linewidth=float(cfg.get("line_width", 2.2))
+            )
+            place_legend_lower_right(
+                fig, axes_flat, cfg=cfg, position="lower right", handles=h, labels=lab
+            )
             stem = idx.next_stem(outdir, metric)
             written.extend(save_cns_figure(stem, dpi))
             chart = _altair_faceted_by_split(
@@ -861,7 +912,7 @@ def _mark_selected_best(
         linewidths=0.8,
         marker="*",
     )
-    if annotate or best_epoch is not None:
+    if annotate:
         ax.annotate(
             f"{label}@{xb:g}\n{yb:.3g}",
             (xb, yb),
@@ -945,7 +996,15 @@ def plot_multimodel_split_isolated(
             ax.set_xlabel(x_key.replace("_", " "))
             ax.set_ylabel(metric.replace("_", " "))
             cns.setup_ax(ax)
-            place_legend_lower_right(plt.gcf(), [ax], cfg=cfg)
+            place_legend_lower_right(
+                plt.gcf(),
+                [ax],
+                cfg=cfg,
+                handles=_explicit_model_legend_handles(
+                    models, palette, linewidth=float(cfg.get("line_width", 2.2))
+                )[0],
+                labels=models,
+            )
             stem = idx.next_stem(outdir, f"multimodel_{metric}_{split}")
             written.extend(save_cns_figure(stem, dpi))
             chart = _altair_line(
@@ -1498,4 +1557,252 @@ def plot_learning_rate(
         else ["#56B4E9"],
     )
     written.extend(save_altair_chart(chart, stem.with_name(stem.name + "_altair")))
+    return written
+
+
+def load_zsv_rows(
+    train_dir: Path,
+    *,
+    model: str,
+    seed: Any = 0,
+    run: str | None = None,
+) -> list[dict[str, Any]]:
+    """Load ``logs/zero_shot_metrics.json`` into long-form rows (split=zero_shot)."""
+    train_dir = Path(train_dir)
+    path = train_dir / "logs" / "zero_shot_metrics.json"
+    if not path.is_file():
+        path = train_dir / "zero_shot_metrics.json"
+    if not path.is_file():
+        return []
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError:
+        return []
+    if not isinstance(payload, dict) or payload.get("skipped"):
+        return []
+    metrics = payload.get("metrics")
+    if not isinstance(metrics, dict):
+        return []
+    out: list[dict[str, Any]] = []
+    for key, raw in metrics.items():
+        if key == "n":
+            continue
+        try:
+            val = float(raw)
+        except (TypeError, ValueError):
+            continue
+        if not math.isfinite(val):
+            continue
+        out.append(
+            {
+                "run": run or model,
+                "model": model,
+                "seed": seed,
+                "epoch": float("nan"),
+                "global_step": None,
+                "split": "zero_shot",
+                "metric": normalize_metric_name(str(key)),
+                "value": val,
+            }
+        )
+    return out
+
+
+def plot_zsv_barplots(
+    rows: list[dict[str, Any]],
+    cfg: dict[str, Any],
+    outdir: Path,
+    idx: FigureIndex,
+    *,
+    dpi: int,
+) -> list[Path]:
+    """Cross-model zero-shot-validation bar panels + Altair.
+
+    Expects long-form rows with ``split == "zero_shot"``.
+    """
+    import matplotlib.pyplot as plt
+    import cnsplots as cns
+    import altair as alt
+
+    zsv = [r for r in rows if str(r.get("split", "")).startswith("zero_shot")]
+    if not zsv:
+        return []
+    apply_pub_style(cfg, dpi=dpi)
+    df = pd.DataFrame(zsv)
+    preferred = [
+        "pearson",
+        "spearman",
+        "rmse",
+        "mae",
+        "mse",
+        "r2",
+        "loss",
+        "genewise_pearson_median",
+        "samplewise_pearson_median",
+    ]
+    metrics = [m for m in preferred if m in set(df["metric"])]
+    metrics.extend(sorted(set(df["metric"]) - set(metrics)))
+    if not metrics:
+        return []
+
+    written: list[Path] = []
+    models = sorted(df["model"].unique())
+    palette = _model_palette(models, cfg)
+    layout_w, layout_h = cns_layout_px(cfg, "double")
+    n = min(len(metrics), 9)
+    nrows, ncols = layout_for(n, cfg)
+    panel_w = max(110, int(layout_w / max(ncols, 1)))
+    panel_h = max(100, int(layout_h / max(nrows, 1)))
+
+    mp = cns.multipanel(
+        max_width=int(layout_w),
+        title="Zero-shot validation (ZSV) — by model",
+        title_fontweight="regular",
+    )
+    axes: list[Any] = []
+    for i, metric in enumerate(metrics[:9]):
+        sub = df[df["metric"] == metric].copy()
+        if sub.empty:
+            continue
+        means = sub.groupby("model")["value"].mean().sort_values(
+            ascending=is_lower_better(metric, cfg)
+        )
+        order = list(means.index)
+        label = chr(ord("A") + i) if i < 26 else str(i + 1)
+        mp.panel(label, width=panel_w, height=panel_h, pad_left=55, pad_top=12, margin_right=6)
+        colors = [palette.get(m, model_color(j, cfg)) for j, m in enumerate(order)]
+        ax = cns.barplot(
+            data=sub,
+            x="value",
+            y="model",
+            order=order,
+            hue="model",
+            hue_order=order,
+            palette=colors,
+            legend=False,
+            add_tip=True,
+        )
+        ax.set_xlabel(metric.replace("_", " "))
+        ax.set_title(f"ZSV {metric.replace('_', ' ')}")
+        cns.setup_ax(ax)
+        axes.append(ax)
+    stem = idx.next_stem(outdir, "zsv_by_model")
+    written.extend(save_cns_figure(stem, dpi))
+
+    chart = (
+        alt.Chart(df[df["metric"].isin(metrics[:9])])
+        .mark_bar()
+        .encode(
+            x=alt.X("value:Q", title="ZSV value"),
+            y=alt.Y("model:N", sort="-x"),
+            color=alt.Color(
+                "model:N",
+                scale=alt.Scale(domain=models, range=[palette[m] for m in models]),
+                legend=None,
+            ),
+            row=alt.Row("metric:N", sort=metrics[:9]),
+            tooltip=["model", "metric", alt.Tooltip("value:Q", format=".4g")],
+        )
+        .properties(title="Zero-shot validation (ZSV) — by model", width=360, height=90)
+    )
+    written.extend(save_altair_chart(chart, stem.with_name(stem.name + "_altair")))
+
+    # Grouped train/val/test/ZSV bars for key metrics (last epoch + ZSV).
+    key_metrics = [m for m in ("pearson", "spearman", "loss", "rmse", "mae") if m in set(df["metric"]) or any(r.get("metric") == m for r in rows)]
+    compare_rows: list[dict[str, Any]] = []
+    for metric in key_metrics:
+        for model in models:
+            # ZSV
+            zsub = df[(df["model"] == model) & (df["metric"] == metric)]
+            if not zsub.empty:
+                compare_rows.append(
+                    {
+                        "model": model,
+                        "metric": metric,
+                        "split": "zero_shot",
+                        "split_label": "zero_shot",
+                        "value": float(zsub["value"].iloc[0]),
+                    }
+                )
+            for split in ("train", "validation", "test"):
+                series = [
+                    r
+                    for r in rows
+                    if r.get("model") == model
+                    and r.get("metric") == metric
+                    and r.get("split") == split
+                    and isinstance(r.get("epoch"), (int, float))
+                    and math.isfinite(float(r["epoch"]))
+                ]
+                if not series:
+                    continue
+                last = max(series, key=lambda r: float(r["epoch"]))
+                compare_rows.append(
+                    {
+                        "model": model,
+                        "metric": metric,
+                        "split": split,
+                        "split_label": split_label(split),
+                        "value": float(last["value"]),
+                    }
+                )
+    if compare_rows:
+        cdf = pd.DataFrame(compare_rows)
+        split_order = ["train", "validation", "test", "zero_shot"]
+        apply_pub_style(cfg, dpi=dpi)
+        n_m = min(len(key_metrics), 4)
+        fig_w = max(8.0, 3.2 * n_m)
+        fig, axes = plt.subplots(1, n_m, figsize=(fig_w, 4.2), squeeze=False)
+        for ax, metric in zip(axes.ravel(), key_metrics[:n_m]):
+            sub = cdf[cdf["metric"] == metric]
+            if sub.empty:
+                ax.set_visible(False)
+                continue
+            # seaborn/cns grouped bars: x=model, hue=split
+            cns.barplot(
+                data=sub,
+                x="model",
+                y="value",
+                hue="split_label",
+                hue_order=[split_label(s) for s in split_order if split_label(s) in set(sub["split_label"])],
+                palette=_palette_for_splits(
+                    [s for s in split_order if split_label(s) in set(sub["split_label"])],
+                    cfg,
+                ),
+                ax=ax,
+            )
+            ax.set_title(metric.replace("_", " "))
+            ax.set_xlabel("")
+            ax.set_ylabel(metric.replace("_", " "))
+            ax.tick_params(axis="x", rotation=35)
+            cns.setup_ax(ax)
+            leg = ax.get_legend()
+            if leg is not None:
+                leg.remove()
+        place_legend_lower_right(fig, list(axes.ravel()), cfg=cfg, position="bottom")
+        fig.suptitle("Train / val / test / ZSV (last epoch vs zero-shot)", fontsize=10)
+        stem2 = idx.next_stem(outdir, "zsv_vs_splits")
+        written.extend(save_cns_figure(stem2, dpi))
+        chart2 = (
+            alt.Chart(cdf)
+            .mark_bar()
+            .encode(
+                x=alt.X("model:N", title=None, sort=models),
+                y=alt.Y("value:Q"),
+                color=alt.Color(
+                    "split_label:N",
+                    scale=alt.Scale(
+                        domain=[split_label(s) for s in split_order],
+                        range=[
+                            split_color(s, cfg) for s in split_order
+                        ],
+                    ),
+                    legend=alt.Legend(title="split"),
+                ),
+                column=alt.Column("metric:N", sort=key_metrics),
+                tooltip=["model", "metric", "split_label", alt.Tooltip("value:Q", format=".4g")],
+            )
+            .properties(width=120, height=220, title="Train / val / test / ZSV")
+        )
+        written.extend(save_altair_chart(chart2, stem2.with_name(stem2.name + "_altair")))
     return written
