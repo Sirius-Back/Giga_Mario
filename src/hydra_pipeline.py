@@ -107,6 +107,35 @@ def _run_stages(cfg: DictConfig) -> int:
     kmer_engine = str(cfg.get("kmer_engine", cfg.get("engine", "auto")) or "auto")
     log_transform = bool(cfg.get("log_transform", False))
 
+    # blastp / pangenome A2A inputs
+    gtf_dir_cfg = cfg.get("gtf_dir", None)
+    fna_dir_cfg = cfg.get("fna_dir", None)
+    gtf_dir = _resolve_path(gtf_dir_cfg) if gtf_dir_cfg not in (None, "", "null") else None
+    fna_dir = _resolve_path(fna_dir_cfg) if fna_dir_cfg not in (None, "", "null") else None
+    if split_type == "blastp":
+        if gtf_dir is None:
+            gtf_dir = ROOT / "raw" / "gtf"
+        if fna_dir is None:
+            fna_dir = ROOT / "raw" / "fna"
+    environment = cfg.get("environment", None)
+    if environment in ("", "null"):
+        environment = None
+    if split_type == "blastp" and environment is None:
+        environment = "gene"
+    window_cfg = cfg.get("window", None)
+    window: dict[str, int] | None = None
+    if window_cfg not in (None, "", "null"):
+        if isinstance(window_cfg, str):
+            import json as _json
+
+            window = {str(k): int(v) for k, v in _json.loads(window_cfg).items()}
+        else:
+            window = {str(k): int(v) for k, v in dict(window_cfg).items()}
+    elif split_type == "blastp":
+        window = {"pos1": 0, "pos2": 0}
+    genetic_code = str(cfg.get("genetic_code", "universal") or "universal")
+    parsed_path = panel_root / "PARSED" if split_type in {"blastp", "pangenome"} else None
+
     split_csv = run_split_predict(
         outdir=out_root,
         type=split_type,
@@ -126,6 +155,12 @@ def _run_stages(cfg: DictConfig) -> int:
         kmer_size=kmer_size,
         log_transform=log_transform,
         engine=kmer_engine,
+        parsed=parsed_path,
+        gtf_dir=gtf_dir,
+        fna_dir=fna_dir,
+        environment=str(environment) if environment is not None else None,
+        window=window,
+        genetic_code=genetic_code,
     )
     split_root = run_split(
         split_csv,

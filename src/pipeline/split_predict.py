@@ -12,6 +12,8 @@ Supported ``type`` values:
     (requires ``marked`` / ``fna`` and an explicit ``threshold``)
   - ``pangenome`` — C++ k-mer contingency / repeat-graph connected components
     (requires ``marked``; filters to PARSED IDs)
+  - ``blastp`` — CDS protein BLASTP homology (adapt fna+gtf → filter ∩ PARSED
+    → sparse BLASTP connected components)
 """
 from __future__ import annotations
 
@@ -27,7 +29,14 @@ from src.splits.random import assign_folds_random, assign_folds_stratified
 from .common import SPLIT_CSV_COLUMNS, ensure_dir, read_csv, write_csv
 from .generate_fold import is_zsv_fold, normalize_fold_label
 
-SUPPORTED_SPLIT_TYPES = ("random", "gc", "kmer", "hashfrag", "pangenome")
+SUPPORTED_SPLIT_TYPES = (
+    "random",
+    "gc",
+    "kmer",
+    "hashfrag",
+    "pangenome",
+    "blastp",
+)
 
 
 def _load_optional_table(
@@ -368,6 +377,77 @@ def _run_pangenome_split_predict(
     return out
 
 
+def _run_blastp_split_predict(
+    *,
+    outdir: Path,
+    seed: int,
+    id_csv: Path | None,
+    fold_csv: Path | None,
+    stratification_csv: Path | None,
+    fna: Path | None,
+    marked_fasta: Path | None,
+    parsed: Path | None,
+    ratios: tuple[float, float, float] | None,
+    max_ids: int | None,
+    genomes: Sequence[str] | None,
+    reuse_panel_marked: bool = False,
+    marked_blastp: Path | None = None,
+    gtf_dir: Path | None = None,
+    fna_dir: Path | None = None,
+    environment: str | None = None,
+    window: dict[str, int] | None = None,
+    genetic_code: str = "universal",
+    threads: int = 8,
+    force: bool = False,
+    evalue: float | None = None,
+    max_target_seqs: int | None = None,
+    min_bitscore: float | None = None,
+) -> Path:
+    """BLASTP path: MARKED_blastp → PARSED filter → CDS proteins → sparse BLASTP CC."""
+    from src.splits.blastp import (
+        DEFAULT_EVALUE,
+        DEFAULT_MAX_TARGET_SEQS,
+        DEFAULT_MIN_BITSCORE,
+        run_blastp_split_assign,
+    )
+
+    panel_marked = marked_fasta or fna
+    summary = run_blastp_split_assign(
+        outdir=outdir,
+        parsed=Path(parsed) if parsed is not None else None,
+        id_csv=Path(id_csv) if id_csv else None,
+        fold_csv=Path(fold_csv) if fold_csv else None,
+        stratification_csv=Path(stratification_csv) if stratification_csv else None,
+        seed=seed,
+        max_ids=max_ids,
+        genomes=genomes,
+        ratios=ratios,
+        genetic_code=genetic_code,
+        threads=threads,
+        evalue=float(evalue) if evalue is not None else DEFAULT_EVALUE,
+        max_target_seqs=(
+            int(max_target_seqs)
+            if max_target_seqs is not None
+            else DEFAULT_MAX_TARGET_SEQS
+        ),
+        min_bitscore=(
+            float(min_bitscore) if min_bitscore is not None else DEFAULT_MIN_BITSCORE
+        ),
+        force=force,
+        marked_blastp=Path(marked_blastp) if marked_blastp else None,
+        panel_marked=Path(panel_marked) if panel_marked else None,
+        reuse_panel_marked=reuse_panel_marked,
+        gtf_dir=Path(gtf_dir) if gtf_dir else None,
+        fna_dir=Path(fna_dir) if fna_dir else None,
+        environment=environment,
+        window=window,
+    )
+    out = Path(summary["split_csv"])
+    if not out.is_file():
+        raise FileNotFoundError(f"blastp split did not write split.csv: {out}")
+    return out
+
+
 def run_split_predict(
     *,
     outdir: Path,
@@ -404,6 +484,11 @@ def run_split_predict(
     fna_dir: Path | None = None,
     environment: str | None = None,
     window: dict[str, int] | None = None,
+    genetic_code: str = "universal",
+    marked_blastp: Path | None = None,
+    evalue: float | None = None,
+    max_target_seqs: int | None = None,
+    min_bitscore: float | None = None,
 ) -> Path:
     """
     Write `{outdir}/split.csv` with columns ID|train_test|fold.
@@ -413,14 +498,15 @@ def run_split_predict(
     ``type=kmer`` — SBS on DSK k-mer composition features (``src.splits.kmer``).
     ``type=hashfrag`` — hashFrag+BLAST orthogonal homology splits (MARKED).
     ``type=pangenome`` — C++ k-mer contingency connected components (MARKED∩PARSED).
+    ``type=blastp`` — CDS protein BLASTP connected components (adapt fna+gtf).
 
     When ``fold.csv`` is present:
       - folds labeled zsv / zeroshotvalidation → train_test=zsv (excluded from
-        random / SBS / hashfrag / pangenome assignment; materialize moves them to
+        random / SBS / hashfrag / pangenome / blastp assignment; materialize moves them to
         zero-shot-validation/)
       - other IDs get train/test/val; fold column keeps fold.csv value (random),
-        SBS cluster id (gc/kmer), homologous-group id (hashfrag), or contingency
-        component id (pangenome)
+        SBS cluster id (gc/kmer), homologous-group id (hashfrag), contingency
+        component id (pangenome), or BLASTP component id (blastp)
 
     When ``fold.csv`` is omitted, emits:
       ``Warning: folds are not included``
@@ -522,6 +608,35 @@ def run_split_predict(
             window=window,
         )
 
+    if type == "blastp":
+        if fold_csv is None:
+            warnings.warn("Warning: folds are not included", UserWarning, stacklevel=2)
+        return _run_blastp_split_predict(
+            outdir=outdir,
+            seed=seed,
+            id_csv=id_csv,
+            fold_csv=fold_csv,
+            stratification_csv=stratification_csv,
+            fna=fna,
+            marked_fasta=marked_fasta,
+            parsed=parsed,
+            ratios=ratios,
+            max_ids=max_ids,
+            genomes=genomes,
+            reuse_panel_marked=reuse_panel_marked,
+            marked_blastp=marked_blastp,
+            gtf_dir=gtf_dir,
+            fna_dir=fna_dir,
+            environment=environment,
+            window=window,
+            genetic_code=genetic_code,
+            threads=threads,
+            force=force,
+            evalue=evalue,
+            max_target_seqs=max_target_seqs,
+            min_bitscore=min_bitscore,
+        )
+
     fold_map = _load_optional_table(fold_csv, min_cols=["ID", "fold"], label="fold.csv")
     strat_map = _load_optional_table(
         stratification_csv, min_cols=["ID"], label="strat.csv"
@@ -591,7 +706,11 @@ def run_split_predict(
 def main(argv: list[str] | None = None) -> int:
     p = argparse.ArgumentParser(description="split-predict → split.csv")
     p.add_argument("--outdir", required=True, type=Path)
-    p.add_argument("--type", default="random")
+    p.add_argument(
+        "--type",
+        default="random",
+        choices=list(SUPPORTED_SPLIT_TYPES),
+    )
     p.add_argument("--seed", type=int, default=42)
     p.add_argument("--id-csv", type=Path, default=None)
     p.add_argument("--fold", "--fold-csv", dest="fold", type=Path, default=None)
@@ -707,14 +826,14 @@ def main(argv: list[str] | None = None) -> int:
         "--parsed",
         type=Path,
         default=None,
-        help="PARSED dir for type=pangenome filter (default: <marked>/../PARSED)",
+        help="PARSED dir for type=pangenome|blastp filter (default: <marked>/../PARSED)",
     )
     p.add_argument(
         "--genome",
         dest="genomes",
         action="append",
         default=None,
-        help="Restrict type=pangenome to genome id(s) from ID.csv (repeatable)",
+        help="Restrict type=pangenome/blastp to genome id(s) from ID.csv (repeatable)",
     )
     p.add_argument(
         "--min-shared",
@@ -729,32 +848,61 @@ def main(argv: list[str] | None = None) -> int:
         help="Existing MARKED_pangenome dir (pangenome window; preferred over panel MARKED)",
     )
     p.add_argument(
+        "--marked-blastp",
+        type=Path,
+        default=None,
+        help="Existing MARKED_blastp dir (blastp adapt window; preferred over panel MARKED)",
+    )
+    p.add_argument(
         "--reuse-panel-marked",
         action="store_true",
-        help="Opt-in: reuse --marked as MARKED_pangenome only when windows match",
+        help="Opt-in: reuse --marked as MARKED_pangenome/MARKED_blastp only when windows match",
     )
     p.add_argument(
         "--gtf-dir",
         type=Path,
         default=None,
-        help="Raw GTF dir for A2A adapt → MARKED_pangenome (type=pangenome)",
+        help="Raw GTF dir for A2A adapt (type=pangenome|blastp)",
     )
     p.add_argument(
         "--fna-dir",
         type=Path,
         default=None,
-        help="Raw FNA dir for A2A adapt → MARKED_pangenome (type=pangenome)",
+        help="Raw FNA dir for A2A adapt / CDS translation (type=pangenome|blastp)",
     )
     p.add_argument(
         "--environment",
         default=None,
         choices=["gene", "random"],
-        help="adapt environment for A2A MARKED_pangenome (type=pangenome)",
+        help="adapt environment for A2A MARKED (type=pangenome|blastp)",
     )
     p.add_argument(
         "--window",
         default=None,
-        help='adapt window JSON for A2A MARKED_pangenome, e.g. \'{"pos1":-100,"pos2":100}\'',
+        help='adapt window JSON for A2A MARKED, e.g. \'{"pos1":0,"pos2":0}\'',
+    )
+    p.add_argument(
+        "--genetic-code",
+        default="universal",
+        help="Translation table for type=blastp (default: universal / NCBI 1)",
+    )
+    p.add_argument(
+        "--evalue",
+        type=float,
+        default=None,
+        help="BLASTP e-value cutoff for type=blastp (default: 1e-5)",
+    )
+    p.add_argument(
+        "--max-target-seqs",
+        type=int,
+        default=None,
+        help="BLASTP -max_target_seqs for type=blastp (default: 50)",
+    )
+    p.add_argument(
+        "--min-bitscore",
+        type=float,
+        default=None,
+        help="Min BLASTP bitscore to keep an edge (type=blastp; default: 50)",
     )
     args = p.parse_args(argv)
     n_clusters: int | Literal["auto"]
@@ -814,6 +962,11 @@ def main(argv: list[str] | None = None) -> int:
         fna_dir=args.fna_dir,
         environment=args.environment,
         window=window,
+        genetic_code=str(args.genetic_code),
+        marked_blastp=args.marked_blastp,
+        evalue=args.evalue,
+        max_target_seqs=args.max_target_seqs,
+        min_bitscore=args.min_bitscore,
     )
     print(path)
     return 0

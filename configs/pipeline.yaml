@@ -55,6 +55,12 @@ viz_conda_env: caduceus_env
 # GC/SBS/kmer clustering: dbscan | kmeans | kmeans_elbow | pca_kmeans | auto
 # (auto/dbscan on n>50k falls back to MiniBatchKMeans elbow)
 cluster_method: auto
+# blastp / pangenome A2A (null → defaults in hydra_pipeline for split=blastp)
+gtf_dir: null
+fna_dir: null
+environment: null
+window: null
+genetic_code: universal
 
 hydra:
   run:
