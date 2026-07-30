@@ -393,13 +393,15 @@ def run_train(
         from src import legnet
 
         tsv = folders if folders.is_file() else folders / "all.tsv"
+        # ddp_spawn + DataLoader workers aborts under Lightning; match Caduceus.
+        nw = 0 if int(n_devices) > 1 else int(num_workers)
         argv = [
             "--data-path", str(tsv), "--out", str(outdir),
             "--epochs", str(epochs), "--seed", str(seed),
             "--n-devices", str(n_devices),
             "--train-batch-size", str(batch_size),
             "--valid-batch-size", str(batch_size),
-            "--num-workers", str(num_workers),
+            "--num-workers", str(nw),
             "--checkpoint-every-n-epochs", str(int(checkpoint_every_n_epochs)),
             "--early-stopping-patience", str(int(early_stopping_patience)),
             "--min-epochs", str(int(min_epochs)),

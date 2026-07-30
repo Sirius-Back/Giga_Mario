@@ -12,6 +12,7 @@ Launch::
 """
 from __future__ import annotations
 
+import json
 import os
 import shutil
 import sys
@@ -41,6 +42,11 @@ def _require(path: Path, kind: str = "path") -> Path:
     return path
 
 
+def _direct_final_ok() -> bool:
+    weights = OUT_ROOT / "direct" / "final_model" / "model.safetensors"
+    return weights.is_file() and weights.stat().st_size > 0
+
+
 def main(argv: list[str] | None = None) -> int:
     argv = list(sys.argv[1:] if argv is None else argv)
     batch = BATCH_SIZE
@@ -49,6 +55,7 @@ def main(argv: list[str] | None = None) -> int:
     patience = EARLY_STOPPING_PATIENCE
     n_devices = N_DEVICES
     max_length = MAX_LENGTH
+    skip_direct = False
     for tok in list(argv):
         if tok.startswith("batch_size="):
             batch = int(tok.split("=", 1)[1])
@@ -67,6 +74,9 @@ def main(argv: list[str] | None = None) -> int:
             argv.remove(tok)
         elif tok.startswith("max_length="):
             max_length = int(tok.split("=", 1)[1])
+            argv.remove(tok)
+        elif tok in {"skip_direct=true", "--skip-direct"}:
+            skip_direct = True
             argv.remove(tok)
 
     os.environ.setdefault("CUDA_VISIBLE_DEVICES", "0,1")
@@ -96,44 +106,61 @@ def main(argv: list[str] | None = None) -> int:
     from src.pipeline.train import run_train
     from src.pipeline.pipeline_viz import run_pipeline_viz_auto
 
+    if skip_direct and not _direct_final_ok():
+        raise RuntimeError(
+            f"skip_direct=true but missing {OUT_ROOT / 'direct' / 'final_model' / 'model.safetensors'}"
+        )
+    if not skip_direct and _direct_final_ok():
+        # Resume-friendly: do not wipe a completed direct train unless forced.
+        print(
+            "direct/final_model already present — treating as skip_direct "
+            "(pass force_direct=true to retrain)",
+            flush=True,
+        )
+        skip_direct = True
+
     print(
         f"continue_from_split run_id={RUN_ID} split_csv={split_csv} "
-        f"n_devices={n_devices} epochs={epochs} min_epochs={min_epochs} "
-        f"patience={patience} batch_size={batch} max_length={max_length}",
+        f"skip_direct={skip_direct} n_devices={n_devices} epochs={epochs} "
+        f"min_epochs={min_epochs} patience={patience} batch_size={batch} "
+        f"max_length={max_length}",
         flush=True,
     )
 
-    run_train(
-        model="caduceus",
-        type="regression",
-        folders=split_root,
-        outdir=OUT_ROOT / "direct",
-        strategy="kmer",
-        smoke=False,
-        epochs=epochs,
-        batch_size=batch,
-        max_length=max_length,
-        seed=SEED,
-        n_devices=n_devices,
-        num_workers=NUM_WORKERS,
-        legnet_demo=False,
-        zsv_root=OUT_ROOT,
-        eval_zsv=True,
-        checkpoint_every_n_epochs=10,
-        early_stopping_patience=patience,
-        min_epochs=min_epochs,
-    )
-    run_pipeline_viz_auto(
-        out_root=OUT_ROOT,
-        panel_root=PANEL_ROOT,
-        train_dir=OUT_ROOT / "direct",
-        run_id=RUN_ID,
-        seed=SEED,
-        plot_train=True,
-        plot_sbs=True,
-        include_split_compare=True,
-        viz_conda_env="caduceus_env",
-    )
+    if not skip_direct:
+        run_train(
+            model="caduceus",
+            type="regression",
+            folders=split_root,
+            outdir=OUT_ROOT / "direct",
+            strategy="kmer",
+            smoke=False,
+            epochs=epochs,
+            batch_size=batch,
+            max_length=max_length,
+            seed=SEED,
+            n_devices=n_devices,
+            num_workers=NUM_WORKERS,
+            legnet_demo=False,
+            zsv_root=OUT_ROOT,
+            eval_zsv=True,
+            checkpoint_every_n_epochs=10,
+            early_stopping_patience=patience,
+            min_epochs=min_epochs,
+        )
+        run_pipeline_viz_auto(
+            out_root=OUT_ROOT,
+            panel_root=PANEL_ROOT,
+            train_dir=OUT_ROOT / "direct",
+            run_id=RUN_ID,
+            seed=SEED,
+            plot_train=True,
+            plot_sbs=True,
+            include_split_compare=True,
+            viz_conda_env="caduceus_env",
+        )
+    else:
+        print("skip_direct: using existing direct/final_model + ZSV", flush=True)
 
     adv_root = OUT_ROOT / "adversarial"
     if adv_root.exists():
@@ -198,7 +225,22 @@ def main(argv: list[str] | None = None) -> int:
         include_split_compare=True,
         viz_conda_env="caduceus_env",
     )
+    done = {
+        "run_id": RUN_ID,
+        "status": "COMPLETED",
+        "direct": str(OUT_ROOT / "direct"),
+        "adversarial": str(adv_root / "train"),
+        "skip_direct": skip_direct,
+        "epochs": epochs,
+        "min_epochs": min_epochs,
+        "early_stopping_patience": patience,
+        "n_devices": n_devices,
+    }
+    (OUT_ROOT / "pipeline_done.json").write_text(
+        json.dumps(done, indent=2) + "\n", encoding="utf-8"
+    )
     print("continue_from_split COMPLETED", flush=True)
+    print(f"pipeline_done={OUT_ROOT / 'pipeline_done.json'}", flush=True)
     return 0
 
 
