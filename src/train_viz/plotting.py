@@ -335,7 +335,7 @@ def _altair_faceted_by_split(
             color=alt.Color(
                 "model:N",
                 scale=alt.Scale(domain=models, range=color_range),
-                legend=alt.Legend(title="run", orient="bottom-right"),
+                legend=alt.Legend(title="run"),
             ),
             tooltip=[
                 alt.Tooltip(f"{x_key}:Q"),
@@ -377,7 +377,7 @@ def _altair_line(
         "color": alt.Color(
             f"{color_field}:N",
             scale=alt.Scale(domain=color_domain, range=color_range),
-            legend=alt.Legend(title=color_field, orient="bottom-right"),
+            legend=alt.Legend(title=color_field),
         ),
         "tooltip": [
             alt.Tooltip(f"{x_key}:Q"),
@@ -542,7 +542,8 @@ def plot_learning_curves(
                             )
                     break
         if page_axes:
-            place_legend_lower_right(plt.gcf(), page_axes, cfg=cfg)
+            # Matplotlib only: bottom strip under the multipanel (Figure_01).
+            place_legend_lower_right(plt.gcf(), page_axes, cfg=cfg, position="bottom")
         stem = idx.next_stem(
             outdir, f"learning_curves_p{page_i + 1}" if len(pages) > 1 else "learning_curves"
         )
