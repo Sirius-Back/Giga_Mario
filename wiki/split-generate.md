@@ -99,6 +99,13 @@ Strategy unit tests (example):
 
 ```bash
 python -m pytest tests/pipeline/test_split_predict.py -q
+python -m pytest tests/splits/test_pangenome_split.py -q
+```
+
+Pangenome native lib:
+
+```bash
+python -m src.splits.pangenome_native.build
 ```
 
 Then assign + materialize with `/split` (runner under `src/run/run_id/`).

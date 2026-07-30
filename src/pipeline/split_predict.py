@@ -10,6 +10,8 @@ Supported ``type`` values:
   - ``kmer`` — SBS with DSK k-mer composition features (same FNA inputs)
   - ``hashfrag`` — homology-aware orthogonal splits via hashFrag+BLAST
     (requires ``marked`` / ``fna`` and an explicit ``threshold``)
+  - ``pangenome`` — C++ k-mer contingency / repeat-graph connected components
+    (requires ``marked``; filters to PARSED IDs)
 """
 from __future__ import annotations
 
@@ -25,7 +27,7 @@ from src.splits.random import assign_folds_random, assign_folds_stratified
 from .common import SPLIT_CSV_COLUMNS, ensure_dir, read_csv, write_csv
 from .generate_fold import is_zsv_fold, normalize_fold_label
 
-SUPPORTED_SPLIT_TYPES = ("random", "gc", "kmer", "hashfrag")
+SUPPORTED_SPLIT_TYPES = ("random", "gc", "kmer", "hashfrag", "pangenome")
 
 
 def _load_optional_table(
@@ -295,6 +297,67 @@ def _run_hashfrag_split_predict(
     return out
 
 
+def _normalize_pangenome_k(kmer_size: Sequence[int] | int) -> int:
+    """Pangenome contingency uses a single k (default 21)."""
+    if isinstance(kmer_size, Sequence) and not isinstance(kmer_size, (str, bytes)):
+        vals = [int(x) for x in kmer_size]
+        if not vals:
+            return 21
+        if len(vals) > 1:
+            raise ValueError(
+                f"type=pangenome accepts a single --kmer-size; got {vals}"
+            )
+        return vals[0]
+    return int(kmer_size) if kmer_size is not None else 21
+
+
+def _run_pangenome_split_predict(
+    *,
+    outdir: Path,
+    seed: int,
+    id_csv: Path | None,
+    fold_csv: Path | None,
+    stratification_csv: Path | None,
+    fna: Path | None,
+    marked_fasta: Path | None,
+    parsed: Path | None,
+    ratios: tuple[float, float, float] | None,
+    max_ids: int | None,
+    plot: bool,
+    kmer_size: Sequence[int] | int,
+    genomes: Sequence[str] | None,
+    min_shared: int,
+) -> Path:
+    """Pangenome path: MARKED∩PARSED → C++ contingency CC → split.csv."""
+    from src.splits.pangenome import run_pangenome_split_assign
+
+    fna_root = marked_fasta or fna
+    if fna_root is None:
+        raise ValueError(
+            "split-predict type=pangenome requires --marked (MARKED dir) or --fna"
+        )
+    k = _normalize_pangenome_k(kmer_size)
+    summary = run_pangenome_split_assign(
+        outdir=outdir,
+        marked=Path(fna_root),
+        parsed=Path(parsed) if parsed is not None else None,
+        id_csv=Path(id_csv) if id_csv else None,
+        fold_csv=Path(fold_csv) if fold_csv else None,
+        stratification_csv=Path(stratification_csv) if stratification_csv else None,
+        seed=seed,
+        max_ids=max_ids,
+        genomes=genomes,
+        k=k,
+        min_shared=int(min_shared),
+        ratios=ratios,
+        plot=plot,
+    )
+    out = Path(summary["split_csv"])
+    if not out.is_file():
+        raise FileNotFoundError(f"pangenome split did not write split.csv: {out}")
+    return out
+
+
 def run_split_predict(
     *,
     outdir: Path,
@@ -322,6 +385,9 @@ def run_split_predict(
     kmer_size: Sequence[int] | int = 5,
     log_transform: bool = False,
     engine: str = "auto",
+    genomes: Sequence[str] | None = None,
+    min_shared: int = 1,
+    parsed: Path | None = None,
 ) -> Path:
     """
     Write `{outdir}/split.csv` with columns ID|train_test|fold.
@@ -330,13 +396,15 @@ def run_split_predict(
     ``type=gc`` — SBS on GC% + AAA% feature table (``src.splits.sbs`` / ``gc``).
     ``type=kmer`` — SBS on DSK k-mer composition features (``src.splits.kmer``).
     ``type=hashfrag`` — hashFrag+BLAST orthogonal homology splits (MARKED).
+    ``type=pangenome`` — C++ k-mer contingency connected components (MARKED∩PARSED).
 
     When ``fold.csv`` is present:
       - folds labeled zsv / zeroshotvalidation → train_test=zsv (excluded from
-        random / SBS / hashfrag assignment; materialize moves them to
+        random / SBS / hashfrag / pangenome assignment; materialize moves them to
         zero-shot-validation/)
       - other IDs get train/test/val; fold column keeps fold.csv value (random),
-        SBS cluster id (gc/kmer), or homologous-group id (hashfrag)
+        SBS cluster id (gc/kmer), homologous-group id (hashfrag), or contingency
+        component id (pangenome)
 
     When ``fold.csv`` is omitted, emits:
       ``Warning: folds are not included``
@@ -410,6 +478,26 @@ def run_split_predict(
             p_test=p_test,
             threads=threads,
             force=force,
+        )
+
+    if type == "pangenome":
+        if fold_csv is None:
+            warnings.warn("Warning: folds are not included", UserWarning, stacklevel=2)
+        return _run_pangenome_split_predict(
+            outdir=outdir,
+            seed=seed,
+            id_csv=id_csv,
+            fold_csv=fold_csv,
+            stratification_csv=stratification_csv,
+            fna=fna,
+            marked_fasta=marked_fasta,
+            parsed=parsed,
+            ratios=ratios,
+            max_ids=max_ids,
+            plot=plot,
+            kmer_size=kmer_size,
+            genomes=genomes,
+            min_shared=min_shared,
         )
 
     fold_map = _load_optional_table(fold_csv, min_cols=["ID", "fold"], label="fold.csv")
@@ -570,7 +658,7 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument(
         "--plot",
         action="store_true",
-        help="Write SBS PCA diagnostics (gc/kmer)",
+        help="Write SBS PCA (gc/kmer) or contingency graph (pangenome) figures",
     )
     p.add_argument(
         "--kmer-size",
@@ -579,8 +667,8 @@ def main(argv: list[str] | None = None) -> int:
         type=int,
         nargs="+",
         default=None,
-        help="K-mer size(s) for type=kmer (default: 5). Any k>=2 supported via "
-        "native/Python in-process counter; optional DSK via strategy API.",
+        help="K-mer size(s) for type=kmer (default: 5), or single k for "
+        "type=pangenome (default: 21)",
     )
     p.add_argument(
         "--log-transform",
@@ -593,13 +681,36 @@ def main(argv: list[str] | None = None) -> int:
         choices=["auto", "native", "cpp", "python", "dsk"],
         help="K-mer counting engine for type=kmer (cpp ≡ native C++)",
     )
+    p.add_argument(
+        "--parsed",
+        type=Path,
+        default=None,
+        help="PARSED dir for type=pangenome filter (default: <marked>/../PARSED)",
+    )
+    p.add_argument(
+        "--genome",
+        dest="genomes",
+        action="append",
+        default=None,
+        help="Restrict type=pangenome to genome id(s) from ID.csv (repeatable)",
+    )
+    p.add_argument(
+        "--min-shared",
+        type=int,
+        default=1,
+        help="Min shared k-mers to emit a contingency edge (type=pangenome)",
+    )
     args = p.parse_args(argv)
     n_clusters: int | Literal["auto"]
     if str(args.n_clusters).lower() == "auto":
         n_clusters = "auto"
     else:
         n_clusters = int(args.n_clusters)
-    kmer_size: Sequence[int] | int = 5
+    kmer_size: Sequence[int] | int
+    if args.type == "pangenome":
+        kmer_size = 21
+    else:
+        kmer_size = 5
     if args.kmer_size is not None:
         kmer_size = tuple(int(x) for x in args.kmer_size)
         if len(kmer_size) == 1:
@@ -630,6 +741,9 @@ def main(argv: list[str] | None = None) -> int:
         kmer_size=kmer_size,
         log_transform=bool(args.log_transform),
         engine=str(args.engine),
+        genomes=list(args.genomes) if args.genomes else None,
+        min_shared=int(args.min_shared),
+        parsed=args.parsed,
     )
     print(path)
     return 0

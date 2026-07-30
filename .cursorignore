@@ -7,7 +7,7 @@ archive/
 miniconda3/
 anaconda3/
 data/
-runs/
+# runs/ — fully visible (logs, figures, checkpoints)
 raw/
 ready_legnet/
 ready_caduceus/
@@ -24,8 +24,8 @@ run0/
 prokaryotes/
 genomes_smoketest/
 random/
-figures/
-logs/
+/figures/
+/logs/
 clean/
 bin/
 
@@ -232,3 +232,7 @@ blastdb/
 !.cursor/skills/**/*.tsv
 !.cursor/skills/**/*.md
 !.cursor/rules/**
+
+# Allow all content under runs/ despite broad globs (*.ckpt, *.csv, figures/, …)
+!runs/
+!runs/**

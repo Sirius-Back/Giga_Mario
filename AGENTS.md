@@ -23,7 +23,10 @@
 | `src/splits/sbs/` | Split-by-similarity core (FNA→distance→assignment) |
 | `src/splits/gc.py` | GC SBS strategy (`split-predict type=gc`) |
 | `src/splits/hashfrag.py` | hashFrag homology strategy (`split-predict type=hashfrag`) |
+| `src/splits/pangenome.py` | Pangenome contingency (`split-predict type=pangenome`) |
+| `src/splits/pangenome_native/` | C++ repeat/contingency graph for pangenome |
 | `splits/hashfrag.md` | Caption for hashFrag orthogonal split |
+| `splits/pangenome.md` | Caption for pangenome contingency split |
 | `wiki/sbs.md` | SBS architecture contracts |
 | `src/caduceus.py` | `@caduceus` fine-tune (`python -m src.caduceus`) |
 | `src/hydra_pipeline.py` | `/pipeline` Hydra orchestrator |
