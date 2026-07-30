@@ -13,7 +13,7 @@ When the user asks to train or fine-tune a model (e.g. Caduceus), follow this wo
 ## Initialize
 
 1. Validate inputs (data splits, config, checkpoints, env) before launch — fail early
-2. Initialize training (seed, logging, checkpoint dir, device as required). Register large CPU/RAM/GPU launches in `queue.md` per **local-job-queue** (keep ≥5% RAM free).
+2. Initialize training (seed, logging, checkpoint dir, device as required). Register large CPU/RAM/GPU launches in `queue.md` per **local-job-queue** (host RAM **used ≤ 95% of MemTotal** / MemAvailable ≥ 5%; not a CPU rule).
 3. Record the chosen trainer/config in `method-decision.md` when multiple options exist
 4. For Caduceus / expression tasks, confirm `metrics.md` + `torchmetrics` are available
 

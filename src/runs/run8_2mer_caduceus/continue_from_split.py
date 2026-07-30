@@ -47,6 +47,62 @@ def _direct_final_ok() -> bool:
     return weights.is_file() and weights.stat().st_size > 0
 
 
+def _adv_split_train_dir(adv_split_root: Path) -> Path | None:
+    """Return existing fold dir: legacy SPLIT/train or pipeline SPLIT/FASTA/TRAIN."""
+    legacy = adv_split_root / "train"
+    if legacy.is_dir():
+        return legacy
+    fasta_train = adv_split_root / "FASTA" / "TRAIN"
+    if fasta_train.is_dir():
+        return fasta_train
+    return None
+
+
+def _clean_failed_adv_train(train_dir: Path) -> None:
+    """Drop failed/empty train weights/logs; keep caduceus_input if present."""
+    if not train_dir.is_dir():
+        return
+    for name in (
+        "final_model",
+        "best_model",
+        "checkpoints",
+        "logs",
+        "tensorboard",
+        "figures",
+        "train_time.json",
+        "run_config.json",
+    ):
+        p = train_dir / name
+        if p.is_dir():
+            shutil.rmtree(p)
+        elif p.is_file():
+            p.unlink(missing_ok=True)
+
+
+def _caduceus_input_ready(adv_input: Path) -> bool:
+    """True when train/val/test labels+sequences exist under caduceus_input."""
+    for fold in ("train", "val", "test"):
+        if not (adv_input / fold / "labels.tsv").is_file():
+            return False
+        if not (adv_input / fold / "sequences").is_dir():
+            return False
+    return True
+
+
+def _resolve_adv_train_folders(adv_split_root: Path, adv_input: Path) -> Path:
+    """Reuse complete caduceus_input; otherwise rebuild from SPLIT."""
+    if _caduceus_input_ready(adv_input):
+        print(f"keeping existing caduceus_input at {adv_input}", flush=True)
+        return adv_input
+    if adv_input.exists():
+        print(
+            f"incomplete caduceus_input — removing for rebuild: {adv_input}",
+            flush=True,
+        )
+        shutil.rmtree(adv_input)
+    return adv_split_root
+
+
 def main(argv: list[str] | None = None) -> int:
     argv = list(sys.argv[1:] if argv is None else argv)
     batch = BATCH_SIZE
@@ -169,39 +225,61 @@ def main(argv: list[str] | None = None) -> int:
     adv_root = OUT_ROOT / "adversarial"
     adv_split_root = adv_root / "SPLIT"
     adv_input = adv_root / "train" / "caduceus_input"
-    if skip_adv_setup or (
-        (adv_split_root / "train").is_dir()
-        and (adv_input / "train").is_dir()
-        and (adv_root / "split.csv").is_file()
-    ):
-        if not ((adv_split_root / "train").is_dir() and (adv_root / "split.csv").is_file()):
-            raise RuntimeError(
-                "skip_adv_setup requested but adversarial SPLIT/split.csv missing"
+    adv_split_csv = adv_root / "split.csv"
+    adv_predict = adv_root / "PREDICT"
+    adv_parsed = adv_root / "PARSED"
+    split_train = _adv_split_train_dir(adv_split_root)
+    # Resume when skip_adv_setup OR split.csv already exists.
+    # Full wipe only when adversarial/split.csv is missing.
+    if adv_split_csv.is_file():
+        # split.csv present: reuse or rebuild SPLIT only (never rmtree adversarial/)
+        if split_train is not None:
+            print(
+                f"reusing existing SPLIT train at {split_train} "
+                f"(skip_adv_setup={skip_adv_setup})",
+                flush=True,
             )
-        print(
-            f"skip_adv_setup: reusing {adv_root} (SPLIT + optional caduceus_input)",
-            flush=True,
-        )
-        # Drop failed/empty train weights but keep caduceus_input if present
-        train_dir = adv_root / "train"
-        if train_dir.is_dir():
-            for name in (
-                "final_model",
-                "best_model",
-                "checkpoints",
-                "logs",
-                "tensorboard",
-                "figures",
-                "train_time.json",
-                "run_config.json",
-            ):
-                p = train_dir / name
-                if p.is_dir():
-                    shutil.rmtree(p)
-                elif p.is_file():
-                    p.unlink(missing_ok=True)
+        elif adv_predict.is_dir() and adv_parsed.is_dir():
+            print(
+                "adversarial/split.csv + PREDICT present but SPLIT/train missing — "
+                "rebuilding SPLIT only (no rmtree of adversarial/)",
+                flush=True,
+            )
+            adv_split_root = run_split(
+                adv_split_csv,
+                parsed_target=adv_predict,
+                parsed_data=adv_parsed,
+                outdir=adv_root,
+                strategy="traintestval",
+                intersect_allow=True,
+                id_csv=PANEL_ROOT / "ID.csv",
+            )
+            split_train = _adv_split_train_dir(Path(adv_split_root))
+            if split_train is None:
+                raise RuntimeError(
+                    f"run_split completed but no TRAIN fold under {adv_split_root}"
+                )
+        else:
+            raise RuntimeError(
+                "adversarial/split.csv present but cannot rebuild SPLIT: "
+                f"missing PREDICT/PARSED under {adv_root}"
+            )
+        if (adv_input / "train").is_dir() and not _caduceus_input_ready(adv_input):
+            print(
+                f"caduceus_input present but incomplete at {adv_input}",
+                flush=True,
+            )
+        _clean_failed_adv_train(adv_root / "train")
     else:
+        # split.csv missing → full rebuild
+        if skip_adv_setup:
+            print(
+                "skip_adv_setup=true but adversarial/split.csv missing — "
+                "falling back to full adversarial rebuild",
+                flush=True,
+            )
         if adv_root.exists():
+            print(f"full adversarial rebuild: rmtree {adv_root}", flush=True)
             shutil.rmtree(adv_root)
         run_adversarial(
             outdir_new=adv_root,
@@ -233,37 +311,42 @@ def main(argv: list[str] | None = None) -> int:
             id_csv=PANEL_ROOT / "ID.csv",
         )
 
-    run_train(
-        model="caduceus",
-        type="classification",
-        folders=adv_split_root,
-        outdir=adv_root / "train",
-        strategy="random",
-        smoke=False,
-        epochs=epochs,
-        batch_size=batch,
-        max_length=max_length,
-        seed=SEED,
-        n_devices=n_devices,
-        num_workers=NUM_WORKERS,
-        legnet_demo=False,
-        zsv_root=adv_root,
-        eval_zsv=True,
-        checkpoint_every_n_epochs=10,
-        early_stopping_patience=patience,
-        min_epochs=min_epochs,
-    )
-    run_pipeline_viz_auto(
-        out_root=OUT_ROOT,
-        panel_root=PANEL_ROOT,
-        train_dir=adv_root / "train",
-        run_id=RUN_ID,
-        seed=SEED,
-        plot_train=True,
-        plot_sbs=False,
-        include_split_compare=True,
-        viz_conda_env="caduceus_env",
-    )
+    adv_train_folders = _resolve_adv_train_folders(Path(adv_split_root), adv_input)
+    adv_weights = adv_root / "train" / "final_model" / "model.safetensors"
+    if adv_weights.is_file() and adv_weights.stat().st_size > 0:
+        print("adversarial final_model present — skip adv train", flush=True)
+    else:
+        run_train(
+            model="caduceus",
+            type="classification",
+            folders=adv_train_folders,
+            outdir=adv_root / "train",
+            strategy="random",
+            smoke=False,
+            epochs=epochs,
+            batch_size=batch,
+            max_length=max_length,
+            seed=SEED,
+            n_devices=n_devices,
+            num_workers=NUM_WORKERS,
+            legnet_demo=False,
+            zsv_root=adv_root,
+            eval_zsv=True,
+            checkpoint_every_n_epochs=10,
+            early_stopping_patience=patience,
+            min_epochs=min_epochs,
+        )
+        run_pipeline_viz_auto(
+            out_root=OUT_ROOT,
+            panel_root=PANEL_ROOT,
+            train_dir=adv_root / "train",
+            run_id=RUN_ID,
+            seed=SEED,
+            plot_train=True,
+            plot_sbs=False,
+            include_split_compare=True,
+            viz_conda_env="caduceus_env",
+        )
     done = {
         "run_id": RUN_ID,
         "status": "COMPLETED",
@@ -274,6 +357,7 @@ def main(argv: list[str] | None = None) -> int:
         "min_epochs": min_epochs,
         "early_stopping_patience": patience,
         "n_devices": n_devices,
+        "batch_size": batch,
     }
     (OUT_ROOT / "pipeline_done.json").write_text(
         json.dumps(done, indent=2) + "\n", encoding="utf-8"
