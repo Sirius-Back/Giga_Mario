@@ -92,8 +92,14 @@ def run_kmer_split_assign(
     dsk2ascii_bin: str | Path | None = None,
     abundance_min: int = 1,
     threads: int = 1,
+    features_npz: Path | None = None,
 ) -> dict[str, Any]:
-    """FNA → k-mer features → SBS assignment → ``split.csv`` (+ PCA diagnostics)."""
+    """FNA → k-mer features → SBS assignment → ``split.csv`` (+ PCA diagnostics).
+
+    If ``features_npz`` is set (or ``outdir/feature_table.npz`` exists and
+    ``features_npz`` is the string/path reuse sentinel via existing file when
+    passed explicitly), skip recomputing k-mer counts and assign from the dump.
+    """
     from src.splits.sbs.assign import normalize_cluster_method
     from src.splits.sbs.visualize import DEFAULT_PLOT_N
 
@@ -104,40 +110,55 @@ def run_kmer_split_assign(
     k_arg = kmer_length if kmer_length is not None else k
     k_list = normalize_k_list(k_arg)
 
-    features = compute_kmer_feature_table(
-        fna,
-        k=k_list,
-        mode=fna_mode,
-        ids=ids,
-        max_ids=max_ids,
-        normalize=normalize,
-        log_transform=log_transform,
-        engine=engine,
-        dsk_bin=dsk_bin,
-        dsk2ascii_bin=dsk2ascii_bin,
-        abundance_min=abundance_min,
-        threads=threads,
-    )
-    # Large panels: skip dense CSV (n×d text OOMs); keep npz for audit + assign in-RAM.
-    import numpy as np
+    npz_reuse = Path(features_npz) if features_npz is not None else None
+    if npz_reuse is not None:
+        print(f"kmer: reusing features from {npz_reuse}", flush=True)
+        from src.pipeline.mem_guard import ensure_allocation_fits, wait_for_ram_headroom
 
-    n_cells = int(features.n) * int(features.n_features)
-    if n_cells >= 20_000_000:
-        npz_path = outdir / "feature_table.npz"
-        np.savez_compressed(
-            npz_path,
-            ids=np.asarray(features.ids),
-            feature_names=np.asarray(features.feature_names),
-            matrix=features.matrix,
+        # Rough peak: matrix + standardize copy
+        wait_for_ram_headroom(0.95, label="kmer_assign_reuse")
+        features = FeatureTable.load_npz(npz_reuse, backend="kmer")
+        ensure_allocation_fits(
+            int(features.n) * int(features.n_features) * 4,
+            safety=1.15,
+            label="kmer_assign_matrix_resident",
         )
-        feat_csv: Path | str = npz_path
-        print(
-            f"kmer: skipped feature_table.csv (n_cells={n_cells}); wrote {npz_path}",
-            flush=True,
-        )
+        feat_csv: Path | str = npz_reuse
     else:
-        feat_csv = features.write_csv(outdir / "feature_table.csv")
+        features = compute_kmer_feature_table(
+            fna,
+            k=k_list,
+            mode=fna_mode,
+            ids=ids,
+            max_ids=max_ids,
+            normalize=normalize,
+            log_transform=log_transform,
+            engine=engine,
+            dsk_bin=dsk_bin,
+            dsk2ascii_bin=dsk2ascii_bin,
+            abundance_min=abundance_min,
+            threads=threads,
+        )
+        # Large panels: skip dense CSV (n×d text OOMs); keep npz for audit + assign in-RAM.
+        import numpy as np
 
+        n_cells = int(features.n) * int(features.n_features)
+        if n_cells >= 20_000_000:
+            npz_path = outdir / "feature_table.npz"
+            features.write_npz(npz_path)
+            feat_csv = npz_path
+            print(
+                f"kmer: skipped feature_table.csv (n_cells={n_cells}); wrote {npz_path}",
+                flush=True,
+            )
+        else:
+            feat_csv = features.write_csv(outdir / "feature_table.csv")
+
+    print(
+        f"kmer: assign cluster_method={cluster_method} n={features.n} "
+        f"d={features.n_features}",
+        flush=True,
+    )
     rows, meta = assign_from_features(
         features,
         fold_csv=fold_csv,

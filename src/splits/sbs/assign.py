@@ -70,14 +70,20 @@ def normalize_cluster_method(method: str | ClusterMethod) -> ClusterMethod:
 
 
 def _standardize(x: np.ndarray) -> np.ndarray:
+    """Column z-score; keep float32 and avoid an extra float64 full copy."""
     x = np.asarray(x)
+    if x.dtype == np.float32:
+        out = np.array(x, dtype=np.float32, copy=True, order="C")
+        mu = out.mean(axis=0)
+        sd = out.std(axis=0)
+        sd = np.where(sd < 1e-12, np.float32(1.0), sd.astype(np.float32, copy=False))
+        out -= mu
+        out /= sd
+        return out
     mu = x.mean(axis=0)
     sd = x.std(axis=0)
     sd = np.where(sd < 1e-12, 1.0, sd)
-    out = (x - mu) / sd
-    if x.dtype == np.float32:
-        return np.asarray(out, dtype=np.float32)
-    return out
+    return (x - mu) / sd
 
 
 def _pairwise_euclidean(x: np.ndarray) -> np.ndarray:
@@ -203,9 +209,12 @@ def _cluster_kmeans_elbow(
     x: np.ndarray, *, seed: int, k_min: int, k_max: int | None
 ) -> tuple[np.ndarray, dict[str, Any]]:
     n = x.shape[0]
-    upper = min(k_max or max(3, int(np.sqrt(n))), n - 1 if n > 1 else 1, 20)
+    # Full-panel elbow: cap k search — many MiniBatch fits × n×d blew RAM (run13/14).
+    hard_cap = 8 if n >= 100_000 else 20
+    upper = min(k_max or max(3, int(np.sqrt(n))), n - 1 if n > 1 else 1, hard_cap)
     lower = max(1, min(k_min, upper))
     inertias: dict[int, float] = {}
+    n_init = 3 if n >= 100_000 else (5 if n >= MINIBATCH_KMEANS_N else 10)
     for k in range(lower, upper + 1):
         # Reuse _cluster_kmeans path's estimator family via a fit-only call
         if n >= MINIBATCH_KMEANS_N:
@@ -215,17 +224,24 @@ def _cluster_kmeans_elbow(
                 n_clusters=k,
                 random_state=seed,
                 batch_size=min(4096, max(256, n // 50)),
-                n_init=5,
+                n_init=n_init,
             )
         else:
             from sklearn.cluster import KMeans
 
             model = KMeans(n_clusters=k, random_state=seed, n_init=10)
+        print(f"[assign] kmeans_elbow fit k={k}/{upper} n={n}", flush=True)
         model.fit(x)
         inertias[k] = float(model.inertia_)
     k_best = _elbow_k(inertias)
     labels = _cluster_kmeans(x, k_best, seed=seed)
-    return labels, {"k": k_best, "inertias": inertias, "selection": "elbow"}
+    return labels, {
+        "k": k_best,
+        "inertias": inertias,
+        "selection": "elbow",
+        "k_max_cap": hard_cap,
+        "n_init": n_init,
+    }
 
 
 def _cluster_hierarchical(x: np.ndarray, n_clusters: int) -> np.ndarray:

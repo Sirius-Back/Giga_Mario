@@ -80,6 +80,36 @@ class FeatureTable:
         sd = np.where(sd < 1e-12, 1.0, sd)
         return (x - mu) / sd
 
+    def write_npz(self, path: Path) -> Path:
+        """Compressed audit dump (ids, feature_names, matrix)."""
+        path = Path(path)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        np.savez_compressed(
+            path,
+            ids=np.asarray(self.ids),
+            feature_names=np.asarray(self.feature_names),
+            matrix=self.matrix,
+        )
+        return path
+
+    @classmethod
+    def load_npz(cls, path: Path, *, backend: str = "kmer") -> "FeatureTable":
+        """Load a table written by :meth:`write_npz` / k-mer large-panel dump."""
+        path = Path(path)
+        if not path.is_file():
+            raise FileNotFoundError(f"feature npz missing: {path}")
+        with np.load(path, allow_pickle=False) as z:
+            ids = tuple(str(x) for x in z["ids"].tolist())
+            names = tuple(str(x) for x in z["feature_names"].tolist())
+            matrix = z["matrix"]
+        return cls(
+            ids=ids,
+            feature_names=names,
+            matrix=matrix,
+            backend=backend,
+            extras={"loaded_from": str(path)},
+        )
+
     def write_csv(self, path: Path) -> Path:
         """Stream CSV to disk (avoids holding n×d Python dicts — OOM on large k)."""
         import csv
