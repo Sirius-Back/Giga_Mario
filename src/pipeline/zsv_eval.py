@@ -318,6 +318,29 @@ def eval_zsv_from_train_outdir(
         if not (model_dir / "config.json").is_file():
             model_dir = outdir / "best_model"
         cfg = _read_run_config(outdir)
+        task = str(cfg.get("task") or "regression").lower()
+        num_labels = int(cfg.get("num_labels") or 1)
+        # Fold-class / classification Caduceus heads do not match mice ZSV TPM labels.
+        if task == "classification" or num_labels > 1:
+            out_json = outdir / "logs" / "zero_shot_metrics.json"
+            out_json.parent.mkdir(parents=True, exist_ok=True)
+            payload: dict[str, Any] = {
+                "skipped": True,
+                "reason": "caduceus_classification_zsv_not_applicable",
+                "detail": (
+                    "Classification checkpoints (e.g. adversarial fold-class) predict "
+                    "discrete labels; panel zero-shot-validation trees carry TPM "
+                    "regression targets. ZSV metrics skipped rather than forcing a "
+                    "mismatched head load."
+                ),
+                "model_dir": str(model_dir),
+                "task": task,
+                "num_labels": num_labels,
+                "metrics": {},
+            }
+            out_json.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
+            print(f"WARNING: Caduceus ZSV skipped (classification) → {out_json}", flush=True)
+            return payload
         max_length = int(cfg.get("max_length") or 256)
         # Train-time eval_batch_size can be huge (DDP headroom); ZSV is single-GPU
         # forward-only and OOM'd at 480 on V100 — cap unless explicitly overridden.
