@@ -237,6 +237,17 @@ def main(argv: list[str] | None = None) -> int:
         action="store_true",
         help="Do not fill missing per-run train_monitor figures first",
     )
+    p.add_argument(
+        "--skip-tb-compare",
+        action="store_true",
+        help="Skip TensorBoard compare tree + HTML dashboard",
+    )
+    p.add_argument(
+        "--start-tb-server",
+        action="store_true",
+        help="After TB compare export, start TensorBoard (see tb_compare)",
+    )
+    p.add_argument("--tb-port", type=int, default=6006)
     args = p.parse_args(argv)
 
     refreshed: list[dict[str, Any]] = []
@@ -256,12 +267,34 @@ def main(argv: list[str] | None = None) -> int:
         outdir=args.outdir / "all_completed_adversarial",
         title="Completed runs — adversarial (from TB/jsonl metrics)",
     )
+    tb_bundle: dict[str, Any] | None = None
+    if not args.skip_tb_compare:
+        from src.train_viz.tb_compare import main as tb_compare_main
+
+        tb_argv = [
+            "--runs-root",
+            str(args.runs_root),
+            "-o",
+            str(args.outdir),
+            "--port",
+            str(args.tb_port),
+            "--stop-existing",
+        ]
+        if args.start_tb_server:
+            tb_argv.append("--start-server")
+        tb_rc = tb_compare_main(tb_argv)
+        bundle_path = args.outdir / "tb_compare_bundle.json"
+        if bundle_path.is_file():
+            tb_bundle = json.loads(bundle_path.read_text(encoding="utf-8"))
+        elif tb_rc not in (0, None):
+            tb_bundle = {"status": f"tb_compare_failed:{tb_rc}"}
     inventory = {
         "runs_root": str(args.runs_root),
         "outdir": str(args.outdir),
         "refreshed_missing_monitors": refreshed,
         "direct": direct,
         "adversarial": adv,
+        "tb_compare": tb_bundle,
         "written_at": datetime.now(timezone.utc).isoformat(),
     }
     inv_path = args.outdir / "all_completed_inventory.json"
@@ -299,6 +332,18 @@ def main(argv: list[str] | None = None) -> int:
         for item in refreshed:
             st = (item.get("monitor") or {}).get("status")
             lines.append(f"- `{item['run_id']}` / `{item['stage']}` → `{st}`")
+    if tb_bundle:
+        lines.extend(
+            [
+                "",
+                "## TensorBoard compare",
+                f"- Dashboard: `{args.outdir / 'compare_index.html'}`",
+                f"- Event trees: `{args.outdir / 'tb_compare'}`",
+            ]
+        )
+        tb_meta = tb_bundle.get("tensorboard") if isinstance(tb_bundle, dict) else None
+        if isinstance(tb_meta, dict) and tb_meta.get("url"):
+            lines.append(f"- Live URL: {tb_meta['url']}")
     (args.outdir / "all_completed_inventory.md").write_text(
         "\n".join(lines) + "\n", encoding="utf-8"
     )
