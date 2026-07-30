@@ -145,6 +145,7 @@ split-generate:
 |--------------|------|
 | `/split` | Writes `src/run/run_id/{data}_{split}_{mode}.py` and execs split-predict+split |
 | **A2A `@preprocess` / `adapt`** | **Required for `pangenome` when `MARKED_pangenome` is missing or the pangenome window ≠ panel `MARKED`.** Invoke adapt with pangenome `environment`/`window` → `MARKED_pangenome`; then filter → `MARKED_parsed` (`src.splits.intersect_pangenome`). Do not silently reuse panel MARKED unless `reuse_panel_marked=True`. |
+| **Pangenome graph persist** | Always write `{outdir}/graph/` (`contingency_graph.npz`, `ids.txt`, `nodes.tsv`, `edges.tsv`, meta). Clustering = **union-find connected components** on shared-k-mer contingency (not Louvain/Leiden, Laplacian, or MCL). Capped `edges.*` are for viz/rebuild; CC labels use the full stream. Reload via `load_contingency_graph` / `plot_pangenome_contingency_from_artifacts`. Caption: `splits/pangenome.md`. |
 | **A2A `@preprocess` / `adapt` (`blastp`)** | **Required for `blastp`:** inputs are **fna+gtf+window+genetic code** (default `universal`), not panel MARKED. adapt → MARKED+intersect; **filter** IDs ∈ PARSED; SBS fold-filter → blastp (optional non-all-vs-all heuristic) → in-built cluster/strat. Caption: `splits/blastp.md`; skill: `../blastp/SKILL.md`. |
 | `splits/*.md` | Spec captions |
 | `wiki/architecture.md` | Pipeline contracts |

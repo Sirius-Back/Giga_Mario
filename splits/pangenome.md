@@ -60,9 +60,42 @@ Opt-in only: `reuse_panel_marked=True` when the panel MARKED window is
 
 # Clustering
 
-- Default: **connected components** via union-find on shared-k-mer contingency.
-- Alternatives (future): Leiden / Louvain / label propagation on the same graph.
+- **Default (implemented):** **union-find connected components** on the
+  bipartite region↔k-mer contingency graph. Regions that share ≥ `min_shared`
+  identical ACGT k-mers (default 1) are united into one component. Each
+  connected component becomes one **fold** label; train/val/test are assigned
+  **at fold (component) grain** via Caduceus-aligned ratios (`seed`), not per
+  region independently.
+- **Not used:** Louvain/Leiden modularity, spectral/Laplacian clustering, or
+  Markov clustering (MCL). Those remain future options on the same graph.
+- **ZSV:** IDs labeled zsv in `fold.csv` are held out before CC assignment.
 - Must not require resolving the full repeat graph or all pairwise distances.
+
+# Saved graph artifacts
+
+Every pangenome split writes a reusable graph under `{outdir}/graph/`
+(`save_graph=True` by default):
+
+| File | Content |
+|------|---------|
+| `contingency_graph.npz` | `cluster_ids`, `edge_u`, `edge_v`, `edge_w` (int32) |
+| `ids.txt` | Region IDs in array index order |
+| `nodes.tsv` | `ID\|cluster` |
+| `edges.tsv` | `source\|target\|weight` (capped co-occurrence edges) |
+| `contingency_graph_meta.json` | k, min_shared, max_edges, clustering method note |
+
+**Important:** `cluster_ids` come from the **full** streaming contingency
+union-find. `edges.*` are a **capped** region–region edge list (≤ `max_edges`,
+default 100 000) for visualization / figure rebuild — reloading CC from the
+capped edge list alone may not recover every component merge.
+
+Reload / replot without re-adapt::
+
+  python -c "from src.splits.pangenome import load_contingency_graph, plot_pangenome_contingency_from_artifacts; ..."
+  # or
+  python -m src.runs.run17_pangenome_CDS_legnet.plot_contingency_graph
+
+Diagnostics also under `figures/` (connected nodes only; fold + train_test panels).
 
 # Implementations
 
@@ -93,7 +126,9 @@ Opt-in only: `reuse_panel_marked=True` when the panel MARKED window is
     A2A: if MARKED_pangenome is missing, agents must invoke @preprocess/adapt
     with the pangenome window — do not assume ready_*/MARKED matches.
     Filter: MARKED_pangenome ∩ PARSED → MARKED_parsed.
-    Diagnostics: figures/contingency_graph.{json,dot,pdf,png}.
+    Diagnostics: `{outdir}/graph/` (npz + nodes/edges TSV — reusable) and
+    `figures/contingency_graph.*` + `Figure_pangenome_contingency_fold_train_test.*`.
+    Clustering = union-find CC (not modularity / Laplacian / MCL).
 
 - name: Minigraph-Cactus
   url: https://github.com/ComparativeGenomicsToolkit/cactus

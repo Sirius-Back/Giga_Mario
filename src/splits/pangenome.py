@@ -44,8 +44,32 @@ __all__ = (
     "adapt_pangenome_from_raw",
     "ensure_marked_pangenome",
     "build_contingency_clusters",
+    "save_contingency_graph",
+    "load_contingency_graph",
     "render_contingency_graph",
+    "plot_pangenome_contingency_from_artifacts",
+    "plot_fold_size_distribution",
     "run_pangenome_split_assign",
+)
+
+# Okabe–Ito (colorblind-safe) for train_test categorical panels
+_TRAIN_TEST_COLORS = {
+    "train": "#0072B2",
+    "val": "#E69F00",
+    "validation": "#E69F00",
+    "test": "#009E73",
+    "zsv": "#CC79A7",
+    "zeroshotvalidation": "#CC79A7",
+}
+_FOLD_PALETTE = (
+    "#0072B2",
+    "#E69F00",
+    "#009E73",
+    "#CC79A7",
+    "#D55E00",
+    "#56B4E9",
+    "#F0E442",
+    "#000000",
 )
 
 SPLIT_ID = "pangenome"
@@ -322,7 +346,17 @@ def build_contingency_clusters(
     max_edges: int = 100_000,
     collect_edges: bool = True,
 ) -> Any:
-    """C++ contingency clustering on sequences; returns ``ContingencyGraphResult``."""
+    """C++ contingency clustering on sequences; returns ``ContingencyGraphResult``.
+
+    Clustering is **union-find connected components** on the bipartite
+    region↔k-mer contingency (regions that share ≥ ``min_shared`` identical
+    ACGT k-mers are united). This is **not** Leiden/Louvain modularity,
+    spectral/Laplacian clustering, or Markov clustering (MCL).
+
+    Optional ``edge_*`` arrays are a **capped** region–region co-occurrence
+    edge list for visualization / persistence (≤ ``max_edges``); the CC labels
+    themselves use the full streaming contingency, not only the capped edges.
+    """
     from src.splits.pangenome_native import get_native_graph
 
     return get_native_graph().contingency_clusters(
@@ -332,6 +366,154 @@ def build_contingency_clusters(
         max_edges=max_edges,
         collect_edges=collect_edges,
     )
+
+
+def save_contingency_graph(
+    outdir: Path,
+    ids: Sequence[str],
+    graph: Any,
+    *,
+    k: int,
+    min_shared: int = DEFAULT_MIN_SHARED,
+    max_edges: int = 100_000,
+    seed: int | None = None,
+    extra_meta: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Persist the contingency graph for later reload / figure rebuild.
+
+    Layout under ``{outdir}/graph/``::
+
+      contingency_graph.npz   # cluster_ids, edge_u, edge_v, edge_w (int32)
+      ids.txt                 # one region ID per line (order = array index)
+      nodes.tsv               # ID|cluster
+      edges.tsv               # source|target|weight  (capped co-occurrence edges)
+      contingency_graph_meta.json
+
+    Reload with :func:`load_contingency_graph`.
+    """
+    import numpy as np
+
+    outdir = Path(outdir)
+    graph_dir = outdir / "graph"
+    graph_dir.mkdir(parents=True, exist_ok=True)
+
+    ids_list = [str(x) for x in ids]
+    n = len(ids_list)
+    cluster_ids = np.asarray(graph.cluster_ids, dtype=np.int32)
+    if cluster_ids.shape != (n,):
+        raise ValueError(
+            f"cluster_ids shape {cluster_ids.shape} != (n_ids={n},)"
+        )
+    edge_u = np.asarray(graph.edge_u, dtype=np.int32)
+    edge_v = np.asarray(graph.edge_v, dtype=np.int32)
+    edge_w = np.asarray(graph.edge_w, dtype=np.int32)
+    if not (len(edge_u) == len(edge_v) == len(edge_w)):
+        raise ValueError("edge_u/v/w length mismatch")
+
+    npz_path = graph_dir / "contingency_graph.npz"
+    np.savez_compressed(
+        npz_path,
+        cluster_ids=cluster_ids,
+        edge_u=edge_u,
+        edge_v=edge_v,
+        edge_w=edge_w,
+    )
+    ids_path = graph_dir / "ids.txt"
+    ids_path.write_text("\n".join(ids_list) + ("\n" if ids_list else ""), encoding="utf-8")
+
+    nodes_path = graph_dir / "nodes.tsv"
+    with nodes_path.open("w", encoding="utf-8") as fh:
+        fh.write("ID|cluster\n")
+        for rid, cid in zip(ids_list, cluster_ids.tolist()):
+            fh.write(f"{rid}|{int(cid)}\n")
+
+    edges_path = graph_dir / "edges.tsv"
+    with edges_path.open("w", encoding="utf-8") as fh:
+        fh.write("source|target|weight\n")
+        for u, v, w in zip(edge_u.tolist(), edge_v.tolist(), edge_w.tolist()):
+            ui, vi = int(u), int(v)
+            if ui < 0 or vi < 0 or ui >= n or vi >= n:
+                continue
+            fh.write(f"{ids_list[ui]}|{ids_list[vi]}|{int(w)}\n")
+
+    meta = {
+        "format": "gigamario_pangenome_contingency_graph_v1",
+        "clustering": "union_find_connected_components",
+        "clustering_note": (
+            "Clusters = connected components via union-find on regions that "
+            "share ≥ min_shared ACGT k-mers (bipartite region↔k-mer contingency). "
+            "Not modularity (Louvain/Leiden), not Laplacian/spectral, not MCL."
+        ),
+        "edges_note": (
+            "edges.tsv / edge_* arrays are a capped co-occurrence edge list for "
+            "visualization and figure rebuild (≤ max_edges). CC labels in "
+            "cluster_ids use the full streaming contingency, not only these edges."
+        ),
+        "k": int(k),
+        "min_shared": int(min_shared),
+        "max_edges": int(max_edges),
+        "seed": seed,
+        "n_ids": n,
+        "n_clusters": int(getattr(graph, "n_clusters", len(set(cluster_ids.tolist())))),
+        "n_edges": int(len(edge_u)),
+        "paths": {
+            "npz": str(npz_path),
+            "ids": str(ids_path),
+            "nodes_tsv": str(nodes_path),
+            "edges_tsv": str(edges_path),
+        },
+    }
+    if extra_meta:
+        meta["extra"] = dict(extra_meta)
+    meta_path = graph_dir / "contingency_graph_meta.json"
+    meta_path.write_text(json.dumps(meta, indent=2, default=str) + "\n", encoding="utf-8")
+    meta["paths"]["meta"] = str(meta_path)
+    return meta
+
+
+def load_contingency_graph(graph_dir: Path) -> dict[str, Any]:
+    """Load a graph saved by :func:`save_contingency_graph`.
+
+    Returns dict with ``ids``, ``cluster_ids``, ``edge_u``, ``edge_v``, ``edge_w``,
+    ``n_clusters``, ``meta``.
+    """
+    import numpy as np
+
+    graph_dir = Path(graph_dir)
+    if graph_dir.name != "graph" and (graph_dir / "graph").is_dir():
+        graph_dir = graph_dir / "graph"
+    npz_path = graph_dir / "contingency_graph.npz"
+    ids_path = graph_dir / "ids.txt"
+    meta_path = graph_dir / "contingency_graph_meta.json"
+    if not npz_path.is_file():
+        raise FileNotFoundError(f"contingency graph npz missing: {npz_path}")
+    if not ids_path.is_file():
+        raise FileNotFoundError(f"contingency graph ids missing: {ids_path}")
+
+    ids = [ln.strip() for ln in ids_path.read_text(encoding="utf-8").splitlines() if ln.strip()]
+    with np.load(npz_path) as data:
+        cluster_ids = np.asarray(data["cluster_ids"], dtype=np.int32)
+        edge_u = np.asarray(data["edge_u"], dtype=np.int32)
+        edge_v = np.asarray(data["edge_v"], dtype=np.int32)
+        edge_w = np.asarray(data["edge_w"], dtype=np.int32)
+    if len(ids) != len(cluster_ids):
+        raise ValueError(
+            f"ids.txt length {len(ids)} != cluster_ids length {len(cluster_ids)}"
+        )
+    meta: dict[str, Any] = {}
+    if meta_path.is_file():
+        meta = json.loads(meta_path.read_text(encoding="utf-8"))
+    n_clusters = int(meta.get("n_clusters") or len(set(cluster_ids.tolist())))
+    return {
+        "ids": ids,
+        "cluster_ids": cluster_ids,
+        "edge_u": edge_u,
+        "edge_v": edge_v,
+        "edge_w": edge_w,
+        "n_clusters": n_clusters,
+        "meta": meta,
+        "graph_dir": str(graph_dir),
+    }
 
 
 def _load_fold_map(fold_csv: Path | None) -> dict[str, str]:
@@ -474,8 +656,16 @@ def render_contingency_graph(
     outdir: Path,
     *,
     title: str = "pangenome contingency graph (connected nodes)",
+    train_test: Sequence[str] | None = None,
+    fold: Sequence[str] | None = None,
 ) -> dict[str, Any]:
-    """Render region co-occurrence graph; drop isolates (degree 0)."""
+    """Render region co-occurrence graph; drop isolates (degree 0).
+
+    Always writes ``contingency_graph.{json,dot}`` and a cluster-coloured
+    scatter. When ``train_test`` / ``fold`` are provided (aligned with
+    ``ids``), also writes a two-panel figure coloured by train/test/val/zsv
+    and by fold (connected nodes only).
+    """
     outdir = Path(outdir)
     outdir.mkdir(parents=True, exist_ok=True)
 
@@ -494,13 +684,33 @@ def render_contingency_graph(
     edges = [e for e in edges if e[0] in connected and e[1] in connected]
     nodes = sorted(connected)
     cid_map = {str(rid): int(cid) for rid, cid in zip(ids, cluster_ids)}
+    tt_map: dict[str, str] = {}
+    fold_map: dict[str, str] = {}
+    if train_test is not None:
+        if len(train_test) != n:
+            raise ValueError(
+                f"train_test length {len(train_test)} != n_ids {n}"
+            )
+        tt_map = {str(rid): str(lab) for rid, lab in zip(ids, train_test)}
+    if fold is not None:
+        if len(fold) != n:
+            raise ValueError(f"fold length {len(fold)} != n_ids {n}")
+        fold_map = {str(rid): str(lab) for rid, lab in zip(ids, fold)}
 
     graph_json = {
         "title": title,
         "n_nodes_connected": len(nodes),
         "n_nodes_total": n,
         "n_edges": len(edges),
-        "nodes": [{"id": rid, "cluster": cid_map.get(rid, -1)} for rid in nodes],
+        "nodes": [
+            {
+                "id": rid,
+                "cluster": cid_map.get(rid, -1),
+                **({"train_test": tt_map[rid]} if rid in tt_map else {}),
+                **({"fold": fold_map[rid]} if rid in fold_map else {}),
+            }
+            for rid in nodes
+        ],
         "edges": [{"source": a, "target": b, "weight": w} for a, b, w in edges],
     }
 
@@ -522,7 +732,11 @@ def render_contingency_graph(
 
     png_path = outdir / "contingency_graph.png"
     pdf_path = outdir / "contingency_graph.pdf"
+    split_png = outdir / "Figure_pangenome_contingency_fold_train_test.png"
+    split_pdf = outdir / "Figure_pangenome_contingency_fold_train_test.pdf"
+    split_svg = outdir / "Figure_pangenome_contingency_fold_train_test.svg"
     plotted = False
+    split_plotted = False
     try:
         import matplotlib
 
@@ -530,6 +744,8 @@ def render_contingency_graph(
         import matplotlib.pyplot as plt
         import numpy as np
 
+        pos: Any = None
+        idx: dict[str, int] = {}
         if nodes and edges:
             idx = {rid: i for i, rid in enumerate(nodes)}
             m = len(nodes)
@@ -546,6 +762,7 @@ def render_contingency_graph(
                     disp[i] -= direction * force
                     disp[j] += direction * force
                 pos += disp
+
             fig, ax = plt.subplots(figsize=(8, 8))
             for a, b, w in edges:
                 i, j = idx[a], idx[b]
@@ -555,9 +772,10 @@ def render_contingency_graph(
                     color="#999999",
                     lw=max(0.5, min(3.0, w / 5.0)),
                     zorder=1,
+                    alpha=0.35,
                 )
             colors = [cid_map.get(rid, 0) for rid in nodes]
-            ax.scatter(pos[:, 0], pos[:, 1], c=colors, cmap="tab20", s=40, zorder=2)
+            ax.scatter(pos[:, 0], pos[:, 1], c=colors, cmap="tab20", s=18, zorder=2)
             ax.set_title(title)
             ax.set_axis_off()
             fig.tight_layout()
@@ -573,6 +791,123 @@ def render_contingency_graph(
             fig.savefig(png_path, dpi=300, bbox_inches="tight")
             plt.close(fig)
             plotted = True
+
+        if pos is not None and (tt_map or fold_map):
+            n_panels = int(bool(tt_map)) + int(bool(fold_map))
+            fig, axes = plt.subplots(
+                1, n_panels, figsize=(7.2 * n_panels, 6.5), squeeze=False
+            )
+            ax_i = 0
+
+            def _draw_edges(ax: Any) -> None:
+                for a, b, w in edges:
+                    i, j = idx[a], idx[b]
+                    ax.plot(
+                        [pos[i, 0], pos[j, 0]],
+                        [pos[i, 1], pos[j, 1]],
+                        color="#BBBBBB",
+                        lw=max(0.4, min(2.5, w / 6.0)),
+                        zorder=1,
+                        alpha=0.3,
+                    )
+
+            if tt_map:
+                ax = axes[0, ax_i]
+                ax_i += 1
+                _draw_edges(ax)
+                labels = [tt_map.get(rid, "other") for rid in nodes]
+                unique = sorted(set(labels), key=lambda x: (x not in _TRAIN_TEST_COLORS, x))
+                color_of = {
+                    lab: _TRAIN_TEST_COLORS.get(lab.lower(), "#999999") for lab in unique
+                }
+                for lab in unique:
+                    mask = [lb == lab for lb in labels]
+                    pts = pos[[i for i, msk in enumerate(mask) if msk]]
+                    if len(pts) == 0:
+                        continue
+                    ax.scatter(
+                        pts[:, 0],
+                        pts[:, 1],
+                        c=color_of[lab],
+                        s=16,
+                        zorder=2,
+                        label=f"{lab} (n={sum(mask)})",
+                        edgecolors="none",
+                    )
+                ax.set_title("Connected nodes by train / test / val / zsv")
+                ax.set_axis_off()
+                ax.legend(
+                    loc="upper left",
+                    bbox_to_anchor=(1.02, 1.0),
+                    frameon=False,
+                    fontsize=8,
+                )
+
+            if fold_map:
+                ax = axes[0, ax_i]
+                _draw_edges(ax)
+                labels = [fold_map.get(rid, "other") for rid in nodes]
+                # Stable palette index from fold string; legend = top folds by count.
+                from collections import Counter
+
+                counts = Counter(labels)
+                top = [f for f, _ in counts.most_common(12)]
+                top_set = set(top)
+                fold_color = {
+                    f: _FOLD_PALETTE[i % len(_FOLD_PALETTE)] for i, f in enumerate(top)
+                }
+                other_c = "#CCCCCC"
+                # Draw "other" first so top folds sit on top.
+                for lab, pts_idx in (
+                    ("__other__", [i for i, lb in enumerate(labels) if lb not in top_set]),
+                    *[
+                        (f, [i for i, lb in enumerate(labels) if lb == f])
+                        for f in top
+                    ],
+                ):
+                    if not pts_idx:
+                        continue
+                    pts = pos[pts_idx]
+                    if lab == "__other__":
+                        ax.scatter(
+                            pts[:, 0],
+                            pts[:, 1],
+                            c=other_c,
+                            s=10,
+                            zorder=2,
+                            label=f"other folds (n={len(pts_idx)})",
+                            edgecolors="none",
+                        )
+                    else:
+                        ax.scatter(
+                            pts[:, 0],
+                            pts[:, 1],
+                            c=fold_color[lab],
+                            s=16,
+                            zorder=3,
+                            label=f"fold {lab} (n={counts[lab]})",
+                            edgecolors="none",
+                        )
+                ax.set_title("Connected nodes by fold (top 12 + other)")
+                ax.set_axis_off()
+                ax.legend(
+                    loc="upper left",
+                    bbox_to_anchor=(1.02, 1.0),
+                    frameon=False,
+                    fontsize=7,
+                )
+
+            fig.suptitle(
+                "Pangenome contingency graph (connected nodes only)",
+                fontsize=11,
+                y=1.02,
+            )
+            fig.tight_layout()
+            fig.savefig(split_pdf, bbox_inches="tight")
+            fig.savefig(split_png, dpi=300, bbox_inches="tight")
+            fig.savefig(split_svg, bbox_inches="tight")
+            plt.close(fig)
+            split_plotted = True
     except Exception as exc:  # noqa: BLE001
         (outdir / "contingency_graph_plot_error.txt").write_text(
             f"{type(exc).__name__}: {exc}\n", encoding="utf-8"
@@ -583,9 +918,256 @@ def render_contingency_graph(
         "dot": str(dot_path),
         "png": str(png_path) if plotted and png_path.is_file() else None,
         "pdf": str(pdf_path) if plotted and pdf_path.is_file() else None,
+        "split_png": str(split_png) if split_plotted and split_png.is_file() else None,
+        "split_pdf": str(split_pdf) if split_plotted and split_pdf.is_file() else None,
+        "split_svg": str(split_svg) if split_plotted and split_svg.is_file() else None,
         "n_nodes_connected": len(nodes),
         "n_edges": len(edges),
     }
+
+
+def plot_fold_size_distribution(
+    assignment_or_split_csv: Path,
+    outdir: Path,
+    *,
+    title: str | None = None,
+    exclude_zsv: bool = True,
+    bins: int = 60,
+) -> dict[str, Any]:
+    """Histogram of contingency fold sizes on a log10(size + 1) scale.
+
+    Reads ``pangenome_assignment.csv`` (``fold`` / ``cluster``) or ``split.csv``
+    (``fold``). Writes publication PDF/PNG/SVG under ``outdir``.
+    """
+    from collections import Counter
+
+    import numpy as np
+
+    assignment_or_split_csv = Path(assignment_or_split_csv)
+    outdir = Path(outdir)
+    outdir.mkdir(parents=True, exist_ok=True)
+    rows = read_csv(assignment_or_split_csv)
+    if not rows:
+        raise ValueError(f"empty table: {assignment_or_split_csv}")
+    fold_key = "fold" if "fold" in rows[0] else "cluster"
+    if fold_key not in rows[0]:
+        raise ValueError(
+            f"need fold or cluster column in {assignment_or_split_csv}; "
+            f"have {list(rows[0])}"
+        )
+    counts: Counter[str] = Counter()
+    for row in rows:
+        lab = str(row[fold_key]).strip()
+        if exclude_zsv and (lab.lower() in {"zsv", "zeroshotvalidation"} or is_zsv_fold(lab)):
+            continue
+        counts[lab] += 1
+    if not counts:
+        raise ValueError("no folds left after ZSV filter")
+
+    sizes = np.asarray(sorted(counts.values()), dtype=np.float64)
+    log_sizes = np.log10(sizes + 1.0)
+    n_folds = int(len(sizes))
+    n_regions = int(sizes.sum())
+    n_singletons = int((sizes == 1).sum())
+
+    stats = {
+        "n_folds": n_folds,
+        "n_regions": n_regions,
+        "n_singletons": n_singletons,
+        "singleton_fraction": float(n_singletons / n_folds),
+        "size_min": int(sizes.min()),
+        "size_median": float(np.median(sizes)),
+        "size_mean": float(sizes.mean()),
+        "size_max": int(sizes.max()),
+        "exclude_zsv": exclude_zsv,
+        "source": str(assignment_or_split_csv),
+    }
+
+    pdf_path = outdir / "Figure_pangenome_fold_size_log10.pdf"
+    png_path = outdir / "Figure_pangenome_fold_size_log10.png"
+    svg_path = outdir / "Figure_pangenome_fold_size_log10.svg"
+    csv_path = outdir / "fold_size_distribution_stats.json"
+
+    import matplotlib
+
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+
+    fig, ax = plt.subplots(figsize=(6.5, 4.2))
+    ax.hist(
+        log_sizes,
+        bins=bins,
+        color="#0072B2",
+        edgecolor="white",
+        linewidth=0.4,
+    )
+    ax.set_xlabel(r"$\log_{10}(\mathrm{fold\ size} + 1)$")
+    ax.set_ylabel("Number of folds")
+    ax.set_title(
+        title
+        or (
+            f"Pangenome contingency fold sizes "
+            f"(n_folds={n_folds:,}; n_regions={n_regions:,})"
+        )
+    )
+    # Annotate key quantiles on the log10(size+1) axis
+    for label, val in (
+        ("median", float(np.median(sizes))),
+        ("max", float(sizes.max())),
+    ):
+        x = float(np.log10(val + 1.0))
+        ax.axvline(x, color="#D55E00", ls="--", lw=1.0, alpha=0.85)
+        ax.text(
+            x,
+            ax.get_ylim()[1] * 0.92 if ax.get_ylim()[1] else 1.0,
+            f"{label}={int(val)}",
+            rotation=90,
+            va="top",
+            ha="right",
+            fontsize=8,
+            color="#D55E00",
+        )
+    note = (
+        f"singletons={n_singletons:,} ({100 * n_singletons / n_folds:.1f}% of folds)"
+        + ("; ZSV excluded" if exclude_zsv else "")
+    )
+    ax.text(
+        0.98,
+        0.98,
+        note,
+        transform=ax.transAxes,
+        ha="right",
+        va="top",
+        fontsize=8,
+        color="#333333",
+    )
+    ax.spines["top"].set_visible(False)
+    ax.spines["right"].set_visible(False)
+    fig.tight_layout()
+    fig.savefig(pdf_path, bbox_inches="tight")
+    fig.savefig(png_path, dpi=300, bbox_inches="tight")
+    fig.savefig(svg_path, bbox_inches="tight")
+    plt.close(fig)
+
+    csv_path.write_text(json.dumps(stats, indent=2) + "\n", encoding="utf-8")
+    stats["pdf"] = str(pdf_path)
+    stats["png"] = str(png_path)
+    stats["svg"] = str(svg_path)
+    stats["stats_json"] = str(csv_path)
+    return stats
+
+
+def plot_pangenome_contingency_from_artifacts(
+    *,
+    marked_parsed: Path,
+    split_csv: Path,
+    outdir: Path,
+    k: int = DEFAULT_K,
+    min_shared: int = DEFAULT_MIN_SHARED,
+    max_edges: int = 100_000,
+    seed: int = 42,
+    prefer_saved_graph: bool = True,
+) -> dict[str, Any]:
+    """Rebuild contingency figure from saved ``graph/`` or recompute from MARKED.
+
+    Prefer ``{outdir}/graph/contingency_graph.npz`` when present so figures can
+    be regenerated without re-streaming sequences. Falls back to C++ rebuild
+    from ``MARKED_parsed`` + labels from ``split.csv``.
+    """
+    marked_parsed = Path(marked_parsed)
+    split_csv = Path(split_csv)
+    outdir = Path(outdir)
+    if not split_csv.is_file():
+        raise FileNotFoundError(f"split.csv missing: {split_csv}")
+
+    rows = read_csv(split_csv)
+    if not rows or "ID" not in rows[0]:
+        raise ValueError(f"split.csv missing ID column: {split_csv}")
+    split_tt = {r["ID"].strip(): r.get("train_test", "").strip() for r in rows}
+    split_fold = {r["ID"].strip(): r.get("fold", "").strip() for r in rows}
+
+    loaded: dict[str, Any] | None = None
+    graph_dir = outdir / "graph"
+    if prefer_saved_graph and (graph_dir / "contingency_graph.npz").is_file():
+        loaded = load_contingency_graph(graph_dir)
+        ids = list(loaded["ids"])
+        cluster_ids = loaded["cluster_ids"].tolist()
+        edge_u = loaded["edge_u"].tolist()
+        edge_v = loaded["edge_v"].tolist()
+        edge_w = loaded["edge_w"].tolist()
+        n_clusters = int(loaded["n_clusters"])
+        source = "saved_graph"
+        meta_k = int((loaded.get("meta") or {}).get("k", k))
+        meta_min = int((loaded.get("meta") or {}).get("min_shared", min_shared))
+    else:
+        if not marked_parsed.is_dir():
+            raise FileNotFoundError(f"MARKED_parsed missing: {marked_parsed}")
+        ids = [r["ID"].strip() for r in rows]
+        seq_map = load_fna_directory(marked_parsed, ids=ids)
+        missing = [rid for rid in ids if rid not in seq_map]
+        if missing:
+            raise FileNotFoundError(
+                f"{len(missing)} split IDs missing from MARKED_parsed "
+                f"(e.g. {missing[:5]})"
+            )
+        sequences = [seq_map[rid] for rid in ids]
+        graph = build_contingency_clusters(
+            sequences,
+            k=int(k),
+            min_shared=int(min_shared),
+            max_edges=int(max_edges),
+            collect_edges=True,
+        )
+        save_contingency_graph(
+            outdir,
+            ids,
+            graph,
+            k=int(k),
+            min_shared=int(min_shared),
+            max_edges=int(max_edges),
+            seed=int(seed),
+            extra_meta={"source": "recomputed_for_plot"},
+        )
+        cluster_ids = graph.cluster_ids.tolist()
+        edge_u = graph.edge_u.tolist()
+        edge_v = graph.edge_v.tolist()
+        edge_w = graph.edge_w.tolist()
+        n_clusters = int(graph.n_clusters)
+        source = "recomputed"
+        meta_k, meta_min = int(k), int(min_shared)
+
+    train_test = [split_tt.get(rid, "") for rid in ids]
+    fold = [split_fold.get(rid, "") for rid in ids]
+    figs = outdir / "figures"
+    plot_meta = render_contingency_graph(
+        ids,
+        edge_u,
+        edge_v,
+        edge_w,
+        cluster_ids,
+        figs,
+        train_test=train_test,
+        fold=fold,
+    )
+    summary = {
+        "marked_parsed": str(marked_parsed),
+        "split_csv": str(split_csv),
+        "graph_source": source,
+        "k": meta_k,
+        "min_shared": meta_min,
+        "max_edges": int(max_edges),
+        "seed": int(seed),
+        "n_ids": len(ids),
+        "n_clusters": n_clusters,
+        "n_edges": len(edge_u),
+        "graph_dir": str(outdir / "graph"),
+        "plot": plot_meta,
+    }
+    outdir.mkdir(parents=True, exist_ok=True)
+    (outdir / "pangenome_graph_plot_meta.json").write_text(
+        json.dumps(summary, indent=2, default=str) + "\n", encoding="utf-8"
+    )
+    return summary
 
 
 def run_pangenome_split_assign(
@@ -604,6 +1186,7 @@ def run_pangenome_split_assign(
     ratios: tuple[float, float, float] | None = None,
     plot: bool = True,
     max_edges: int = 100_000,
+    save_graph: bool = True,
     # MARKED_pangenome resolution (A2A adapt vs reuse)
     marked_pangenome: Path | None = None,
     panel_marked: Path | None = None,
@@ -675,13 +1258,28 @@ def run_pangenome_split_assign(
 
     seq_map = load_fna_directory(marked_parsed, ids=kept)
     sequences = [seq_map[rid] for rid in kept]
+    # Always collect edges when persisting the graph (independent of plot=).
+    collect_edges = bool(save_graph) or bool(plot)
     graph = build_contingency_clusters(
         sequences,
         k=k,
         min_shared=min_shared,
         max_edges=max_edges,
-        collect_edges=plot,
+        collect_edges=collect_edges,
     )
+
+    graph_meta: dict[str, Any] | None = None
+    if save_graph:
+        graph_meta = save_contingency_graph(
+            outdir,
+            kept,
+            graph,
+            k=int(k),
+            min_shared=int(min_shared),
+            max_edges=int(max_edges),
+            seed=int(seed),
+            extra_meta={"marked_parsed": str(marked_parsed)},
+        )
 
     rows, assign_meta = assign_from_contingency(
         kept,
@@ -696,6 +1294,19 @@ def run_pangenome_split_assign(
 
     plot_meta: dict[str, Any] | None = None
     if plot:
+        by_id = {
+            str(r.get("region") or r.get("ID") or ""): r
+            for r in rows
+            if (r.get("region") or r.get("ID"))
+        }
+        tt_aligned = [
+            str(by_id[str(rid)]["train_test"]) if str(rid) in by_id else ""
+            for rid in kept
+        ]
+        fold_aligned = [
+            str(by_id[str(rid)]["fold"]) if str(rid) in by_id else ""
+            for rid in kept
+        ]
         plot_meta = render_contingency_graph(
             kept,
             graph.edge_u.tolist(),
@@ -703,6 +1314,8 @@ def run_pangenome_split_assign(
             graph.edge_w.tolist(),
             graph.cluster_ids.tolist(),
             outdir / "figures",
+            train_test=tt_aligned,
+            fold=fold_aligned,
         )
 
     summary = {
@@ -721,6 +1334,8 @@ def run_pangenome_split_assign(
         "split_csv": str(split_csv),
         "assignment_csv": str(assign_path),
         "assign_meta": assign_meta,
+        "graph": graph_meta,
+        "graph_dir": str(outdir / "graph") if graph_meta else None,
         "plot": plot_meta,
         "genomes": list(genomes) if genomes else None,
         "a2a_adapt": A2A_ADAPT_HINT if source_meta.get("source") != "adapt_from_raw" else None,

@@ -139,6 +139,20 @@ def test_pangenome_split_on_mock(tmp_path: Path) -> None:
     assert (figs / "contingency_graph.pdf").is_file() or (
         figs / "contingency_graph.png"
     ).is_file()
+    assert (figs / "Figure_pangenome_contingency_fold_train_test.pdf").is_file() or (
+        figs / "Figure_pangenome_contingency_fold_train_test.png"
+    ).is_file()
+    graph_dir = tmp_path / "pg_out" / "graph"
+    assert (graph_dir / "contingency_graph.npz").is_file()
+    assert (graph_dir / "ids.txt").is_file()
+    assert (graph_dir / "nodes.tsv").is_file()
+    assert (graph_dir / "edges.tsv").is_file()
+    assert (graph_dir / "contingency_graph_meta.json").is_file()
+    from src.splits.pangenome import load_contingency_graph
+
+    loaded = load_contingency_graph(graph_dir)
+    assert len(loaded["ids"]) == len(split_rows)
+    assert len(loaded["cluster_ids"]) == len(split_rows)
 
     # Shared-motif non-ZSV IDs should share a fold when not held out.
     shared_folds = {by_id[str(i)]["fold"] for i in range(2, 13)}

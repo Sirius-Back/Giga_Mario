@@ -110,4 +110,6 @@ python -m src.splits.pangenome_native.build
 
 **A2A (pangenome):** when `MARKED_pangenome` is missing or the pangenome window ≠ panel `MARKED`, invoke `@preprocess` / `src.pipeline.adapt` (raw → `MARKED_pangenome`), then `python -m src.splits.intersect_pangenome` → `MARKED_parsed`. Do not silently reuse panel MARKED.
 
+**Graph persist:** `run_pangenome_split_assign` writes `{outdir}/graph/` (`contingency_graph.npz`, `ids.txt`, `nodes.tsv`, `edges.tsv`, meta). Clustering = union-find connected components on shared-k-mer contingency. Reload with `load_contingency_graph` / `plot_pangenome_contingency_from_artifacts`.
+
 Then assign + materialize with `/split` (runner under `src/run/run_id/`).

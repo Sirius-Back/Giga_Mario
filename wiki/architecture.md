@@ -148,7 +148,7 @@ Example rule: `GCF_000005845.2|genome|zsv` → resolve via `id_rule` (`id_col_1=
 | **Input** | `outdir`; `type=random\|gc\|kmer\|hashfrag\|pangenome`; optional `id_csv`, `fold`, `stratification`, `marked`/`fna`, … |
 | **Assignment (random)** | Imports `assign_folds_random` / `assign_folds_stratified` from `src.splits.random` |
 | **Assignment (gc)** | SBS: FNA/MARKED → feature table (`GC_pct`, `AAA_pct`) → cluster folds (default DBSCAN) → fold-grain train/test/val (`src.splits.gc` / `src.splits.sbs`) |
-| **Assignment (pangenome)** | A2A adapt → `MARKED_pangenome` (pangenome window; may ≠ panel MARKED) → filter ∩ PARSED → `MARKED_parsed` → C++ contingency CC → fold-grain train/test/val. Opt-in `reuse_panel_marked` only when windows match. |
+| **Assignment (pangenome)** | A2A adapt → `MARKED_pangenome` (pangenome window; may ≠ panel MARKED) → filter ∩ PARSED → `MARKED_parsed` → C++ contingency **union-find connected components** (not Louvain/Laplacian/MCL) → fold-grain train/test/val. Persist `{outdir}/graph/` (npz + TSV). Opt-in `reuse_panel_marked` only when windows match. |
 | **Stratification** | Random: all strat columns (composite key). SBS: aggregate strat **per fold** (numeric→sum, categorical→mode) then stratify fold→train/test/val |
 | **fold.csv** | `zsv` / `zeroshotvalidation` → `train_test=zsv` (excluded from assignment). If omitted: warning `Warning: folds are not included` |
 | **Output** | `{outdir}/split.csv` (`ID|train_test|fold`); SBS also writes `feature_table.csv`, `sbs_assignment.csv`, optional PCA figures |
