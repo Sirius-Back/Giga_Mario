@@ -1,8 +1,8 @@
 ---
 description: >-
-  Local heavy-job queue: register large CPU/RAM/GPU jobs in queue.md; wait on
-  high load; keep host RAM usage ≤95% of MemTotal (no SLURM — full RAM drops
-  the connection).
+  Local heavy-job queue: register large CPU/RAM/GPU jobs in queue.md; allow
+  safe parallel and sequential launches; host RAM used ≤95% of MemTotal (no
+  SLURM — full RAM drops the connection).
 alwaysApply: true
 ---
 
@@ -10,6 +10,8 @@ alwaysApply: true
 
 There is **no SLURM** on this machine. Heavy jobs run locally. Overloading RAM
 drops the remote connection — treat memory headroom as a hard constraint.
+
+Use helpers: `src/pipeline/mem_guard.py`, `src/pipeline/job_queue.py`.
 
 ## RAM headroom (hard — total RAM only)
 
@@ -20,12 +22,10 @@ ratio, and not GPU VRAM.
   (equivalently: **MemAvailable ≥ 5% of MemTotal**).
 - Always leave a little room for the OS, SSH/agent session, and page cache
   reclaim — never plan to fill RAM to 100%.
-- Do **not** launch or stack jobs that would push used RAM above 95%.
-- If used RAM is already **> 95%** (MemAvailable ≤ 5% of MemTotal): **do not
-  launch**; follow **Wait on high load** below. Pause/back off long jobs if
-  they are the ones driving the spike.
-
-Check before every large launch, e.g.:
+- Before launch, check **current used + declared peak** still ≤ 95%.
+- Inside long jobs: **wait** for headroom (`wait_for_ram_headroom` /
+  `ensure_allocation_fits`) — do **not** SIGKILL yourself or exit on the first
+  transient spike if waiting can recover.
 
 ```bash
 free -h
@@ -34,28 +34,61 @@ awk '/MemTotal:/ {t=$2} /MemAvailable:/ {a=$2} END {
 }' /proc/meminfo
 ```
 
+## Parallel vs sequential politics
+
+**Goal:** jobs should run (parallel *or* chained) without dying instantly.
+
+### Parallel — allowed when all hold
+
+1. **RAM:** `used_now + sum(relevant peaks) ≤ 95% MemTotal` (use
+   `job_queue.can_launch_parallel` / `wait_until_launchable`).
+2. **GPU:** no overlap of device indices between `gpu_train` jobs
+   (e.g. run on `0,1` while another uses `2,3` is OK).
+3. **Classes:**
+   - `gpu_train` + `cpu_ram_heavy` — OK if RAM peaks fit (typical).
+   - two `gpu_train` — OK on **disjoint** GPUs.
+   - two `cpu_ram_heavy` (e.g. full-panel k=7) — OK **only if** both declare
+     `peak_ram_gib` and the combined projection stays ≤ 95%; otherwise
+     **serialize**.
+   - `waiter` / `light` — do not block others; they are not RAM consumers.
+
+### Sequential — required when
+
+- Requested GPUs are busy (same indices), **or**
+- Adding this job’s peak would push host RAM used above 95%, **or**
+- Another `cpu_ram_heavy` is RUNNING without a declared peak.
+
+Then: append a `waiter` entry, poll/wait on PID or `pipeline_done` /
+`split_cpu_done`, and only then launch. Prefer `wait <pid>` / sleep with
+backoff; do not busy-spin.
+
+### Do not
+
+- Treat “any RUNNING row in queue.md” as a blanket ban on parallelism.
+- Treat CPU 100% as the RAM rule.
+- Launch a second full-panel dense k-mer matrix build blindly without a peak
+  check (those peaks are tens of GiB).
+- Instantly fail long jobs on a short RAM spike — **wait**, then resume.
+
 ## CPU (soft — separate from the 95% RAM rule)
 
-- Prefer leaving some CPU free for the OS/agent, but **CPU saturation alone
-  does not replace the RAM rule**.
-- If CPU is fully busy **and** other heavy jobs are `RUNNING` in `queue.md`,
-  wait rather than stacking more large launches.
+Prefer leaving some CPU for the OS/agent. CPU saturation alone does not forbid
+a GPU job on free devices if RAM headroom holds.
 
 ## Large jobs → write `queue.md`
 
-If the agent launches a **large** CPU / RAM / GPU job, **append** an entry to
-project-root **`queue.md`** (create the file if missing) with at least:
+Append an entry for every **large** CPU / RAM / GPU job (create `queue.md` if
+missing):
 
-- **launch time** (ISO-8601 local or UTC, stated)
-- **job** (command / script / purpose)
-- **PID** (and related IDs: parent shell, GPU indices, log path, etc.)
-- **estimated time** (wall-clock duration expected until completion)
+- **launch time**, **job**, **PID**, **estimated time**, **status**
+- **class:** `cpu_ram_heavy` | `gpu_train` | `waiter` | `light`
+- **peak_ram_gib:** expected extra host RAM at peak (required for
+  `cpu_ram_heavy`)
+- **GPUs:** indices when relevant
+- log path / resources when useful
 
-Also record when useful: CPUs, RAM request, GPUs, cwd, log path, status
-(`RUNNING` / `COMPLETED` / `FAILED`).
-
-Update the same entry to **COMPLETED** / **FAILED** when the job finishes; do
-not delete history — append or mark status in place.
+Update the same entry to **COMPLETED** / **FAILED** when finished; do not
+delete history.
 
 ### Entry template
 
@@ -65,41 +98,48 @@ not delete history — append or mark status in place.
 - **job:** `python -m src.caduceus ...`
 - **PID:** 12345 (parent 12300)
 - **estimated time:** 2h
-- **resources:** 16 CPU, ~32G RAM, 4 GPU
+- **class:** gpu_train
+- **peak_ram_gib:** 12
+- **GPUs:** 0,1
+- **resources:** batch 256
 - **log:** logs/job_%PID%.out
 - **status:** RUNNING
 ```
 
 ## Wait on high load
 
-If **RAM used > 95% of MemTotal** (MemAvailable ≤ 5%), or other heavy entries
-are still `RUNNING` in `queue.md` and launching would breach the RAM limit:
+If launch is not allowed under **Parallel vs sequential**:
 
-1. **Read `queue.md`** — identify active heavy jobs (PID, estimated time).
-2. **Wait** for those jobs to finish: use `wait` (shell job wait) and/or poll
-   until the PID exits.
-3. Wait at least until the **estimated time**, and **longer if needed** until
-   the process is actually done and **used RAM ≤ 95%** again.
-4. Only then launch the next large job (and register it in `queue.md`).
-
-Do not busy-loop without backoff; prefer `wait <pid>` or sleep intervals that
-respect the remaining estimated time.
+1. Read `queue.md` — active PIDs, classes, peaks, GPUs, ETAs.
+2. Wait until conflicting PIDs exit **or** RAM/GPU headroom recovers.
+3. Wait at least until the relevant ETA, longer if needed, until
+   `can_launch_parallel` is true and **used ≤ 95%**.
+4. Then launch and register the new entry.
 
 ## Examples
 
 ```
 ❌ BAD
-Launch 4× GPU train + assembly while MemAvailable is ~2% of MemTotal; no queue.md.
+Stack two full-panel k=7 splits with no peak_ram_gib; both Killed at matrix alloc.
 
 ✅ GOOD
-free shows used ~60% of MemTotal → append queue.md → run job.
-Later: used >95% → read queue.md → wait PID until ETA (+extra) → then next job.
+Declare peak_ram_gib≈32 each; if projection >95%, run second as waiter until
+first split_cpu_done; inside split, ensure_allocation_fits before np.zeros.
 ```
 
 ```
 ❌ BAD
-Treat “CPU 100%” as the same rule as RAM, or aim for 100% RAM fill.
+Refuse all launches because queue.md has any RUNNING row (even a waiter).
 
 ✅ GOOD
-Refuse launch while used RAM >95% of MemTotal; keep ≥5% MemAvailable always.
+GPU train on 0,1 + CPU k-mer on free RAM in parallel; chain run12 after run8
+via waiter on same GPUs.
+```
+
+```
+❌ BAD
+assert_ram_headroom → immediate MemoryError / process death on a spike.
+
+✅ GOOD
+wait_for_ram_headroom / ensure_allocation_fits; only fail after timeout.
 ```

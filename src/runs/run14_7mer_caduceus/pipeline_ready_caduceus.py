@@ -76,7 +76,19 @@ def main(argv: list[str] | None = None) -> int:
         sys.path.insert(0, str(ROOT))
     os.chdir(ROOT)
 
+    # Full-panel k=7 float32 matrix ~ n×16k ≈ 28–40 GiB peak — wait, don't die.
+    from src.pipeline.job_queue import (
+        CLASS_CPU_RAM_HEAVY,
+        CLASS_GPU_TRAIN,
+        wait_until_launchable,
+    )
+
     if not skip_split and not (OUT_ROOT / "split_cpu_done.json").is_file():
+        wait_until_launchable(
+            peak_ram_gib=40.0,
+            job_class=CLASS_CPU_RAM_HEAVY,
+            label="run14_7mer_split",
+        )
         from src.runs.run14_7mer_caduceus.run_split_cpu import main as split_main
 
         rc = split_main(argv)
@@ -90,6 +102,12 @@ def main(argv: list[str] | None = None) -> int:
 
     if not skip_wait:
         wait_for_gpus()
+        wait_until_launchable(
+            peak_ram_gib=16.0,
+            gpus=WAIT_GPUS,
+            job_class=CLASS_GPU_TRAIN,
+            label="run14_7mer_train",
+        )
     else:
         print("skip_wait=true — not polling GPUs", flush=True)
 

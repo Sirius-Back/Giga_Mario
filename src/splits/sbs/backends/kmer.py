@@ -354,7 +354,10 @@ class KmerFeatureBackend:
                     stacklevel=2,
                 )
 
-        from src.pipeline.mem_guard import assert_ram_headroom
+        from src.pipeline.mem_guard import (
+            ensure_allocation_fits,
+            wait_for_ram_headroom,
+        )
 
         # Large panels: two-pass (vocab, then fill matrix) so we never hold
         # per-id count dicts for all sequences at once (k=7 ready_legnet OOM).
@@ -389,7 +392,7 @@ class KmerFeatureBackend:
             # Pass 1: vocab (+ optional store for small n)
             for idx, rid in enumerate(ids):
                 if idx % 2000 == 0:
-                    assert_ram_headroom(0.95)
+                    wait_for_ram_headroom(0.95, label="kmer_pass1")
                     if two_pass and (idx == 0 or idx % 10000 == 0):
                         print(
                             f"[kmer] pass1 vocab {idx}/{len(ids)} "
@@ -416,7 +419,14 @@ class KmerFeatureBackend:
             # float32 for large panels (k=7 full ready_legnet ~ n×16k would OOM as f64)
             n_cells = len(ids) * len(feature_names)
             dtype = np.float32 if n_cells >= 5_000_000 else float
-            assert_ram_headroom(0.95)
+            itemsize = 4 if dtype == np.float32 else 8
+            ensure_allocation_fits(
+                n_cells * itemsize,
+                max_used_fraction=0.95,
+                safety=1.25,
+                label="kmer_feature_matrix",
+            )
+            wait_for_ram_headroom(0.95, label="kmer_pre_matrix")
             mat = np.zeros((len(ids), len(feature_names)), dtype=dtype)
             sorted_vocab = {k: sorted(vocab[k]) for k in self.k_list}
 
@@ -444,7 +454,7 @@ class KmerFeatureBackend:
                 )
                 for i, rid in enumerate(ids):
                     if i % 2000 == 0:
-                        assert_ram_headroom(0.95)
+                        wait_for_ram_headroom(0.95, label="kmer_pass2")
                         if i == 0 or i % 10000 == 0:
                             print(f"[kmer] pass2 fill {i}/{len(ids)}", flush=True)
                     _fill_row(i, rid, _count_row(i, rid))
