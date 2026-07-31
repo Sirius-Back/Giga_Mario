@@ -29,6 +29,9 @@ PAIR_SPECS = (
 )
 DEFAULT_THRESHOLDS = (0.5, 0.6, 0.7, 0.8, 0.9)
 N_POS_BINS = 20
+# Finer bins + meta-clustering (Figure_10+)
+DEFAULT_META_POS_BINS = 50
+MAX_META_CLUSTERS = 20
 
 
 def _col(scope: str, variant: str) -> str:
