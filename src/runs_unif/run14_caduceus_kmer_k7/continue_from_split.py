@@ -9,8 +9,9 @@ New (write):
   ``runs_unif/caduceus/run14_caduceus_kmer_k7``
 
 Flow:
-  1. Rewrite ``split.csv`` from the present SBS/kmer assignment to
-     train:test:val ≈ 3:1:1 (**whole clusters**; never mutate legacy).
+  1. Rewrite ``split.csv`` from the present SBS/kmer assignment:
+     subdivide mega-clusters with **highest-k kNN** (cap ``max_fold_size``),
+     then assign whole folds to train:test:val ≈ 3:1:1 (**never** mutate legacy).
   2. Stage k-mer intermediates + materialize SPLIT.
   3. Wait until **1** GPU is free, then direct train
      (min 15 / max 30 / early-stop patience 10) + mice ZSV.
@@ -59,8 +60,12 @@ PREFERRED_GPUS = (0, 1, 2, 3)
 MEM_FREE_MIB = 200
 POLL_SEC = 60
 PEAK_RAM_GIB_TRAIN = 24.0
-PEAK_RAM_GIB_SPLIT = 16.0
+# Mega-cluster kNN/MiniBatch on ~168k×16k float32 slices needs headroom.
+PEAK_RAM_GIB_SPLIT = 48.0
 GPU_CONFIRM_SEC = 5
+
+# Cap SBS fold size after mega-cluster high-k kNN subdivide.
+MAX_FOLD_SIZE = 2000
 
 KMER_INTERMEDIATES = (
     "feature_table.csv",
@@ -135,6 +140,7 @@ def _parse_argv(argv: list[str]) -> dict[str, object]:
         "patience": EARLY_STOPPING_PATIENCE,
         "skip_wait": False,
         "split_only": False,
+        "force_resplit": False,
     }
     for tok in list(argv):
         if tok.startswith("batch_size="):
@@ -149,16 +155,29 @@ def _parse_argv(argv: list[str]) -> dict[str, object]:
         elif tok.startswith("early_stopping_patience="):
             cfg["patience"] = int(tok.split("=", 1)[1])
             argv.remove(tok)
+        elif tok.startswith("max_fold_size="):
+            cfg["max_fold_size"] = int(tok.split("=", 1)[1])
+            argv.remove(tok)
         elif tok in {"skip_wait=true", "--skip-wait"}:
             cfg["skip_wait"] = True
             argv.remove(tok)
         elif tok in {"split_only=true", "--split-only"}:
             cfg["split_only"] = True
             argv.remove(tok)
+        elif tok in {"force_resplit=true", "--force-resplit"}:
+            cfg["force_resplit"] = True
+            argv.remove(tok)
+    if "max_fold_size" not in cfg:
+        cfg["max_fold_size"] = MAX_FOLD_SIZE
     return cfg
 
 
-def stage_split(*, seed: int = SEED) -> dict:
+def stage_split(
+    *,
+    seed: int = SEED,
+    max_fold_size: int = MAX_FOLD_SIZE,
+    force_resplit: bool = False,
+) -> dict:
     """Rewrite split table + stage k-mer sidecars + materialize SPLIT."""
     from src.pipeline.job_queue import (
         CLASS_CPU_RAM_HEAVY,
@@ -174,12 +193,18 @@ def stage_split(*, seed: int = SEED) -> dict:
 
     _require(LEGACY_OUT / "split.csv", "file")
     _require(LEGACY_OUT / "sbs_assignment.csv", "file")
+    _require(LEGACY_OUT / "feature_table.npz", "file")
     _require(PANEL_ROOT / "ID.csv", "file")
     _require(PANEL_ROOT / "PARSED", "dir")
     _require(PANEL_ROOT / "PREDICT", "dir")
     _require(PANEL_ROOT / "fold.csv", "file")
 
     OUT_ROOT.parent.mkdir(parents=True, exist_ok=True)
+    if force_resplit and OUT_ROOT.exists():
+        stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+        archived = OUT_ROOT.parent / f"{RUN_NAME}_ARCHIVED_MEGA_{stamp}"
+        print(f"force_resplit — archive {OUT_ROOT} → {archived}", flush=True)
+        OUT_ROOT.rename(archived)
     assert_fresh_out_root(OUT_ROOT)
     OUT_ROOT.mkdir(parents=True, exist_ok=True)
 
@@ -191,26 +216,46 @@ def stage_split(*, seed: int = SEED) -> dict:
     )
     append_queue_entry(
         f"{RUN_NAME}_split",
-        job=f"python -m src.runs_unif.{RUN_NAME}.continue_from_split split_only=true",
+        job=(
+            f"python -m src.runs_unif.{RUN_NAME}.continue_from_split "
+            f"split_only=true max_fold_size={max_fold_size}"
+        ),
         pid=os.getpid(),
-        estimated_time="1-3h",
+        estimated_time="1-4h",
         job_class=CLASS_CPU_RAM_HEAVY,
         peak_ram_gib=PEAK_RAM_GIB_SPLIT,
         log=str(ROOT / "logs" / f"{RUN_NAME}_split.log"),
     )
 
+    # Stage feature table first so mega-kNN can mmap it from out_root or legacy.
+    feat_src = LEGACY_OUT / "feature_table.npz"
+    feat_dest = OUT_ROOT / "feature_table.npz"
+    if not feat_dest.exists():
+        shutil.copy2(feat_src, feat_dest)
+        print(f"staged {feat_dest.name}", flush=True)
+
     rewrite_info = rewrite_split_table_aligned(
         LEGACY_OUT / "split.csv",
         OUT_ROOT / "split.csv",
         seed=seed,
-        prefer_label_swap=True,
+        prefer_label_swap=False,  # mega-kNN path; do not preserve mega folds via swap
         assignment_csv=LEGACY_OUT / "sbs_assignment.csv",
         allow_id_reassign=False,  # kmer SBS: never random ID sweep
+        feature_table=feat_dest,
+        max_fold_size=int(max_fold_size),
+        knn_k=None,  # highest practical kNN neighborhood
     )
-    print(f"split rewrite: {json.dumps(rewrite_info, sort_keys=True)}", flush=True)
+    print(f"split rewrite: {json.dumps(rewrite_info, sort_keys=True, default=str)}", flush=True)
 
-    staged_extra: dict[str, str] = {}
+    staged_extra: dict[str, str] = {"feature_table.npz": str(feat_dest)}
     for rel in KMER_INTERMEDIATES:
+        if rel == "feature_table.npz":
+            continue
+        if rel == "sbs_assignment.csv" and (OUT_ROOT / rel).is_file():
+            # Already written by rewrite_split_from_sbs_assignment.
+            staged_extra[rel] = str(OUT_ROOT / rel)
+            print(f"reuse rewritten {rel}", flush=True)
+            continue
         src = LEGACY_OUT / rel
         if not src.is_file():
             continue
@@ -247,6 +292,8 @@ def stage_split(*, seed: int = SEED) -> dict:
         "split_params": SPLIT_PARAMS,
         "kmer_size": 7,
         "ratios": [3, 1, 1],
+        "max_fold_size": int(max_fold_size),
+        "mega_subdivide": "knn_highest_k",
         "rewrite": rewrite_info,
         "staged_extra": staged_extra,
         "zsv": "mice",
@@ -381,13 +428,18 @@ def main(argv: list[str] | None = None) -> int:
     print(
         f"{RUN_NAME}: legacy={LEGACY_OUT} → out={OUT_ROOT} "
         f"panel={PANEL_ROOT} split_only={cfg['split_only']} "
+        f"force_resplit={cfg['force_resplit']} max_fold_size={cfg['max_fold_size']} "
         f"adversarial=false",
         flush=True,
     )
 
     split_done = OUT_ROOT / "split_done.json"
-    if not split_done.is_file():
-        stage_split(seed=SEED)
+    if cfg["force_resplit"] or not split_done.is_file():
+        stage_split(
+            seed=SEED,
+            max_fold_size=int(cfg["max_fold_size"]),
+            force_resplit=bool(cfg["force_resplit"]),
+        )
     else:
         print(f"reuse staged split: {split_done}", flush=True)
         _require(LEGACY_OUT / "split.csv", "file")

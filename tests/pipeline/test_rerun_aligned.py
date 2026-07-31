@@ -199,6 +199,90 @@ def test_rewrite_from_sbs_assignment_cluster_grain(tmp_path: Path) -> None:
     assert all(len(v) == 1 for v in fold_labels.values())
 
 
+def test_mega_knn_subdivide_then_aligned_ratios(tmp_path: Path) -> None:
+    """One mega-fold + tiny folds → kNN subdivide → ≈3:1:1 packing."""
+    import numpy as np
+
+    from src.pipeline.common import write_csv
+    from src.pipeline.rerun_aligned import (
+        is_aligned_ratios,
+        rewrite_split_from_sbs_assignment,
+    )
+    from src.splits.sbs.assign import ASSIGNMENT_COLUMNS
+    from src.splits.sbs.features import FeatureTable
+
+    rng = np.random.default_rng(0)
+    # Mega fold 0: 60 pts in 3 well-separated blobs; plus 4 singleton folds.
+    n_mega = 60
+    ids = [f"r{i}" for i in range(n_mega + 4)]
+    centers = np.array([[0.0, 0.0], [10.0, 0.0], [0.0, 10.0]], dtype=np.float32)
+    mats = []
+    for i in range(n_mega):
+        mats.append(centers[i % 3] + rng.normal(0, 0.05, size=2).astype(np.float32))
+    for _ in range(4):
+        mats.append(rng.normal(50, 0.1, size=2).astype(np.float32))
+    matrix = np.vstack(mats)
+    ft = FeatureTable(
+        ids=tuple(ids),
+        feature_names=("f0", "f1"),
+        matrix=matrix,
+        backend="test",
+    )
+    ft_path = tmp_path / "features.npz"
+    ft.write_npz(ft_path)
+
+    rows = []
+    for i in range(n_mega):
+        rows.append(
+            {
+                "region": ids[i],
+                "cluster": "0",
+                "train_test": "train",
+                "fold": "0",
+                "additional": "",
+            }
+        )
+    for j, i in enumerate(range(n_mega, n_mega + 4)):
+        rows.append(
+            {
+                "region": ids[i],
+                "cluster": str(j + 1),
+                "train_test": "test",
+                "fold": str(j + 1),
+                "additional": "",
+            }
+        )
+    rows.append(
+        {
+            "region": "z0",
+            "cluster": "zsv",
+            "train_test": "zsv",
+            "fold": "zsv",
+            "additional": "",
+        }
+    )
+    assign = tmp_path / "legacy" / "sbs_assignment.csv"
+    write_csv(assign, rows, ASSIGNMENT_COLUMNS)
+    dest = tmp_path / "unif" / "split.csv"
+    info = rewrite_split_from_sbs_assignment(
+        assign,
+        dest,
+        seed=42,
+        feature_table=ft_path,
+        max_fold_size=15,
+        knn_k=None,
+    )
+    assert "mega" in info["method"]
+    assert info["mega_subdivide"]["n_subdivided_parents"] >= 1
+    assert info["mega_subdivide"]["max_fold_size_after"] <= 15 * 1.5
+    after = info["counts_after"]
+    assert is_aligned_ratios(
+        (after["train"], after["test"], after["val"]), tol=0.12
+    )
+    assert after["zsv"] == 1
+    assert info["n_clusters"] > 5
+
+
 def test_parse_override_keys() -> None:
     keys = parse_override_keys(
         ["mode=run", "rerun=true", "+epochs=20", "train=caduceus"]

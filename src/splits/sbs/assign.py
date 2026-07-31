@@ -576,6 +576,276 @@ def aggregate_stratification_per_fold(
     return fold_strata
 
 
+# Cap for building an explicit kNN connectivity graph (above → MiniBatchKMeans).
+KNN_GRAPH_MAX_N = 25_000
+# Default max regions per fold after mega-cluster split (aligned rewrites).
+DEFAULT_MAX_FOLD_SIZE = 2000
+# Hard upper bound on neighbor count when caller asks for "highest" k.
+KNN_K_HARD_CAP = 512
+
+
+def highest_knn_k(n: int, *, cap: int = KNN_K_HARD_CAP) -> int:
+    """Largest practical kNN neighborhood size for ``n`` points."""
+    if n <= 1:
+        return 1
+    # Aggressive but capped: prefer √n growth, never above n-1 or hard cap.
+    target = max(64, int(4.0 * np.sqrt(float(n))))
+    return int(min(n - 1, cap, max(2, target)))
+
+
+def _zscore_rows(x: np.ndarray) -> np.ndarray:
+    """Column z-score copy (float32); constant columns → sd=1."""
+    out = np.asarray(x, dtype=np.float32, order="C").copy()
+    mu = out.mean(axis=0)
+    sd = out.std(axis=0)
+    sd[sd < 1e-8] = 1.0
+    out -= mu
+    out /= sd
+    return out
+
+
+def _partition_with_high_k_knn(
+    x: np.ndarray,
+    *,
+    n_clusters: int,
+    knn_k: int,
+    seed: int,
+    knn_graph_max_n: int = KNN_GRAPH_MAX_N,
+) -> tuple[np.ndarray, dict[str, Any]]:
+    """Split a feature block into ``n_clusters`` using high-k kNN when feasible.
+
+    - ``n ≤ knn_graph_max_n``: AgglomerativeClustering on a kNN connectivity graph
+      (``n_neighbors=knn_k``, linkage=average).
+    - larger ``n``: MiniBatchKMeans / KMeans with the same ``n_clusters`` (scale-safe
+      stand-in; still targets small folds via high k).
+    """
+    n = int(x.shape[0])
+    k_parts = int(min(max(n_clusters, 2), n))
+    k_nn = int(min(max(knn_k, 2), n - 1)) if n > 1 else 1
+    meta: dict[str, Any] = {
+        "n": n,
+        "n_clusters": k_parts,
+        "knn_k": k_nn,
+    }
+    if n <= 1 or k_parts <= 1:
+        meta["method_used"] = "singleton"
+        return np.zeros(n, dtype=int), meta
+
+    if n <= int(knn_graph_max_n):
+        from sklearn.cluster import AgglomerativeClustering
+        from sklearn.neighbors import NearestNeighbors
+
+        nn = NearestNeighbors(n_neighbors=k_nn, algorithm="auto")
+        nn.fit(x)
+        connectivity = nn.kneighbors_graph(x, mode="connectivity")
+        model = AgglomerativeClustering(
+            n_clusters=k_parts,
+            connectivity=connectivity,
+            linkage="average",
+        )
+        labels = model.fit_predict(x)
+        meta["method_used"] = "knn_agglomerative"
+        return np.asarray(labels, dtype=int), meta
+
+    labels = _cluster_kmeans(x, k_parts, seed=seed)
+    meta["method_used"] = "minibatch_kmeans_high_k"
+    return np.asarray(labels, dtype=int), meta
+
+
+def subdivide_mega_clusters_knn(
+    rows: list[dict[str, str]],
+    feature_table: Path | FeatureTable,
+    *,
+    max_fold_size: int = DEFAULT_MAX_FOLD_SIZE,
+    seed: int = 42,
+    knn_k: int | None = None,
+    knn_graph_max_n: int = KNN_GRAPH_MAX_N,
+    max_passes: int = 3,
+) -> dict[str, Any]:
+    """Split oversize SBS folds in-place via high-k kNN (or high-k MiniBatch).
+
+    Updates ``fold`` / ``cluster`` on non-ZSV rows whose fold size exceeds
+    ``max_fold_size``. Parent fold id is recorded in ``additional`` as
+    ``mega_parent=<id>``. Feature rows are matched by ``region`` id.
+
+    ``knn_k=None`` selects :func:`highest_knn_k` (largest practical neighborhood).
+    ``n_clusters`` per mega-fold is ``ceil(n / max_fold_size)`` so folds stay small.
+    """
+    if max_fold_size < 2:
+        raise ValueError(f"max_fold_size must be >= 2; got {max_fold_size}")
+    if max_passes < 1:
+        raise ValueError(f"max_passes must be >= 1; got {max_passes}")
+
+    ft_path: Path | None
+    ids: tuple[str, ...]
+    matrix: np.ndarray
+    npz_handle = None
+    if isinstance(feature_table, FeatureTable):
+        ft_path = None
+        ids = feature_table.ids
+        matrix = feature_table.matrix
+    else:
+        ft_path = Path(feature_table)
+        if not ft_path.is_file():
+            raise FileNotFoundError(f"feature table missing: {ft_path}")
+        npz_handle = np.load(ft_path, mmap_mode="r", allow_pickle=False)
+        ids = tuple(str(x) for x in npz_handle["ids"].tolist())
+        matrix = npz_handle["matrix"]
+
+    id_to_feat = {rid: i for i, rid in enumerate(ids)}
+    missing = [
+        str(r["region"])
+        for r in rows
+        if str(r.get("fold", "")).lower() != "zsv"
+        and not is_zsv_fold(str(r.get("train_test", "")))
+        and str(r["region"]) not in id_to_feat
+    ]
+    if missing:
+        raise KeyError(
+            f"{len(missing)} assignment regions absent from feature table "
+            f"(e.g. {missing[0]!r})"
+        )
+
+    from src.pipeline.mem_guard import ensure_allocation_fits
+
+    subdivided: list[dict[str, Any]] = []
+    next_seed = int(seed)
+
+    try:
+        for pass_i in range(int(max_passes)):
+            fold_members: dict[str, list[int]] = {}
+            for i, row in enumerate(rows):
+                label = str(row.get("train_test", "")).strip().lower()
+                fold = str(row.get("fold") or row.get("cluster") or "").strip()
+                if is_zsv_fold(label) or is_zsv_fold(fold) or fold.lower() == "zsv":
+                    continue
+                fold_members.setdefault(fold, []).append(i)
+
+            megas = {
+                fid: members
+                for fid, members in fold_members.items()
+                if len(members) > int(max_fold_size)
+            }
+            if not megas:
+                break
+
+            print(
+                f"[subdivide_mega] pass={pass_i + 1} n_mega={len(megas)} "
+                f"max_fold_size={max_fold_size} largest="
+                f"{max(len(v) for v in megas.values())}",
+                flush=True,
+            )
+
+            for parent, members in sorted(
+                megas.items(), key=lambda kv: (-len(kv[1]), kv[0])
+            ):
+                n = len(members)
+                # Slightly over-partition so max fold size lands ≤ max_fold_size.
+                n_clusters = int(np.ceil(n / (float(max_fold_size) * 0.85)))
+                n_clusters = min(n, max(n_clusters, 2))
+                # Highest k: never fewer partitions than needed for max_fold_size.
+                k_nn = (
+                    int(knn_k)
+                    if knn_k is not None
+                    else highest_knn_k(n)
+                )
+                # Allocate feature slice (float32 copy for z-score + cluster).
+                d = int(matrix.shape[1])
+                ensure_allocation_fits(
+                    n * d * 4 * 3,
+                    label=f"mega_fold_{parent}_n{n}",
+                )
+                feat_ix = [id_to_feat[str(rows[i]["region"])] for i in members]
+                # Fancy index on memmap → contiguous float32 block.
+                x_raw = np.asarray(matrix[feat_ix, :], dtype=np.float32)
+                x = _zscore_rows(x_raw)
+                del x_raw
+                labels, part_meta = _partition_with_high_k_knn(
+                    x,
+                    n_clusters=n_clusters,
+                    knn_k=k_nn,
+                    seed=next_seed,
+                    knn_graph_max_n=knn_graph_max_n,
+                )
+                next_seed += 1
+                del x
+
+                # Remap local labels → stable global fold ids.
+                local_ids = sorted({int(v) for v in labels.tolist()})
+                local_to_new = {
+                    lab: f"{parent}s{j:04d}" for j, lab in enumerate(local_ids)
+                }
+                sizes = Counter(int(v) for v in labels.tolist())
+                for row_i, lab in zip(members, labels.tolist()):
+                    new_fold = local_to_new[int(lab)]
+                    row = rows[row_i]
+                    prev_add = str(row.get("additional") or "").strip()
+                    tag = f"mega_parent={parent}"
+                    if not prev_add:
+                        row["additional"] = tag
+                    elif tag not in prev_add:
+                        row["additional"] = f"{prev_add};{tag}"
+                    row["fold"] = new_fold
+                    row["cluster"] = new_fold
+
+                subdivided.append(
+                    {
+                        "parent": parent,
+                        "n": n,
+                        "n_subclusters": len(local_ids),
+                        "sub_sizes": {
+                            local_to_new[lab]: int(sizes[lab]) for lab in local_ids
+                        },
+                        "partition": part_meta,
+                        "pass": pass_i + 1,
+                    }
+                )
+                print(
+                    f"[subdivide_mega] {parent}: n={n} → {len(local_ids)} folds "
+                    f"via {part_meta.get('method_used')} knn_k={k_nn}",
+                    flush=True,
+                )
+    finally:
+        if npz_handle is not None:
+            npz_handle.close()
+
+    # Final size audit
+    final_sizes = Counter(
+        str(r.get("fold") or r.get("cluster") or "")
+        for r in rows
+        if not is_zsv_fold(str(r.get("train_test", "")))
+        and str(r.get("fold", "")).lower() != "zsv"
+    )
+    max_final = max(final_sizes.values()) if final_sizes else 0
+    # Soft slack: k-means packs are imperfect; hard-fail only if still huge.
+    hard_cap = int(max(max_fold_size * 1.5, max_fold_size + 1))
+    if max_final > hard_cap:
+        raise RuntimeError(
+            f"mega-cluster subdivide left fold size {max_final} > "
+            f"hard_cap={hard_cap} (max_fold_size={max_fold_size}) after "
+            f"{max_passes} passes; top={final_sizes.most_common(5)}"
+        )
+    if max_final > int(max_fold_size):
+        print(
+            f"[subdivide_mega] WARNING: max fold {max_final} still > "
+            f"max_fold_size={max_fold_size} (≤ hard_cap={hard_cap})",
+            flush=True,
+        )
+
+    return {
+        "max_fold_size": int(max_fold_size),
+        "knn_k": knn_k,
+        "knn_k_resolved_policy": "highest" if knn_k is None else "fixed",
+        "knn_graph_max_n": int(knn_graph_max_n),
+        "feature_table": str(ft_path) if ft_path is not None else "FeatureTable",
+        "n_subdivided_parents": len({s["parent"] for s in subdivided}),
+        "subdivisions": subdivided,
+        "n_folds_after": len(final_sizes),
+        "max_fold_size_after": int(max_final),
+        "fold_size_hist_top": final_sizes.most_common(10),
+    }
+
+
 def _assign_folds_to_train_test(
     fold_ids: list[str],
     *,

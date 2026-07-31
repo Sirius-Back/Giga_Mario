@@ -180,18 +180,28 @@ def rewrite_split_from_sbs_assignment(
     dest_assignment_csv: Path | None = None,
     seed: int = 42,
     ratios: tuple[float, float, float] = ALIGNED_RATIOS,
+    feature_table: Path | None = None,
+    max_fold_size: int | None = None,
+    knn_k: int | None = None,
 ) -> dict[str, Any]:
-    """Redo fold→train/test/val from existing SBS clusters (no re-clustering).
+    """Redo fold→train/test/val from existing SBS clusters (no full re-cluster).
 
     Reads ``sbs_assignment.csv`` (``region|cluster|train_test|fold|…``), keeps
     ZSV rows, and reassigns **whole clusters** to train/test/val at ≈3:1:1 via
     :func:`src.splits.sbs.assign._assign_folds_to_train_test`. Each region keeps
     a single label → **no train/test/val ID intersections**. Never mutates the
     source assignment file.
+
+    When ``feature_table`` is set (and/or ``max_fold_size``), oversize folds are
+    first subdivided with :func:`src.splits.sbs.assign.subdivide_mega_clusters_knn`
+    (high-k kNN / high-k MiniBatch) so mega-clusters cannot dominate the ratio
+    packing.
     """
     from src.pipeline.generate_fold import is_zsv_fold
     from src.splits.sbs.assign import (
+        DEFAULT_MAX_FOLD_SIZE,
         _assign_folds_to_train_test,
+        subdivide_mega_clusters_knn,
         write_assignment_table,
     )
 
@@ -216,8 +226,26 @@ def rewrite_split_from_sbs_assignment(
         [{"train_test": r["train_test"]} for r in rows]
     )
 
+    # Working copy — never mutate the source file rows object in place via path.
+    work_rows: list[dict[str, str]] = [dict(r) for r in rows]
+    subdivide_meta: dict[str, Any] | None = None
+    ft = Path(feature_table) if feature_table is not None else None
+    if ft is not None or max_fold_size is not None:
+        if ft is None:
+            raise ValueError(
+                "max_fold_size requires feature_table for mega-cluster kNN split"
+            )
+        cap = int(max_fold_size) if max_fold_size is not None else DEFAULT_MAX_FOLD_SIZE
+        subdivide_meta = subdivide_mega_clusters_knn(
+            work_rows,
+            ft,
+            max_fold_size=cap,
+            seed=int(seed),
+            knn_k=knn_k,
+        )
+
     fold_members: dict[str, list[int]] = {}
-    for i, row in enumerate(rows):
+    for i, row in enumerate(work_rows):
         label = str(row["train_test"]).strip().lower()
         fold = str(row.get("fold") or row.get("cluster") or "").strip()
         if is_zsv_fold(label) or is_zsv_fold(fold) or fold.lower() == "zsv":
@@ -242,7 +270,7 @@ def rewrite_split_from_sbs_assignment(
     out_assign: list[dict[str, str]] = []
     out_split: list[dict[str, str]] = []
     seen_ids: set[str] = set()
-    for i, row in enumerate(rows):
+    for i, row in enumerate(work_rows):
         rid = str(row["region"])
         if rid in seen_ids:
             raise RuntimeError(f"duplicate region in assignment: {rid!r}")
@@ -306,7 +334,7 @@ def rewrite_split_from_sbs_assignment(
             f"before={before} after={after} n_folds={len(fold_members)}"
         )
 
-    return {
+    out: dict[str, Any] = {
         "method": "sbs_cluster_to_train_test_val",
         "source_assignment_csv": str(assignment_csv),
         "dest_split_csv": str(dest_split_csv),
@@ -318,6 +346,10 @@ def rewrite_split_from_sbs_assignment(
         "seed": int(seed),
         "ratios": list(ratios),
     }
+    if subdivide_meta is not None:
+        out["method"] = "sbs_mega_knn_then_cluster_to_train_test_val"
+        out["mega_subdivide"] = subdivide_meta
+    return out
 
 
 def rewrite_split_table_aligned(
@@ -328,6 +360,9 @@ def rewrite_split_table_aligned(
     prefer_label_swap: bool = True,
     assignment_csv: Path | None = None,
     allow_id_reassign: bool = True,
+    feature_table: Path | None = None,
+    max_fold_size: int | None = None,
+    knn_k: int | None = None,
 ) -> dict[str, Any]:
     """Rebuild train/test/val on the present ID table at ≈3:1:1; keep ZSV rows.
 
@@ -336,7 +371,8 @@ def rewrite_split_table_aligned(
     1. Pairwise **label swaps** among train/test/val (preserves ID pools / clusters)
        when ``prefer_label_swap``.
     2. If ``assignment_csv`` is set — **SBS cluster→train/test/val** redo (whole
-       clusters; no ID-level mixing across splits).
+       clusters; no ID-level mixing across splits). Optional mega-cluster kNN
+       subdivide when ``feature_table`` / ``max_fold_size`` is set.
     3. Else if ``allow_id_reassign`` — random ID reassignment at ≈3:1:1
        (appropriate for ``split=random`` only).
     4. Else raise.
@@ -374,9 +410,10 @@ def rewrite_split_table_aligned(
     method: str
     out_rows: list[dict[str, str]]
 
-    swap_hit = (
-        _try_label_swaps_to_aligned(rows, before) if prefer_label_swap else None
-    )
+    # When mega-cluster subdivide is requested, skip label-only swaps — they
+    # preserve mega-folds and cannot fix ratio packing.
+    do_swap = prefer_label_swap and feature_table is None and max_fold_size is None
+    swap_hit = _try_label_swaps_to_aligned(rows, before) if do_swap else None
     if swap_hit is not None:
         method, out_rows = swap_hit
     elif assignment_csv is not None:
@@ -387,6 +424,9 @@ def rewrite_split_table_aligned(
             dest_assignment_csv=dest_split_csv.parent / "sbs_assignment.csv",
             seed=seed,
             ratios=ALIGNED_RATIOS,
+            feature_table=feature_table,
+            max_fold_size=max_fold_size,
+            knn_k=knn_k,
         )
     elif allow_id_reassign:
         method = "reassign_random_3_1_1"
