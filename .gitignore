@@ -115,6 +115,14 @@ src/runs/**/__pycache__/
 src/runs/**/*.py[cod]
 figures/
 figure/
+# Stray root figure dumps (large Altair/matplotlib exports)
+/Figure_*.png
+/Figure_*.pdf
+/Figure_*.svg
+/*.png
+/*.jpg
+/*.jpeg
+/*.webp
 adapt/
 monitoring-report.md
 

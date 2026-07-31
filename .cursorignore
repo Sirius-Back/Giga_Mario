@@ -26,6 +26,14 @@ prokaryotes/
 genomes_smoketest/
 random/
 /figures/
+# Stray root figure dumps
+/Figure_*.png
+/Figure_*.pdf
+/Figure_*.svg
+/*.png
+/*.jpg
+/*.jpeg
+/*.webp
 /logs/
 clean/
 bin/
