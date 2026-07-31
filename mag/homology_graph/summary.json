@@ -1,0 +1,76 @@
+{
+  "component_size_max": 2772,
+  "component_size_median": 11,
+  "edge_table": "mag/homology_graph/edges.tsv.gz",
+  "endpoint_mentions_per_genome": {
+    "bos_taurus": 680928,
+    "canis_lupus_familiaris": 552734,
+    "capra_hircus": 645972,
+    "equus_caballus": 798116,
+    "homo_sapiens": 485575,
+    "macaca_mulatta": 1820411,
+    "mus_musculus": 994781,
+    "oryctolagus_cuniculus": 876477,
+    "ovis_aries": 516118,
+    "rattus_norvegicus": 1055650,
+    "sus_scrofa": 1114310
+  },
+  "generated_at": "2026-07-31T08:02:36.044669+00:00",
+  "high_confidence_only": false,
+  "n_components": 8031,
+  "n_edges": 4770536,
+  "n_genomes": 11,
+  "n_nodes": 229527,
+  "n_rows_kept_raw": 4770536,
+  "n_rows_read": 39315252,
+  "n_self_loops_skipped": 0,
+  "nodes_per_genome": {
+    "bos_taurus": 20716,
+    "canis_lupus_familiaris": 20191,
+    "capra_hircus": 21118,
+    "equus_caballus": 21035,
+    "homo_sapiens": 19622,
+    "macaca_mulatta": 21308,
+    "mus_musculus": 21784,
+    "oryctolagus_cuniculus": 20025,
+    "ovis_aries": 19812,
+    "rattus_norvegicus": 22280,
+    "sus_scrofa": 21636
+  },
+  "panel_species": [
+    "homo_sapiens",
+    "mus_musculus",
+    "rattus_norvegicus",
+    "sus_scrofa",
+    "bos_taurus",
+    "equus_caballus",
+    "canis_lupus_familiaris",
+    "ovis_aries",
+    "macaca_mulatta",
+    "oryctolagus_cuniculus",
+    "capra_hircus"
+  ],
+  "random_seed": 42,
+  "relation_counts": {
+    "ortholog": 1285146,
+    "paralog": 3485390
+  },
+  "release": 116,
+  "source_files": {
+    "bos_taurus": "mag/ensembl/data/bos_taurus/compara_homology/Compara.116.protein_default.homologies.tsv.gz",
+    "canis_lupus_familiaris": "mag/ensembl/data/canis_lupus_familiaris/compara_homology/Compara.116.protein_default.homologies.tsv.gz",
+    "capra_hircus": "mag/ensembl/data/capra_hircus/compara_homology/Compara.116.protein_default.homologies.tsv.gz",
+    "equus_caballus": "mag/ensembl/data/equus_caballus/compara_homology/Compara.116.protein_default.homologies.tsv.gz",
+    "homo_sapiens": "mag/ensembl/data/homo_sapiens/compara_homology/Compara.116.protein_default.homologies.tsv.gz",
+    "macaca_mulatta": "mag/ensembl/data/macaca_mulatta/compara_homology/Compara.116.protein_default.homologies.tsv.gz",
+    "mus_musculus": "mag/ensembl/data/mus_musculus/compara_homology/Compara.116.protein_default.homologies.tsv.gz",
+    "oryctolagus_cuniculus": "mag/ensembl/data/oryctolagus_cuniculus/compara_homology/Compara.116.protein_default.homologies.tsv.gz",
+    "ovis_aries": "mag/ensembl/data/ovis_aries/compara_homology/Compara.116.protein_default.homologies.tsv.gz",
+    "rattus_norvegicus": "mag/ensembl/data/rattus_norvegicus/compara_homology/Compara.116.protein_default.homologies.tsv.gz",
+    "sus_scrofa": "mag/ensembl/data/sus_scrofa/compara_homology/Compara.116.protein_default.homologies.tsv.gz"
+  },
+  "unique_relation_counts": {
+    "ortholog": 1285146,
+    "paralog": 3485390
+  }
+}

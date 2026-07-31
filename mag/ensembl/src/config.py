@@ -65,10 +65,13 @@ DATA_TYPE_PATHS: Dict[str, Dict[str, str]] = {
         "file_pattern": "{species}.vcf.gz",
     },
     "compara_homology": {
-        "subdir": "compara/homology",
+        # Real Ensembl FTP layout (release >= ~100):
+        # /pub/release-N/tsv/ensembl-compara/homologies/<species>/
+        # Old path compara/homology exists but is empty.
+        "subdir": "tsv/ensembl-compara/homologies",
         "species_subdir": "",
-        "description": "Compara homology data",
-        "file_pattern": "Compara.{homology_type}.{release}.gz",
+        "description": "Compara homology TSV (orthologs + paralogs)",
+        "file_pattern": "Compara.{release}.protein_default.homologies.tsv.gz",
     },
     "regulation": {
         "subdir": "regulation",

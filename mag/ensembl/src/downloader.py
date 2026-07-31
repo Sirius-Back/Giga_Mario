@@ -260,6 +260,8 @@ class EnsemblDownloader:
             "fasta_ncrna": ["", "all"],
             "gtf": ["", "primary_assembly"],
             "gff3": ["", "primary_assembly"],
+            # Prefer protein gene-tree dump over ncrna / breed collections.
+            "compara_homology": ["protein_default", "protein_", ""],
         }
 
         suffixes = priority_suffixes.get(data_type, [""])
