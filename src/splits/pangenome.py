@@ -44,6 +44,7 @@ __all__ = (
     "adapt_pangenome_from_raw",
     "ensure_marked_pangenome",
     "build_contingency_clusters",
+    "refine_large_components_by_modularity",
     "save_contingency_graph",
     "load_contingency_graph",
     "render_contingency_graph",
@@ -51,6 +52,8 @@ __all__ = (
     "plot_fold_size_distribution",
     "run_pangenome_split_assign",
 )
+
+DEFAULT_MAX_FOLD_SIZE = 1000
 
 # Okabe–Ito (colorblind-safe) for train_test categorical panels
 _TRAIN_TEST_COLORS = {
@@ -366,6 +369,155 @@ def build_contingency_clusters(
         max_edges=max_edges,
         collect_edges=collect_edges,
     )
+
+
+def refine_large_components_by_modularity(
+    ids: Sequence[str],
+    sequences: Sequence[str],
+    cluster_ids: Sequence[int],
+    *,
+    k: int,
+    min_shared: int = DEFAULT_MIN_SHARED,
+    max_fold_size: int = DEFAULT_MAX_FOLD_SIZE,
+    max_edges: int = 2_000_000,
+    seed: int = 42,
+    resolution: float | None = None,
+) -> tuple[list[int], dict[str, Any]]:
+    """Split oversized contingency CCs with Louvain modularity.
+
+    For each connected component with size > ``max_fold_size``, rebuild a
+    k-mer co-occurrence subgraph on that subset and run NetworkX Louvain
+    (``nx.community.louvain_communities``). Smaller components are kept.
+
+    Returns renumbered cluster labels (0..n-1) and a refinement meta dict.
+    """
+    try:
+        import networkx as nx
+        from networkx.algorithms.community import louvain_communities
+    except ImportError as exc:  # pragma: no cover
+        raise RuntimeError(
+            "networkx is required for modularity refinement of large pangenome "
+            "components; install networkx in the active environment"
+        ) from exc
+
+    if len(ids) != len(sequences) or len(ids) != len(cluster_ids):
+        raise ValueError("ids, sequences, and cluster_ids length mismatch")
+    if max_fold_size <= 1:
+        raise ValueError(f"max_fold_size must be > 1; got {max_fold_size}")
+
+    labels = [int(c) for c in cluster_ids]
+    by_cc: dict[int, list[int]] = defaultdict(list)
+    for i, cid in enumerate(labels):
+        by_cc[cid].append(i)
+
+    large = {cid: members for cid, members in by_cc.items() if len(members) > max_fold_size}
+    meta: dict[str, Any] = {
+        "method": "louvain_modularity",
+        "max_fold_size": int(max_fold_size),
+        "k": int(k),
+        "min_shared": int(min_shared),
+        "seed": int(seed),
+        "n_large_components": len(large),
+        "large_component_sizes": {str(cid): len(m) for cid, m in sorted(large.items(), key=lambda kv: -len(kv[1]))[:20]},
+        "refined": [],
+    }
+    if not large:
+        # Renumber for stable 0..n_clusters-1
+        remap = {old: new for new, old in enumerate(sorted(by_cc))}
+        return [remap[c] for c in labels], meta
+
+    next_label = max(labels) + 1 if labels else 0
+    for cid, members in sorted(large.items(), key=lambda kv: -len(kv[1])):
+        sub_seqs = [sequences[i] for i in members]
+        sub_graph = build_contingency_clusters(
+            sub_seqs,
+            k=int(k),
+            min_shared=int(min_shared),
+            max_edges=int(max_edges),
+            collect_edges=True,
+        )
+        g = nx.Graph()
+        g.add_nodes_from(range(len(members)))
+        for u, v, w in zip(
+            sub_graph.edge_u.tolist(),
+            sub_graph.edge_v.tolist(),
+            sub_graph.edge_w.tolist(),
+        ):
+            ui, vi, wi = int(u), int(v), float(w)
+            if ui == vi or ui < 0 or vi < 0:
+                continue
+            if g.has_edge(ui, vi):
+                g[ui][vi]["weight"] += wi
+            else:
+                g.add_edge(ui, vi, weight=wi)
+
+        res = float(resolution) if resolution is not None else max(
+            1.0, len(members) / float(max_fold_size)
+        )
+        if g.number_of_edges() == 0:
+            # No pairwise edges collected — keep original CC (cannot modularize).
+            meta["refined"].append(
+                {
+                    "original_cluster": int(cid),
+                    "size": len(members),
+                    "n_communities": 1,
+                    "resolution": res,
+                    "status": "skipped_no_edges",
+                }
+            )
+            continue
+
+        communities = louvain_communities(
+            g, weight="weight", resolution=res, seed=int(seed)
+        )
+        communities = [sorted(c) for c in communities]
+        # If still one oversized community, raise resolution once more.
+        if len(communities) == 1 and len(members) > max_fold_size:
+            res = res * 2.0
+            communities = louvain_communities(
+                g, weight="weight", resolution=res, seed=int(seed)
+            )
+            communities = [sorted(c) for c in communities]
+
+        if len(communities) <= 1:
+            meta["refined"].append(
+                {
+                    "original_cluster": int(cid),
+                    "size": len(members),
+                    "n_communities": 1,
+                    "resolution": res,
+                    "n_subgraph_edges": int(g.number_of_edges()),
+                    "status": "unchanged",
+                }
+            )
+            continue
+
+        for j, comm in enumerate(communities):
+            lab = int(cid) if j == 0 else int(next_label)
+            if j > 0:
+                next_label += 1
+            for local_i in comm:
+                labels[members[local_i]] = lab
+
+        meta["refined"].append(
+            {
+                "original_cluster": int(cid),
+                "size": len(members),
+                "n_communities": len(communities),
+                "community_sizes": [len(c) for c in communities],
+                "resolution": res,
+                "n_subgraph_edges": int(g.number_of_edges()),
+                "status": "split",
+            }
+        )
+
+    # Compact labels to 0..n_clusters-1
+    unique = sorted(set(labels))
+    remap = {old: new for new, old in enumerate(unique)}
+    out = [remap[c] for c in labels]
+    meta["n_clusters_after"] = len(unique)
+    meta["n_clusters_before"] = len(by_cc)
+    return out, meta
 
 
 def save_contingency_graph(
@@ -1187,6 +1339,9 @@ def run_pangenome_split_assign(
     plot: bool = True,
     max_edges: int = 100_000,
     save_graph: bool = True,
+    modularity_refine: bool = False,
+    max_fold_size: int = DEFAULT_MAX_FOLD_SIZE,
+    modularity_max_edges: int = 2_000_000,
     # MARKED_pangenome resolution (A2A adapt vs reuse)
     marked_pangenome: Path | None = None,
     panel_marked: Path | None = None,
