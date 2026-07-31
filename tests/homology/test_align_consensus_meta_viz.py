@@ -58,10 +58,16 @@ def test_profile_kmeans_and_atg(tmp_path: Path) -> None:
     bin_sim = pd.DataFrame(rows)
     wide, mat, clusters = profile_matrix(bin_sim, n_bins=10)
     assert wide.shape == (12, 30)
-    labels, k, meta = choose_k_and_cluster(mat, max_k=5, seed=0)
-    assert k <= 5
+    labels, k, meta = choose_k_and_cluster(mat, min_k=10, max_k=15, seed=0)
+    assert 10 <= k <= 15
     assert len(labels) == 12
     assert meta["k"] == k
+    assert meta["min_k"] == 10
+
+    labels_f, k_f, meta_f = choose_k_and_cluster(mat, fixed_k=10, seed=0)
+    assert k_f == 10
+    assert meta_f["fixed_k"] == 10
+    assert len(set(labels_f)) == 10
 
     # ATG in middle of ungapped
     aln = tmp_path / "cluster_x.aln.fa"

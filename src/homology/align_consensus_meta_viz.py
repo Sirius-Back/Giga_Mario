@@ -25,6 +25,7 @@ from src.homology.visualize import _apply_cns_style
 
 MIN_ALIGN_FRAC = 0.5
 DEFAULT_N_BINS = 50
+MIN_META_CLUSTERS = 10
 MAX_META_CLUSTERS = 20
 TSS_REL_POS = 0.5  # LegNet CRS is TSS-centered (±100 bp)
 
@@ -127,25 +128,53 @@ def profile_matrix(
 def choose_k_and_cluster(
     mat: np.ndarray,
     *,
+    min_k: int = MIN_META_CLUSTERS,
     max_k: int = MAX_META_CLUSTERS,
+    fixed_k: int | None = None,
     seed: int = 42,
 ) -> tuple[np.ndarray, int, dict[str, Any]]:
-    """KMeans with k in 2..max_k chosen by silhouette (capped at n_samples-1)."""
+    """KMeans with k chosen by silhouette inside ``[min_k, max_k]`` (default 10–20).
+
+    Searching from k=2 often collapses to 2 coarse groups; the user-facing
+    resolution target is 10–20 meta-clusters, so silhouette is evaluated only
+    in that window (unless ``fixed_k`` is set).
+    """
     n = mat.shape[0]
     if n < 2:
         raise ValueError("Need >=2 clusters for meta-clustering")
-    k_max = min(int(max_k), n - 1, 20)
-    if k_max < 2:
-        labels = np.zeros(n, dtype=int)
-        return labels, 1, {"k": 1, "silhouette": None, "reason": "n<3"}
 
     scaler = StandardScaler()
     X = scaler.fit_transform(mat)
-    best_k = 2
+
+    if fixed_k is not None:
+        k = int(fixed_k)
+        if k < 2 or k > n - 1:
+            raise ValueError(f"fixed_k={k} invalid for n={n}")
+        labels = KMeans(n_clusters=k, random_state=seed, n_init=10).fit_predict(X)
+        score = float(silhouette_score(X, labels, metric="euclidean")) if k >= 2 else float("nan")
+        meta = {
+            "k": k,
+            "silhouette": score,
+            "scores": {str(k): score},
+            "min_k": int(min_k),
+            "max_k": int(max_k),
+            "fixed_k": k,
+            "seed": seed,
+        }
+        return np.asarray(labels, dtype=int), k, meta
+
+    k_max = min(int(max_k), n - 1)
+    k_min = min(int(min_k), k_max)
+    if k_min < 2:
+        k_min = 2
+    if k_max < k_min:
+        raise ValueError(f"No valid k in [{min_k}, {max_k}] for n={n}")
+
+    best_k = k_min
     best_score = -1.0
     best_labels = None
     scores: dict[str, float] = {}
-    for k in range(2, k_max + 1):
+    for k in range(k_min, k_max + 1):
         km = KMeans(n_clusters=k, random_state=seed, n_init=10)
         labels = km.fit_predict(X)
         if len(set(labels)) < 2:
@@ -157,15 +186,17 @@ def choose_k_and_cluster(
             best_k = k
             best_labels = labels
     if best_labels is None:
-        km = KMeans(n_clusters=2, random_state=seed, n_init=10)
+        km = KMeans(n_clusters=k_min, random_state=seed, n_init=10)
         best_labels = km.fit_predict(X)
-        best_k = 2
+        best_k = k_min
         best_score = float("nan")
     meta = {
         "k": int(best_k),
         "silhouette": best_score if np.isfinite(best_score) else None,
         "scores": scores,
+        "min_k": k_min,
         "max_k": k_max,
+        "fixed_k": None,
         "seed": seed,
     }
     return np.asarray(best_labels, dtype=int), int(best_k), meta
@@ -274,6 +305,8 @@ def build_meta_tables(
     n_bins: int = DEFAULT_N_BINS,
     min_align_frac: float = MIN_ALIGN_FRAC,
     max_k: int = MAX_META_CLUSTERS,
+    min_k: int = MIN_META_CLUSTERS,
+    fixed_k: int | None = None,
     seed: int = 42,
     atg_workers: int = 8,
 ) -> dict[str, Any]:
@@ -296,7 +329,9 @@ def build_meta_tables(
     bin_sim = per_cluster_bin_similarity(filtered, n_bins=n_bins, variant="raw")
 
     wide, mat, clusters = profile_matrix(bin_sim, n_bins=n_bins)
-    labels, k, km_meta = choose_k_and_cluster(mat, max_k=max_k, seed=seed)
+    labels, k, km_meta = choose_k_and_cluster(
+        mat, min_k=min_k, max_k=max_k, fixed_k=fixed_k, seed=seed
+    )
     assign = pd.DataFrame({"cluster": clusters, "meta_cluster": labels})
     bin_sim = bin_sim.merge(assign, on="cluster", how="left")
 
@@ -621,6 +656,8 @@ def run_meta_viz(
     n_bins: int = DEFAULT_N_BINS,
     min_align_frac: float = MIN_ALIGN_FRAC,
     max_k: int = MAX_META_CLUSTERS,
+    min_k: int = MIN_META_CLUSTERS,
+    fixed_k: int | None = None,
     dpi: int = 300,
     seed: int = 42,
 ) -> list[Path]:
@@ -633,6 +670,8 @@ def run_meta_viz(
         n_bins=n_bins,
         min_align_frac=min_align_frac,
         max_k=max_k,
+        min_k=min_k,
+        fixed_k=fixed_k,
         seed=seed,
     )
     tables["bin_sim"].to_csv(outdir / "table_bin_similarity_meta.tsv", sep="\t", index=False)

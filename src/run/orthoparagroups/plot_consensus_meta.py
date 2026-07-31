@@ -9,6 +9,7 @@ from src.homology.align_consensus_meta_viz import (
     DEFAULT_N_BINS,
     MAX_META_CLUSTERS,
     MIN_ALIGN_FRAC,
+    MIN_META_CLUSTERS,
     run_meta_viz,
 )
 
@@ -24,7 +25,24 @@ def main(argv: list[str] | None = None) -> int:
     )
     p.add_argument("--n-bins", type=int, default=DEFAULT_N_BINS)
     p.add_argument("--min-align-frac", type=float, default=MIN_ALIGN_FRAC)
-    p.add_argument("--max-k", type=int, default=MAX_META_CLUSTERS)
+    p.add_argument(
+        "--min-k",
+        type=int,
+        default=MIN_META_CLUSTERS,
+        help="Lower bound for silhouette search (default 10)",
+    )
+    p.add_argument(
+        "--max-k",
+        type=int,
+        default=MAX_META_CLUSTERS,
+        help="Upper bound for silhouette search / meta-clusters (default 20)",
+    )
+    p.add_argument(
+        "--fixed-k",
+        type=int,
+        default=0,
+        help="If >0, force this k (skip silhouette search)",
+    )
     p.add_argument("--limit", type=int, default=0)
     p.add_argument("--dpi", type=int, default=300)
     p.add_argument("--seed", type=int, default=42)
@@ -37,6 +55,8 @@ def main(argv: list[str] | None = None) -> int:
         n_bins=args.n_bins,
         min_align_frac=args.min_align_frac,
         max_k=args.max_k,
+        min_k=args.min_k,
+        fixed_k=(args.fixed_k if args.fixed_k > 0 else None),
         dpi=args.dpi,
         seed=args.seed,
     )
