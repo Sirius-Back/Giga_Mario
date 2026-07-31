@@ -53,8 +53,14 @@ def load_zsv_pairs(
     *,
     parsed_root: Path,
     predict_root: Path,
+    max_samples: int | None = None,
+    seed: int = 42,
 ) -> list[tuple[str, str, float]]:
-    """Return ``(id, sequence, target)`` for ZSV holdouts."""
+    """Return ``(id, sequence, target)`` for ZSV holdouts.
+
+    When ``max_samples`` is set and smaller than the full ZSV set, draw a
+    deterministic random subset (``seed``) without replacement.
+    """
     parsed_root = Path(parsed_root)
     predict_root = Path(predict_root)
     zsv_parsed = parsed_root / "zero-shot-validation"
@@ -90,6 +96,15 @@ def load_zsv_pairs(
         pairs.append((rid, seq, float(by_id[rid])))
     if not pairs:
         raise ValueError(f"No ZSV sequences under {zsv_parsed}")
+    if max_samples is not None:
+        if max_samples <= 0:
+            raise ValueError(f"max_samples must be positive, got {max_samples}")
+        if max_samples < len(pairs):
+            import numpy as np
+
+            rng = np.random.default_rng(int(seed))
+            idx = rng.choice(len(pairs), size=int(max_samples), replace=False)
+            pairs = [pairs[int(i)] for i in idx]
     return pairs
 
 
@@ -259,7 +274,10 @@ def eval_caduceus_zsv(
     batch_size: int = 192,
     max_length: int = 256,
     device: int = 0,
+    device_ids: list[int] | tuple[int, ...] | None = None,
     amp: bool = True,
+    max_samples: int | None = None,
+    seed: int = 42,
 ) -> dict[str, Any]:
     """Caduceus HF checkpoint on universal ZSV trees (same artifacts as LegNet)."""
     import importlib
@@ -279,7 +297,10 @@ def eval_caduceus_zsv(
         batch_size=batch_size,
         max_length=max_length,
         device=device,
+        device_ids=device_ids,
         amp=amp,
+        max_samples=max_samples,
+        seed=seed,
     )
 
 
@@ -289,6 +310,9 @@ def eval_zsv_from_train_outdir(
     outdir: Path,
     split_root: Path,
     device: int = 0,
+    device_ids: list[int] | tuple[int, ...] | None = None,
+    max_samples: int | None = None,
+    seed: int = 42,
 ) -> dict[str, Any] | None:
     """Dispatch ZSV eval when ``SPLIT`` (or panel) has zero-shot-validation trees.
 
@@ -355,7 +379,10 @@ def eval_zsv_from_train_outdir(
             batch_size=batch_size,
             max_length=max_length,
             device=device,
+            device_ids=device_ids,
             amp=amp,
+            max_samples=max_samples,
+            seed=seed,
         )
     raise ValueError(f"Unknown model for ZSV eval: {model}")
 
@@ -366,12 +393,29 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--outdir", required=True, type=Path, help="Train run directory")
     p.add_argument("--split-root", required=True, type=Path, help="SPLIT or panel root")
     p.add_argument("--device", type=int, default=0)
+    p.add_argument(
+        "--device-ids",
+        type=int,
+        nargs="+",
+        default=None,
+        help="Optional multi-GPU DataParallel ids (e.g. 0 1)",
+    )
+    p.add_argument(
+        "--max-samples",
+        type=int,
+        default=None,
+        help="Optional random subset size (e.g. 8192); default = full ZSV",
+    )
+    p.add_argument("--seed", type=int, default=42, help="RNG seed for --max-samples")
     args = p.parse_args(argv)
     result = eval_zsv_from_train_outdir(
         model=args.model,
         outdir=args.outdir,
         split_root=args.split_root,
         device=args.device,
+        device_ids=args.device_ids,
+        max_samples=args.max_samples,
+        seed=args.seed,
     )
     if result is None:
         print("ERROR: zero-shot-validation trees not found", flush=True)

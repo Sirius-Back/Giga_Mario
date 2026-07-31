@@ -133,6 +133,7 @@ def _parse_argv(argv: list[str]) -> dict[str, object]:
         "adv_patience": ADV_EARLY_STOPPING_PATIENCE,
         "skip_wait": False,
         "split_only": False,
+        "n_devices": None,
     }
     for tok in list(argv):
         if tok.startswith("batch_size="):
@@ -155,6 +156,9 @@ def _parse_argv(argv: list[str]) -> dict[str, object]:
             argv.remove(tok)
         elif tok.startswith("adversarial_early_stopping_patience="):
             cfg["adv_patience"] = int(tok.split("=", 1)[1])
+            argv.remove(tok)
+        elif tok.startswith("n_devices="):
+            cfg["n_devices"] = int(tok.split("=", 1)[1])
             argv.remove(tok)
         elif tok in {"skip_wait=true", "--skip-wait"}:
             cfg["skip_wait"] = True
@@ -473,7 +477,46 @@ def main(argv: list[str] | None = None) -> int:
         print("split_only=true — skipping train", flush=True)
         return 0
 
-    if cfg["skip_wait"]:
+    forced_n = cfg.get("n_devices")
+    if forced_n is not None:
+        n = int(forced_n)
+        if n < 1:
+            raise ValueError(f"n_devices must be >=1, got {n}")
+        if cfg["skip_wait"]:
+            # Prefer already-free GPUs; else first n indices.
+            free = select_free_gpus(prefer=PREFERRED_GPUS, fallback=FALLBACK_GPUS)
+            if n == 1:
+                used = {g: _gpu_used_mib(g) for g in PREFERRED_GPUS}
+                gpus = tuple(
+                    g for g in PREFERRED_GPUS
+                    if used.get(g) is not None and used[g] < MEM_FREE_MIB
+                )[:1]
+                if not gpus:
+                    gpus = (0,)
+            elif free and len(free) >= n:
+                gpus = free[:n]
+            else:
+                gpus = PREFERRED_GPUS[:n]
+            print(f"n_devices={n} skip_wait=true — using GPUs {gpus}", flush=True)
+        else:
+            if n == 1:
+                print("Waiting for any single free GPU …", flush=True)
+                while True:
+                    used = {g: _gpu_used_mib(g) for g in PREFERRED_GPUS}
+                    print(f"GPU memory.used MiB: {used}", flush=True)
+                    free1 = [
+                        g for g in PREFERRED_GPUS
+                        if used.get(g) is not None and used[g] < MEM_FREE_MIB
+                    ]
+                    if free1:
+                        gpus = (free1[0],)
+                        break
+                    time.sleep(POLL_SEC)
+            else:
+                gpus = wait_for_train_gpus()
+                gpus = gpus[:n]
+            print(f"n_devices={n} — using GPUs {gpus}", flush=True)
+    elif cfg["skip_wait"]:
         gpus = select_free_gpus() or FALLBACK_GPUS
         print(f"skip_wait=true — using GPUs {gpus}", flush=True)
     else:

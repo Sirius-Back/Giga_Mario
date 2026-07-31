@@ -59,10 +59,6 @@ force: false
 #   - epoch eval caps remain 8192 (Caduceus --eval-max-samples)
 rerun: false
 source_split: null
-# Optional separate adversarial schedule (null → same as direct).
-adversarial_epochs: null
-adversarial_min_epochs: null
-adversarial_early_stopping_patience: null
 plot_split: true
 # After-train visualization (learning curves + SBS PCA on split.csv)
 plot_train: true

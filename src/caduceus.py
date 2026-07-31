@@ -307,15 +307,24 @@ def evaluate_zsv_root(
     batch_size: int = 192,
     max_length: int = 256,
     device: int | str = 0,
+    device_ids: list[int] | tuple[int, ...] | None = None,
     amp: bool = True,
     task: str = "regression",
+    max_samples: int | None = None,
+    seed: int = 42,
 ) -> dict[str, Any]:
     """Universal Caduceus ZSV: PARSED|PREDICT ``zero-shot-validation`` → metrics JSON.
 
     Accepts either ``zsv_root`` (panel/SPLIT parent with PARSED+PREDICT) or explicit
     ``parsed_root`` + ``predict_root``. Writes the same artifact shape as LegNet ZSV
     via ``src.pipeline.zsv_eval.write_zsv_artifacts``.
+
+    ``device_ids`` (optional, ≥2) shards ZSV pairs across GPUs in parallel
+    (one model replica per device). Caduceus/Mamba Triton kernels are not
+    ``DataParallel``-safe, so we never wrap the model in DP.
     """
+    from concurrent.futures import ThreadPoolExecutor
+
     from src.pipeline.zsv_eval import load_zsv_pairs, metrics_from_preds, write_zsv_artifacts
 
     model_dir = Path(model_dir)
@@ -331,57 +340,118 @@ def evaluate_zsv_root(
             parsed_root = zsv_root / "FASTA"
         predict_root = predict_root or (zsv_root / "PREDICT")
 
-    pairs = load_zsv_pairs(parsed_root=Path(parsed_root), predict_root=Path(predict_root))
+    pairs = load_zsv_pairs(
+        parsed_root=Path(parsed_root),
+        predict_root=Path(predict_root),
+        max_samples=max_samples,
+        seed=seed,
+    )
     if task != "regression":
         raise NotImplementedError(
             f"Caduceus ZSV currently supports regression only (got task={task!r})"
         )
 
-    if isinstance(device, int):
-        torch_device = torch.device(
-            f"cuda:{device}" if torch.cuda.is_available() else "cpu"
+    ids: list[int] | None = None
+    if device_ids is not None:
+        ids = [int(x) for x in device_ids]
+        if not ids:
+            raise ValueError("device_ids must be non-empty when provided")
+        if any(i < 0 for i in ids):
+            raise ValueError(f"device_ids must be non-negative, got {ids}")
+
+    def _infer_on_device(
+        shard: list[tuple[str, str, float]], dev: int | str
+    ) -> tuple[list[float], list[float], float, int]:
+        if isinstance(dev, int):
+            torch_device = torch.device(
+                f"cuda:{dev}" if torch.cuda.is_available() else "cpu"
+            )
+        else:
+            torch_device = torch.device(dev)
+        tokenizer = AutoTokenizer.from_pretrained(str(model_dir), trust_remote_code=True)
+        pad_id = tokenizer.pad_token_id if tokenizer.pad_token_id is not None else 4
+        model = AutoModelForSequenceClassification.from_pretrained(
+            str(model_dir),
+            trust_remote_code=True,
+            num_labels=1,
+            problem_type="regression",
         )
+        model.to(torch_device)
+        model.eval()
+        loader = DataLoader(
+            ZsvPairDataset(shard, tokenizer, max_length),
+            batch_size=int(batch_size),
+            shuffle=False,
+            num_workers=0,
+            pin_memory=torch_device.type == "cuda",
+            collate_fn=lambda b: collate_pad(b, pad_id),
+        )
+        preds_l: list[float] = []
+        targets_l: list[float] = []
+        use_amp = bool(amp) and torch_device.type == "cuda"
+        criterion = torch.nn.MSELoss()
+        total_loss_l, n_l = 0.0, 0
+        for batch in loader:
+            batch = {k: v.to(torch_device) for k, v in batch.items()}
+            with torch.cuda.amp.autocast(enabled=use_amp):
+                out = model(**batch)
+                logits = out.logits.squeeze(-1)
+                labels = batch["labels"]
+                loss = criterion(logits, labels)
+            bs = labels.size(0)
+            total_loss_l += float(loss.item()) * bs
+            n_l += bs
+            preds_l.extend(logits.detach().float().cpu().reshape(-1).tolist())
+            targets_l.extend(labels.detach().float().cpu().reshape(-1).tolist())
+        del model
+        if torch_device.type == "cuda":
+            torch.cuda.empty_cache()
+        return preds_l, targets_l, total_loss_l, n_l
+
+    if ids is not None and len(ids) > 1 and torch.cuda.is_available():
+        # Contiguous shards preserve pair order when concatenated in device order.
+        n_gpu = len(ids)
+        bounds = [i * len(pairs) // n_gpu for i in range(n_gpu + 1)]
+        shards = [pairs[bounds[i] : bounds[i + 1]] for i in range(n_gpu)]
+        print(
+            f"Caduceus ZSV sharded across device_ids={ids} "
+            f"shard_sizes={[len(s) for s in shards]} batch_size={batch_size}",
+            flush=True,
+        )
+        with ThreadPoolExecutor(max_workers=n_gpu) as pool:
+            futs = [
+                pool.submit(_infer_on_device, shard, dev)
+                for shard, dev in zip(shards, ids)
+                if shard
+            ]
+            parts = [f.result() for f in futs]
+        preds: list[float] = []
+        targets: list[float] = []
+        total_loss, n = 0.0, 0
+        for preds_l, targets_l, loss_l, n_l in parts:
+            preds.extend(preds_l)
+            targets.extend(targets_l)
+            total_loss += loss_l
+            n += n_l
+        torch_device = torch.device(f"cuda:{ids[0]}")
+        use_amp = bool(amp)
+        effective_bs = int(batch_size)
     else:
-        torch_device = torch.device(device)
-
-    tokenizer = AutoTokenizer.from_pretrained(str(model_dir), trust_remote_code=True)
-    pad_id = tokenizer.pad_token_id if tokenizer.pad_token_id is not None else 4
-    model = AutoModelForSequenceClassification.from_pretrained(
-        str(model_dir),
-        trust_remote_code=True,
-        num_labels=1,
-        problem_type="regression",
-    )
-    model.to(torch_device)
-    model.eval()
-
-    ds = ZsvPairDataset(pairs, tokenizer, max_length)
-    loader = DataLoader(
-        ds,
-        batch_size=batch_size,
-        shuffle=False,
-        num_workers=0,
-        pin_memory=torch_device.type == "cuda",
-        collate_fn=lambda b: collate_pad(b, pad_id),
-    )
-
-    preds: list[float] = []
-    targets: list[float] = []
-    use_amp = bool(amp) and torch_device.type == "cuda"
-    criterion = torch.nn.MSELoss()
-    total_loss, n = 0.0, 0
-    for batch in loader:
-        batch = {k: v.to(torch_device) for k, v in batch.items()}
-        with torch.cuda.amp.autocast(enabled=use_amp):
-            out = model(**batch)
-            logits = out.logits.squeeze(-1)
-            labels = batch["labels"]
-            loss = criterion(logits, labels)
-        bs = labels.size(0)
-        total_loss += float(loss.item()) * bs
-        n += bs
-        preds.extend(logits.detach().float().cpu().reshape(-1).tolist())
-        targets.extend(labels.detach().float().cpu().reshape(-1).tolist())
+        if ids is not None:
+            primary: int | str = ids[0]
+        elif isinstance(device, int):
+            primary = int(device)
+        else:
+            primary = device
+        preds, targets, total_loss, n = _infer_on_device(pairs, primary)
+        if isinstance(primary, int):
+            torch_device = torch.device(
+                f"cuda:{primary}" if torch.cuda.is_available() else "cpu"
+            )
+        else:
+            torch_device = torch.device(primary)
+        use_amp = bool(amp) and torch_device.type == "cuda"
+        effective_bs = int(batch_size)
 
     if len(preds) != len(targets) or n == 0:
         raise RuntimeError(
@@ -409,10 +479,15 @@ def evaluate_zsv_root(
         metrics=metrics,
         extra={
             "n_pairs": len(pairs),
+            "max_samples": max_samples,
+            "sample_seed": int(seed),
             "max_length": int(max_length),
             "batch_size": int(batch_size),
+            "effective_batch_size": int(effective_bs),
             "amp": bool(use_amp),
             "device": str(torch_device),
+            "device_ids": ids,
+            "parallel": "shard" if ids is not None and len(ids) > 1 else "single",
         },
     )
 
