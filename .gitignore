@@ -275,6 +275,11 @@ build/
 *.so
 *.dylib
 *.dll
+*.o
+*.a
+
+# C++ build products under mag tools
+mag/src/orthoparagroups/orthoparagroups
 
 .sudo_as_admin_successful
 
@@ -286,6 +291,10 @@ build/
 !tests/fixtures/mini_raw/**/*.gtf
 !tests/fixtures/mini_raw/**/*.fai
 !tests/fixtures/mini_raw/**/*.fa
+
+# mag orthoparagroups smoketest fixtures (tiny)
+!mag/src/orthoparagroups/smoketest/**/*.fa
+!mag/src/orthoparagroups/smoketest/**/*.fna
 
 # --- Archived local trees (keep on disk; not in public repo) ---
 archive/

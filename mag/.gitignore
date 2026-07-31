@@ -102,3 +102,8 @@ manifest.json
 
 # OS
 Thumbs.db
+
+# C++ build products
+*.o
+src/orthoparagroups/orthoparagroups
+
