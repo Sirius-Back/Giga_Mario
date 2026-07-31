@@ -30,3 +30,13 @@ mag/src/orthoparagroups/orthoparagroups \
 
 - `cluster_*.fna` — headers tagged `ortholog` or `paralog`
 - `clusters.tsv` — cluster property table
+
+## Figures
+
+```bash
+python -m src.run.orthoparagroups.plot_clusters \
+  --clusters mag/orthoparagroups/clusters.tsv \
+  --outdir mag/orthoparagroups/figures
+```
+
+cnsplots: `Figure_01`–`Figure_10` (PDF/SVG/PNG). Altair: matching `*_altair` HTML/VL/PNG plus `Figure_11` species median occupancy.
