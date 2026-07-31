@@ -90,6 +90,7 @@ data/
 logs/
 tmp/
 manifest.json
+!homology_graph/manifest.json
 *.partial
 
 # IDE
