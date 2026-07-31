@@ -119,19 +119,230 @@ def count_train_test_val(rows: Sequence[dict[str, str]]) -> dict[str, int]:
     return counts
 
 
+def _apply_label_permutation(
+    rows: Sequence[dict[str, str]],
+    perm: dict[str, str],
+) -> list[dict[str, str]]:
+    """Remap train/test/val labels via ``perm``; leave zsv/other unchanged."""
+    out: list[dict[str, str]] = []
+    for row in rows:
+        label = str(row["train_test"]).strip().lower()
+        new_label = perm.get(label, row["train_test"])
+        out.append(
+            {
+                "ID": row["ID"],
+                "train_test": new_label,
+                "fold": row["fold"],
+            }
+        )
+    return out
+
+
+def _try_label_swaps_to_aligned(
+    rows: Sequence[dict[str, str]],
+    before: dict[str, int],
+) -> tuple[str, list[dict[str, str]]] | None:
+    """Try pairwise train/test/val label swaps that yield ≈3:1:1.
+
+    Returns ``(method, out_rows)`` or ``None`` if no swap works.
+    """
+    ttv = (before["train"], before["test"], before["val"])
+    if sum(ttv) <= 0:
+        return None
+    # (method_name, permutation of labels: old → new)
+    candidates: list[tuple[str, dict[str, str], tuple[int, int, int]]] = [
+        (
+            "swap_train_val",
+            {"train": "val", "val": "train", "test": "test"},
+            (ttv[2], ttv[1], ttv[0]),  # val,test,train counts → new train,test,val
+        ),
+        (
+            "swap_train_test",
+            {"train": "test", "test": "train", "val": "val"},
+            (ttv[1], ttv[0], ttv[2]),
+        ),
+        (
+            "swap_val_test",
+            {"train": "train", "val": "test", "test": "val"},
+            (ttv[0], ttv[2], ttv[1]),
+        ),
+    ]
+    for method, perm, projected in candidates:
+        if is_aligned_ratios(projected):
+            return method, _apply_label_permutation(rows, perm)
+    return None
+
+
+def rewrite_split_from_sbs_assignment(
+    assignment_csv: Path,
+    dest_split_csv: Path,
+    *,
+    dest_assignment_csv: Path | None = None,
+    seed: int = 42,
+    ratios: tuple[float, float, float] = ALIGNED_RATIOS,
+) -> dict[str, Any]:
+    """Redo fold→train/test/val from existing SBS clusters (no re-clustering).
+
+    Reads ``sbs_assignment.csv`` (``region|cluster|train_test|fold|…``), keeps
+    ZSV rows, and reassigns **whole clusters** to train/test/val at ≈3:1:1 via
+    :func:`src.splits.sbs.assign._assign_folds_to_train_test`. Each region keeps
+    a single label → **no train/test/val ID intersections**. Never mutates the
+    source assignment file.
+    """
+    from src.pipeline.generate_fold import is_zsv_fold
+    from src.splits.sbs.assign import (
+        _assign_folds_to_train_test,
+        write_assignment_table,
+    )
+
+    assignment_csv = Path(assignment_csv)
+    dest_split_csv = Path(dest_split_csv)
+    if not assignment_csv.is_file():
+        raise FileNotFoundError(f"Missing SBS assignment: {assignment_csv}")
+    if dest_split_csv.exists():
+        raise FileExistsError(f"Refusing overwrite: {dest_split_csv}")
+
+    rows = read_csv(assignment_csv)
+    if not rows:
+        raise ValueError(f"assignment is empty: {assignment_csv}")
+    required = {"region", "cluster", "train_test", "fold"}
+    missing = required - set(rows[0])
+    if missing:
+        raise ValueError(
+            f"assignment missing columns {sorted(missing)}: {assignment_csv}"
+        )
+
+    before = count_train_test_val(
+        [{"train_test": r["train_test"]} for r in rows]
+    )
+
+    fold_members: dict[str, list[int]] = {}
+    for i, row in enumerate(rows):
+        label = str(row["train_test"]).strip().lower()
+        fold = str(row.get("fold") or row.get("cluster") or "").strip()
+        if is_zsv_fold(label) or is_zsv_fold(fold) or fold.lower() == "zsv":
+            continue
+        fold_members.setdefault(fold, []).append(i)
+
+    if len(fold_members) < 3:
+        raise RuntimeError(
+            f"need ≥3 SBS clusters to assign train/test/val; got {len(fold_members)} "
+            f"from {assignment_csv}"
+        )
+
+    fold_sizes = {fid: len(members) for fid, members in fold_members.items()}
+    fold_to_tt = _assign_folds_to_train_test(
+        sorted(fold_members),
+        seed=int(seed),
+        fold_strata=None,
+        ratios=ratios,
+        fold_sizes=fold_sizes,
+    )
+
+    out_assign: list[dict[str, str]] = []
+    out_split: list[dict[str, str]] = []
+    seen_ids: set[str] = set()
+    for i, row in enumerate(rows):
+        rid = str(row["region"])
+        if rid in seen_ids:
+            raise RuntimeError(f"duplicate region in assignment: {rid!r}")
+        seen_ids.add(rid)
+        label = str(row["train_test"]).strip().lower()
+        fold = str(row.get("fold") or row.get("cluster") or "").strip()
+        additional = row.get("additional", "")
+        cluster = str(row.get("cluster", fold))
+        if is_zsv_fold(label) or is_zsv_fold(fold) or fold.lower() == "zsv":
+            tt = "zsv"
+            fold_out = "zsv"
+            cluster_out = "zsv"
+        else:
+            tt = fold_to_tt[fold]
+            fold_out = fold
+            cluster_out = cluster
+        out_assign.append(
+            {
+                "region": rid,
+                "cluster": cluster_out,
+                "train_test": tt,
+                "fold": fold_out,
+                "additional": additional,
+            }
+        )
+        out_split.append({"ID": rid, "train_test": tt, "fold": fold_out})
+
+    # Integrity: no ID in more than one of train/test/val
+    by_tt: dict[str, set[str]] = {"train": set(), "test": set(), "val": set()}
+    for r in out_split:
+        lab = str(r["train_test"]).strip().lower()
+        if lab in by_tt:
+            by_tt[lab].add(str(r["ID"]))
+    for a, b in (("train", "test"), ("train", "val"), ("test", "val")):
+        inter = by_tt[a] & by_tt[b]
+        if inter:
+            raise RuntimeError(
+                f"split intersection {a}∩{b}={len(inter)} (e.g. {next(iter(inter))!r})"
+            )
+
+    dest_split_csv.parent.mkdir(parents=True, exist_ok=True)
+    write_csv(dest_split_csv, out_split, SPLIT_CSV_COLUMNS)
+    assign_dest = (
+        Path(dest_assignment_csv)
+        if dest_assignment_csv is not None
+        else dest_split_csv.parent / "sbs_assignment.csv"
+    )
+    if assign_dest.exists():
+        raise FileExistsError(f"Refusing overwrite: {assign_dest}")
+    write_assignment_table(out_assign, assign_dest)
+
+    after = count_train_test_val(out_split)
+    if not is_aligned_ratios((after["train"], after["test"], after["val"])):
+        # Fold-grain assignment may miss exact 3:1:1 when cluster sizes are coarse;
+        # still require best-effort within 2× tol, else fail loudly.
+        if not is_aligned_ratios(
+            (after["train"], after["test"], after["val"]),
+            tol=_RATIO_FRAC_TOL * 2,
+        ):
+            raise RuntimeError(
+                f"cluster→train/test/val failed to reach ≈3:1:1: "
+                f"before={before} after={after} n_folds={len(fold_members)}"
+            )
+
+    return {
+        "method": "sbs_cluster_to_train_test_val",
+        "source_assignment_csv": str(assignment_csv),
+        "dest_split_csv": str(dest_split_csv),
+        "dest_assignment_csv": str(assign_dest),
+        "counts_before": before,
+        "counts_after": after,
+        "n_clusters": len(fold_members),
+        "train_test_by_fold": dict(fold_to_tt),
+        "seed": int(seed),
+        "ratios": list(ratios),
+    }
+
+
 def rewrite_split_table_aligned(
     source_split_csv: Path,
     dest_split_csv: Path,
     *,
     seed: int = 42,
     prefer_label_swap: bool = True,
+    assignment_csv: Path | None = None,
+    allow_id_reassign: bool = True,
 ) -> dict[str, Any]:
     """Rebuild train/test/val on the present ID table at ≈3:1:1; keep ZSV rows.
 
-    When the present table is already ≈1:1:3 (legacy inverted ``ratios=[1,1,3]``),
-    swap **train ↔ val** labels (deterministic; preserves ID membership of the
-    large pool → train). Otherwise reassign assignable IDs with
-    ``ratios=(3,1,1)``. Never mutates ``source_split_csv``.
+    Order of attempts:
+
+    1. Pairwise **label swaps** among train/test/val (preserves ID pools / clusters)
+       when ``prefer_label_swap``.
+    2. If ``assignment_csv`` is set — **SBS cluster→train/test/val** redo (whole
+       clusters; no ID-level mixing across splits).
+    3. Else if ``allow_id_reassign`` — random ID reassignment at ≈3:1:1
+       (appropriate for ``split=random`` only).
+    4. Else raise.
+
+    Never mutates ``source_split_csv``.
     """
     from src.pipeline.generate_fold import is_zsv_fold
     from src.splits.common import assign_folds_random
@@ -162,28 +373,23 @@ def rewrite_split_table_aligned(
         if not is_zsv_fold(row["train_test"]) and not is_zsv_fold(row.get("fold", ""))
     ]
     method: str
-    # Detect legacy inverted 1:1:3 (train:test:val) → fix via train↔val swap.
-    ttv = (before["train"], before["test"], before["val"])
-    if prefer_label_swap and sum(ttv) > 0 and is_aligned_ratios(
-        (ttv[2], ttv[1], ttv[0])  # val, test, train ≈ 3:1:1 when current is 1:1:3
-    ):
-        method = "swap_train_val"
-        out_rows: list[dict[str, str]] = []
-        for row in rows:
-            label = str(row["train_test"]).strip().lower()
-            new_label = label
-            if label == "train":
-                new_label = "val"
-            elif label == "val":
-                new_label = "train"
-            out_rows.append(
-                {
-                    "ID": row["ID"],
-                    "train_test": new_label if label in {"train", "val", "test"} else row["train_test"],
-                    "fold": row["fold"],
-                }
-            )
-    else:
+    out_rows: list[dict[str, str]]
+
+    swap_hit = (
+        _try_label_swaps_to_aligned(rows, before) if prefer_label_swap else None
+    )
+    if swap_hit is not None:
+        method, out_rows = swap_hit
+    elif assignment_csv is not None:
+        # Cluster-grain path writes both split.csv and sbs_assignment.csv.
+        return rewrite_split_from_sbs_assignment(
+            Path(assignment_csv),
+            dest_split_csv,
+            dest_assignment_csv=dest_split_csv.parent / "sbs_assignment.csv",
+            seed=seed,
+            ratios=ALIGNED_RATIOS,
+        )
+    elif allow_id_reassign:
         method = "reassign_random_3_1_1"
         import random as _random
 
@@ -210,6 +416,12 @@ def rewrite_split_table_aligned(
                         "fold": "zsv",
                     }
                 )
+    else:
+        raise RuntimeError(
+            "aligned rewrite: no train/test/val label swap yields ≈3:1:1 and "
+            "ID-level reassign is disabled; provide assignment_csv for SBS "
+            f"cluster→fold assign (before={before})"
+        )
 
     dest_split_csv.parent.mkdir(parents=True, exist_ok=True)
     write_csv(dest_split_csv, out_rows, SPLIT_CSV_COLUMNS)
