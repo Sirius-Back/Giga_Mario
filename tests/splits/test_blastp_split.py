@@ -115,12 +115,40 @@ def _write_mini_genome(
     return marked, parsed, id_csv, fold_csv, gtf_dir, fna_dir
 
 
+def test_sparse_blastp_identical_proteins(tmp_path: Path) -> None:
+    import shutil
+
+    if not shutil.which("diamond"):
+        pytest.skip("diamond not on PATH")
+    faa = tmp_path / "p.faa"
+    # Diverse sequence so DIAMOND tantan masking does not wipe seeds.
+    aa = (
+        "MKTAYIAKQRQISFVKSHFSRQLEERLGLIEVQAPILSRVGDGTQDNLSGAEKAVQVKVKALPDAQFEVVHS"
+        "LAKWKRQTLGQHDFSAGEGDNLVLTPTPIPLRLAANAAVVALGNLPAVGRSYWVYVLIVAVLAGFLLAGVG"
+    )
+    faa.write_text(f">p1\n{aa}\n>p2\n{aa}\n", encoding="utf-8")
+    hits, edges = run_sparse_blastp(
+        faa,
+        work=tmp_path / "blast",
+        threads=1,
+        evalue=10.0,
+        max_target_seqs=5,
+        min_bitscore=5.0,
+        force=True,
+    )
+    assert hits.is_file()
+    assert hits.name == "diamond_hits.tsv"
+    assert ("p1", "p2") in edges or ("p2", "p1") in edges
+
+
 def test_translate_cds_and_blastp_assign(tmp_path: Path) -> None:
+    import shutil
+
+    if not shutil.which("diamond"):
+        pytest.skip("diamond not on PATH")
     marked, parsed, id_csv, fold_csv, gtf_dir, fna_dir = _write_mini_genome(tmp_path)
     out = tmp_path / "out"
     # Pre-place MARKED_blastp so we skip adapt.
-    import shutil
-
     shutil.copytree(marked, out / "MARKED_blastp")
 
     summary = run_blastp_split_assign(
@@ -142,24 +170,6 @@ def test_translate_cds_and_blastp_assign(tmp_path: Path) -> None:
     assert split_csv.is_file()
     text = split_csv.read_text(encoding="utf-8")
     assert "zsv" in text
-    # Identical CDS for gA and gB → BLASTP edge → same component for IDs 1 and 2
+    # Identical CDS for gA and gB → DIAMOND edge → same component for IDs 1 and 2
     assert summary["n_proteins"] >= 1
     assert summary["n_blast_edges"] >= 1 or summary["n_proteins"] >= 2
-
-
-def test_sparse_blastp_identical_proteins(tmp_path: Path) -> None:
-    faa = tmp_path / "p.faa"
-    aa = "MKPFG" * 8
-    faa.write_text(f">p1\n{aa}\n>p2\n{aa}\n", encoding="utf-8")
-    hits, edges = run_sparse_blastp(
-        faa,
-        work=tmp_path / "blast",
-        threads=1,
-        evalue=10.0,
-        max_target_seqs=5,
-        min_bitscore=5.0,
-        query_chunk=10,
-        force=True,
-    )
-    assert hits.is_file()
-    assert ("p1", "p2") in edges or ("p2", "p1") in edges

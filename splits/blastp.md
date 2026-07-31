@@ -87,12 +87,11 @@ intentionally identical (opt-in only).
       --plot
   notes: |
     Genetic code default: `universal`.
-    Step (2) filter: IDs ∩ PARSED only (must be written; mirror
-    `intersect_pangenome` pattern — do not invent labels).
-    Step (3.2): BLASTP with optional candidate heuristic (no dense n×n
-    requirement for clustering).
-    Step (3.3): reuse SBS clustering, control, and stratification.
-    Requires BLAST+ (`blastp`, `makeblastdb`) on PATH when implemented.
+    Step (2) filter: IDs ∩ PARSED only (mirror `intersect_pangenome`).
+    Step (3.2): **DIAMOND** `blastp --sensitive` (production default; not NCBI
+    BLASTP). Sparse hits (`-k` / e-value / bitscore) → connected components.
+    Step (3.3): reuse SBS fold→train/val/test + stratification.
+    Requires `diamond` on PATH (`bin/diamond` or conda bioconda).
     `/split-generate` reads this caption to emit `src/splits/blastp.py`;
     `/split` then runs split-predict + materialize.
 

@@ -4,7 +4,7 @@ Caption: ``splits/blastp.md``. Wired into ``split-predict`` as ``type=blastp``.
 
 Flow:
   raw (fna+gtf) → adapt MARKED_blastp → filter ∩ PARSED → CDS protein FASTA
-  → sparse BLASTP (chunked queries, max_target_seqs) → connected components
+  → DIAMOND blastp --sensitive (sparse hits) → connected components
   → fold-grain train/val/test (+ ZSV) → ``split.csv``.
 
 Proteins come from **CDS exons** (genetic code, default universal), not raw DNA
@@ -374,19 +374,26 @@ def run_sparse_blastp(
     query_chunk: int = DEFAULT_QUERY_CHUNK,
     force: bool = False,
 ) -> tuple[Path, list[tuple[str, str]]]:
-    """makeblastdb + chunked blastp → undirected edges (heuristic, not all-vs-all)."""
-    blastp = shutil.which("blastp")
-    makeblastdb = shutil.which("makeblastdb")
-    if not blastp or not makeblastdb:
-        raise FileNotFoundError("blastp and makeblastdb must be on PATH")
+    """DIAMOND blastp → undirected edges (production default; not NCBI BLASTP).
+
+    ``query_chunk`` is ignored (kept for API compatibility). Single-pass DIAMOND
+    replaces the old chunked NCBI blastp path.
+    """
+    _ = query_chunk
+    diamond = shutil.which("diamond")
+    if not diamond:
+        raise FileNotFoundError(
+            "diamond must be on PATH (conda install -c bioconda diamond)"
+        )
 
     work = ensure_dir(Path(work))
     faa = Path(faa)
     if not faa.is_file() or faa.stat().st_size == 0:
         raise FileNotFoundError(f"protein FASTA missing/empty: {faa}")
 
-    hits_path = work / "blastp_hits.tsv"
-    edges_path = work / "blastp_edges.tsv"
+    hits_path = work / "diamond_hits.tsv"
+    edges_path = work / "diamond_edges.tsv"
+    # Legacy NCBI resume files are intentionally ignored (discarded for DIAMOND).
     if hits_path.is_file() and edges_path.is_file() and not force:
         edges: list[tuple[str, str]] = []
         with edges_path.open(encoding="utf-8") as fh:
@@ -396,75 +403,62 @@ def run_sparse_blastp(
                     continue
                 a, b = line.split("\t")[:2]
                 edges.append((a, b))
+        print(f"RESUME: reusing DIAMOND hits {hits_path}", flush=True)
         return hits_path, edges
 
-    db_prefix = work / "prot_db"
-    if force or not (work / "prot_db.psq").is_file():
+    db_prefix = work / "prot_diamond"
+    db_file = Path(str(db_prefix) + ".dmnd")
+    if force or not db_file.is_file():
+        print(f"DIAMOND makedb ← {faa}", flush=True)
         subprocess.run(
             [
-                makeblastdb,
-                "-in",
+                diamond,
+                "makedb",
+                "--in",
                 str(faa),
-                "-dbtype",
-                "prot",
-                "-out",
+                "-d",
                 str(db_prefix),
+                "--threads",
+                str(max(1, int(threads))),
             ],
             check=True,
             cwd=str(work),
         )
 
-    # Split queries into chunks for resumable progress.
-    records: list[tuple[str, str]] = []
-    header: str | None = None
-    chunks_aa: list[str] = []
-    with faa.open(encoding="utf-8") as fh:
-        for line in fh:
-            line = line.rstrip("\n")
-            if line.startswith(">"):
-                if header is not None:
-                    records.append((header, "".join(chunks_aa)))
-                header = line[1:].split()[0]
-                chunks_aa = []
-            else:
-                chunks_aa.append(line.strip())
-        if header is not None:
-            records.append((header, "".join(chunks_aa)))
-
-    chunk_dir = ensure_dir(work / "query_chunks")
-    hit_parts: list[Path] = []
-    for i in range(0, len(records), max(1, int(query_chunk))):
-        part = chunk_dir / f"q_{i // query_chunk:05d}.faa"
-        part_hits = chunk_dir / f"q_{i // query_chunk:05d}.hits.tsv"
-        hit_parts.append(part_hits)
-        if part_hits.is_file() and not force:
-            continue
-        batch = records[i : i + int(query_chunk)]
-        with part.open("w", encoding="utf-8") as fh:
-            for hid, aa in batch:
-                fh.write(f">{hid}\n")
-                fh.write("\n".join(textwrap.wrap(aa, 60)) + "\n")
-        cmd = [
-            blastp,
-            "-query",
-            str(part),
-            "-db",
+    print(
+        f"DIAMOND blastp --sensitive evalue={evalue} -k={max_target_seqs} "
+        f"threads={threads} → {hits_path}",
+        flush=True,
+    )
+    subprocess.run(
+        [
+            diamond,
+            "blastp",
+            "-q",
+            str(faa),
+            "-d",
             str(db_prefix),
-            "-outfmt",
-            "6 qseqid sseqid pident length evalue bitscore",
-            "-evalue",
+            "-o",
+            str(hits_path),
+            "--outfmt",
+            "6",
+            "qseqid",
+            "sseqid",
+            "pident",
+            "length",
+            "evalue",
+            "bitscore",
+            "--evalue",
             str(evalue),
-            "-max_target_seqs",
+            "-k",
             str(int(max_target_seqs)),
-            "-num_threads",
+            "--threads",
             str(max(1, int(threads))),
-        ]
-        with part_hits.open("w", encoding="utf-8") as out_fh:
-            subprocess.run(cmd, check=True, stdout=out_fh, cwd=str(work))
-
-    with hits_path.open("w", encoding="utf-8") as out_fh:
-        for hp in hit_parts:
-            out_fh.write(hp.read_text(encoding="utf-8"))
+            "--sensitive",
+        ],
+        check=True,
+        cwd=str(work),
+    )
 
     edge_set: set[tuple[str, str]] = set()
     with hits_path.open(encoding="utf-8") as fh:
@@ -490,6 +484,7 @@ def run_sparse_blastp(
         fh.write("qseqid\tsseqid\n")
         for a, b in edges:
             fh.write(f"{a}\t{b}\n")
+    print(f"DIAMOND done: n_hits_file={hits_path} n_edges={len(edges)}", flush=True)
     return hits_path, edges
 
 
@@ -939,6 +934,7 @@ def run_blastp_split_assign(
         "blastp_hits": str(hits_path) if hits_path else None,
         "assign_meta": assign_meta,
         "tools": {
+            "diamond": _tool_version("diamond"),
             "blastp": _tool_version("blastp"),
             "makeblastdb": _tool_version("makeblastdb"),
         },

@@ -1,6 +1,8 @@
-"""CPU stages for run15_blastp_legnet: mice fold + BLASTP split + LegNet TSV.
+"""CPU stages for run15_blastp_legnet: mice fold + DIAMOND BLASTP split + LegNet TSV.
 
 No GPU train. Writes under ``runs/run15_blastp_legnet/``.
+
+Homology search uses DIAMOND ``blastp --sensitive`` (not NCBI BLASTP).
 
 Launch::
 
@@ -26,7 +28,7 @@ RATIOS = (1, 1, 3)
 GENETIC_CODE = "universal"
 ENVIRONMENT = "gene"
 WINDOW = {"pos1": 0, "pos2": 0}
-THREADS = max(4, (os.cpu_count() or 8) // 2)
+THREADS = max(8, (os.cpu_count() or 8) // 2)
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -75,6 +77,7 @@ def main(argv: list[str] | None = None) -> int:
         "run_id": RUN_ID,
         "stage": "split_cpu",
         "split": "blastp",
+        "homology_engine": "diamond",
         "genetic_code": genetic_code,
         "environment": ENVIRONMENT,
         "window": WINDOW,
