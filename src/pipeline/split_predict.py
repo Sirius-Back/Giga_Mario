@@ -14,6 +14,8 @@ Supported ``type`` values:
     (requires ``marked``; filters to PARSED IDs)
   - ``blastp`` — CDS protein BLASTP homology (adapt fna+gtf → filter ∩ PARSED
     → sparse BLASTP connected components)
+  - ``mmseqs`` — MMseqs2 ``easy-cluster`` homology folds (MARKED; Locked
+    ratios 60:20:20 train/val/test)
 """
 from __future__ import annotations
 
@@ -36,6 +38,7 @@ SUPPORTED_SPLIT_TYPES = (
     "hashfrag",
     "pangenome",
     "blastp",
+    "mmseqs",
 )
 
 
@@ -448,6 +451,67 @@ def _run_blastp_split_predict(
     return out
 
 
+def _run_mmseqs_split_predict(
+    *,
+    outdir: Path,
+    seed: int,
+    id_csv: Path | None,
+    fold_csv: Path | None,
+    stratification_csv: Path | None,
+    fna: Path | None,
+    marked_fasta: Path | None,
+    ratios: tuple[float, float, float] | None,
+    max_ids: int | None,
+    plot: bool,
+    custom_label_column: str | None,
+    threads: int,
+    force: bool,
+    min_seq_id: float | None,
+    mmseqs_sensitivity: float | None,
+    mmseqs_bin: Path | None,
+) -> Path:
+    """MMseqs2 path: MARKED → easy-cluster → fold-grain 60:20:20 → split.csv."""
+    from src.splits.mmseqs import (
+        DEFAULT_MIN_SEQ_ID,
+        DEFAULT_RATIOS,
+        DEFAULT_SENSITIVITY,
+        run_mmseqs_split_assign,
+    )
+
+    fna_root = marked_fasta or fna
+    if fna_root is None:
+        raise ValueError(
+            "split-predict type=mmseqs requires --marked (MARKED dir) or --fna"
+        )
+    summary = run_mmseqs_split_assign(
+        outdir=outdir,
+        fna=Path(fna_root),
+        id_csv=Path(id_csv) if id_csv else None,
+        fold_csv=Path(fold_csv) if fold_csv else None,
+        stratification_csv=Path(stratification_csv) if stratification_csv else None,
+        seed=seed,
+        max_ids=max_ids,
+        ratios=ratios if ratios is not None else DEFAULT_RATIOS,
+        plot=plot,
+        custom_label_column=custom_label_column,
+        mmseqs_bin=mmseqs_bin,
+        threads=threads,
+        sensitivity=(
+            float(mmseqs_sensitivity)
+            if mmseqs_sensitivity is not None
+            else DEFAULT_SENSITIVITY
+        ),
+        min_seq_id=(
+            float(min_seq_id) if min_seq_id is not None else DEFAULT_MIN_SEQ_ID
+        ),
+        force=force,
+    )
+    out = Path(summary["split_csv"])
+    if not out.is_file():
+        raise FileNotFoundError(f"mmseqs split did not write split.csv: {out}")
+    return out
+
+
 def run_split_predict(
     *,
     outdir: Path,
@@ -484,11 +548,16 @@ def run_split_predict(
     fna_dir: Path | None = None,
     environment: str | None = None,
     window: dict[str, int] | None = None,
+    modularity_refine: bool = False,
+    max_fold_size: int | None = None,
     genetic_code: str = "universal",
     marked_blastp: Path | None = None,
     evalue: float | None = None,
     max_target_seqs: int | None = None,
     min_bitscore: float | None = None,
+    min_seq_id: float | None = None,
+    mmseqs_sensitivity: float | None = None,
+    mmseqs_bin: Path | None = None,
 ) -> Path:
     """
     Write `{outdir}/split.csv` with columns ID|train_test|fold.
@@ -499,14 +568,16 @@ def run_split_predict(
     ``type=hashfrag`` — hashFrag+BLAST orthogonal homology splits (MARKED).
     ``type=pangenome`` — C++ k-mer contingency connected components (MARKED∩PARSED).
     ``type=blastp`` — CDS protein BLASTP connected components (adapt fna+gtf).
+    ``type=mmseqs`` — MMseqs2 easy-cluster folds (MARKED; default ratios 60:20:20).
 
     When ``fold.csv`` is present:
       - folds labeled zsv / zeroshotvalidation → train_test=zsv (excluded from
-        random / SBS / hashfrag / pangenome / blastp assignment; materialize moves them to
+        random / SBS / hashfrag / pangenome / blastp / mmseqs assignment; materialize moves them to
         zero-shot-validation/)
       - other IDs get train/test/val; fold column keeps fold.csv value (random),
         SBS cluster id (gc/kmer), homologous-group id (hashfrag), contingency
-        component id (pangenome), or BLASTP component id (blastp)
+        component id (pangenome), BLASTP component id (blastp), or MMseqs
+        cluster id (mmseqs)
 
     When ``fold.csv`` is omitted, emits:
       ``Warning: folds are not included``
@@ -635,6 +706,29 @@ def run_split_predict(
             evalue=evalue,
             max_target_seqs=max_target_seqs,
             min_bitscore=min_bitscore,
+        )
+
+    if type == "mmseqs":
+        if fold_csv is None:
+            warnings.warn("Warning: folds are not included", UserWarning, stacklevel=2)
+        custom_col = custom_label_column or stratification_column
+        return _run_mmseqs_split_predict(
+            outdir=outdir,
+            seed=seed,
+            id_csv=id_csv,
+            fold_csv=fold_csv,
+            stratification_csv=stratification_csv,
+            fna=fna,
+            marked_fasta=marked_fasta,
+            ratios=ratios,
+            max_ids=max_ids,
+            plot=plot,
+            custom_label_column=custom_col,
+            threads=threads,
+            force=force,
+            min_seq_id=min_seq_id,
+            mmseqs_sensitivity=mmseqs_sensitivity,
+            mmseqs_bin=mmseqs_bin,
         )
 
     fold_map = _load_optional_table(fold_csv, min_cols=["ID", "fold"], label="fold.csv")
@@ -904,6 +998,24 @@ def main(argv: list[str] | None = None) -> int:
         default=None,
         help="Min BLASTP bitscore to keep an edge (type=blastp; default: 50)",
     )
+    p.add_argument(
+        "--min-seq-id",
+        type=float,
+        default=None,
+        help="MMseqs --min-seq-id for type=mmseqs (default: 0.8)",
+    )
+    p.add_argument(
+        "--mmseqs-sensitivity",
+        type=float,
+        default=None,
+        help="MMseqs -s sensitivity for type=mmseqs (default: 7.5)",
+    )
+    p.add_argument(
+        "--mmseqs-bin",
+        type=Path,
+        default=None,
+        help="Explicit path to mmseqs binary (type=mmseqs)",
+    )
     args = p.parse_args(argv)
     n_clusters: int | Literal["auto"]
     if str(args.n_clusters).lower() == "auto":
@@ -967,6 +1079,9 @@ def main(argv: list[str] | None = None) -> int:
         evalue=args.evalue,
         max_target_seqs=args.max_target_seqs,
         min_bitscore=args.min_bitscore,
+        min_seq_id=args.min_seq_id,
+        mmseqs_sensitivity=args.mmseqs_sensitivity,
+        mmseqs_bin=args.mmseqs_bin,
     )
     print(path)
     return 0

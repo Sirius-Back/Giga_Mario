@@ -23,10 +23,21 @@ from .kmer import (
     normalize_k_list,
     parse_dsk_ascii,
 )
-from .mmseqs import MMseqsDistanceBackend
+from .mmseqs import (
+    DEFAULT_MIN_SEQ_ID,
+    DEFAULT_SENSITIVITY,
+    MMseqsDistanceBackend,
+    cluster_map_to_dense_ids,
+    find_mmseqs,
+    parse_cluster_tsv,
+    run_mmseqs_easy_cluster,
+    write_multifasta,
+)
 
 __all__ = [
     "DEFAULT_FEATURE_NAMES",
+    "DEFAULT_MIN_SEQ_ID",
+    "DEFAULT_SENSITIVITY",
     "DSK_MIN_K",
     "NATIVE_MAX_K",
     "FEATURE_AAA_PCT",
@@ -36,13 +47,18 @@ __all__ = [
     "KmerFeatureBackend",
     "MMseqsDistanceBackend",
     "aaa_percent",
+    "cluster_map_to_dense_ids",
     "count_kmers",
     "count_kmers_dsk",
     "count_kmers_local",
     "find_dsk",
     "find_dsk2ascii",
+    "find_mmseqs",
     "gc_fraction",
     "gc_percent",
     "normalize_k_list",
+    "parse_cluster_tsv",
     "parse_dsk_ascii",
+    "run_mmseqs_easy_cluster",
+    "write_multifasta",
 ]

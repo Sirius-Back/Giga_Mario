@@ -148,6 +148,7 @@ split-generate:
 | **A2A `@preprocess` / `adapt`** | **Required for `pangenome` when `MARKED_pangenome` is missing or the pangenome window ≠ panel `MARKED`.** Invoke adapt with pangenome `environment`/`window` → `MARKED_pangenome`; then filter → `MARKED_parsed` (`src.splits.intersect_pangenome`). Do not silently reuse panel MARKED unless `reuse_panel_marked=True`. |
 | **Pangenome graph persist** | Always write `{outdir}/graph/` (`contingency_graph.npz`, `ids.txt`, `nodes.tsv`, `edges.tsv`, meta). Clustering = **union-find connected components** on shared-k-mer contingency (not Louvain/Leiden, Laplacian, or MCL). Capped `edges.*` are for viz/rebuild; CC labels use the full stream. Reload via `load_contingency_graph` / `plot_pangenome_contingency_from_artifacts`. Caption: `splits/pangenome.md`. |
 | **A2A `@preprocess` / `adapt` (`blastp`)** | **Required for `blastp`:** inputs are **fna+gtf+window+genetic code** (default `universal`), not panel MARKED. adapt → MARKED+intersect; **filter** IDs ∈ PARSED; SBS fold-filter → blastp (optional non-all-vs-all heuristic) → in-built cluster/strat. Caption: `splits/blastp.md`; skill: `../blastp/SKILL.md`. |
+| **MMseqs2 (`mmseqs`)** | Panel **MARKED** → `mmseqs easy-cluster` (cluster-first; not dense \(n\times n\) for production) → SBS fold→train/test/val at **Locked** `ratios=(0.6, 0.2, 0.2)` (train/val/test = 60:20:20). Default downstream: **LegNet** via `/train`. Caption: `splits/mmseqs.md`; skill: `../mmseqs/SKILL.md`. Legacy `MMseqsDistanceBackend` = small-n only. |
 | `splits/*.md` | Spec captions |
 | `wiki/architecture.md` | Pipeline contracts |
 | `wiki/split-generate.md` | Human mirror of this skill |
@@ -162,5 +163,7 @@ split-generate:
 - Pangenome caption: [`splits/pangenome.md`](../../../splits/pangenome.md)
 - BLASTP caption: [`splits/blastp.md`](../../../splits/blastp.md)
 - BLASTP skill: [`../blastp/SKILL.md`](../blastp/SKILL.md)
+- MMseqs2 caption: [`splits/mmseqs.md`](../../../splits/mmseqs.md)
+- MMseqs2 skill: [`../mmseqs/SKILL.md`](../mmseqs/SKILL.md)
 - `/split` skill: [`../split/SKILL.md`](../split/SKILL.md)
 - `/preprocess` skill: [`../preprocess/SKILL.md`](../preprocess/SKILL.md)
