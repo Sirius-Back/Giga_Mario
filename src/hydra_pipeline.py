@@ -10,6 +10,10 @@ Examples::
   CUDA_VISIBLE_DEVICES=0,1,2,3 python -m src.hydra_pipeline mode=run \\
     run_id=run0 epochs=3 n_devices=4
 
+  # rerun — fine-tune under runs_aligned/ without overwriting a prior run
+  python -m src.hydra_pipeline mode=run rerun=true \\
+    source_split=runs/run3 run_id=run3_caduceus_aligned train=caduceus
+
 Concrete model CLIs live under ``configs/train/*.yaml`` (``direct_cmd``,
 ``adversarial_cmd``, ``zsv_cmd``) — not ad-hoc ``model_dir`` flags on the
 orchestrator.
@@ -30,9 +34,20 @@ def _resolve_path(value: str | Path) -> Path:
     return path if path.is_absolute() else ROOT / path
 
 
-def _run_stages(cfg: DictConfig) -> int:
+def _run_stages(cfg: DictConfig, *, cli_overrides: set[str] | None = None) -> int:
     from src.pipeline.adversarial import apply_fold_class_targets, run_adversarial
     from src.pipeline.legnet_input import build_legnet_tsv
+    from src.pipeline.rerun_aligned import (
+        ALIGNED_EVAL_MAX_SAMPLES,
+        ALIGNED_RATIOS,
+        apply_rerun_schedule,
+        assert_fresh_out_root,
+        default_aligned_out_root,
+        require_aligned_ratios,
+        resolve_source_artifacts,
+        stage_source_into_out_root,
+        write_rerun_manifest,
+    )
     from src.pipeline.split import run_split
     from src.pipeline.split_predict import run_split_predict
     from src.pipeline.train import run_train
@@ -41,8 +56,20 @@ def _run_stages(cfg: DictConfig) -> int:
     if mode not in {"dry", "run"}:
         raise ValueError(f"mode must be dry|run, got {mode!r}")
 
+    overridden = set(cli_overrides or ())
+    rerun = bool(cfg.get("rerun", False))
+    source_split_cfg = cfg.get("source_split", None)
+    if source_split_cfg in (None, "", "null"):
+        source_hint: str | None = None
+    else:
+        source_hint = str(source_split_cfg)
+
     panel_root = _resolve_path(cfg.panel_root)
-    out_root = _resolve_path(cfg.out_root)
+    if rerun and "out_root" not in overridden:
+        out_root = default_aligned_out_root(str(cfg.run_id), project_root=ROOT)
+    else:
+        out_root = _resolve_path(cfg.out_root)
+
     for required in ("ID.csv", "fold.csv", "PARSED", "PREDICT"):
         path = panel_root / required
         if not path.exists():
@@ -60,13 +87,48 @@ def _run_stages(cfg: DictConfig) -> int:
 
     seed = int(cfg.seed)
     epochs = int(cfg.epochs)
+    min_epochs = int(cfg.get("min_epochs", 0) or 0)
+    early_stop = int(cfg.get("early_stopping_patience", 0) or 0)
     train_name = str(cfg.train.name).lower()
     run_training = mode == "run"
     eval_zsv = bool(cfg.zsv)
+    reuse_folds = False
+    source_artifacts = None
+    rerun_stage_info: dict | None = None
 
-    # Persist Hydra snapshots before long stages so settings exist mid-run.
+    if rerun:
+        # Aligned defaults: max 30 epochs, min 10, early stop allowed; never
+        # overwrite prior run trees (fresh out_root under runs_aligned/).
+        epochs, min_epochs, early_stop = apply_rerun_schedule(
+            epochs=epochs,
+            min_epochs=min_epochs,
+            early_stopping_patience=early_stop,
+            overridden=overridden,
+        )
+        assert_fresh_out_root(out_root)
+        if source_hint:
+            source_artifacts = resolve_source_artifacts(source_hint, project_root=ROOT)
+            # Never write into the source run root.
+            if out_root.resolve() == source_artifacts.root.resolve():
+                raise FileExistsError(
+                    "rerun out_root must differ from source_split root "
+                    f"({source_artifacts.root}). Use runs_aligned/<new_run_id>."
+                )
+            if source_artifacts.split_csv.resolve().is_relative_to(out_root.resolve()):
+                raise FileExistsError(
+                    "source_split resolves under out_root; refusing self-overwrite"
+                )
+            reuse_folds = True
+        else:
+            # Fresh train/test/val only at ~3:1:1 (no other ratio schedules).
+            if "ratios" not in overridden or ratios is None:
+                ratios = ALIGNED_RATIOS
+            ratios = require_aligned_ratios(ratios)
+
+    # Fresh destination only — never mutate a prior run tree.
+    if rerun:
+        assert_fresh_out_root(out_root)
     out_root.mkdir(parents=True, exist_ok=True)
-    _write_hydra_resolved(cfg, out_root)
 
     # --- direct split ---
     split_type = str(cfg.split)
@@ -102,6 +164,10 @@ def _run_stages(cfg: DictConfig) -> int:
     else:
         threads = int(threads_cfg)
     force_split = bool(cfg.get("force", False))
+    if rerun and force_split:
+        raise ValueError(
+            "rerun=true forbids force=true (would overwrite prior split/BLAST trees)"
+        )
     kmer_size_cfg = cfg.get("kmer_size", None)
     if kmer_size_cfg in (None, "", "null"):
         kmer_size: int | tuple[int, ...] = 5
@@ -145,41 +211,93 @@ def _run_stages(cfg: DictConfig) -> int:
     genetic_code = str(cfg.get("genetic_code", "universal") or "universal")
     parsed_path = panel_root / "PARSED" if split_type in {"blastp", "pangenome"} else None
 
-    split_csv = run_split_predict(
-        outdir=out_root,
-        type=split_type,
-        seed=seed,
-        id_csv=panel_root / "ID.csv",
-        fold_csv=panel_root / "fold.csv",
-        ratios=ratios,
-        marked_fasta=marked_path,
-        max_ids=max_ids,
-        plot=plot_split and split_type in {"gc", "kmer"},
-        cluster_method=cluster_method,
-        threshold=threshold,
-        p_train=p_train,
-        p_test=p_test,
-        threads=threads,
-        force=force_split,
-        kmer_size=kmer_size,
-        log_transform=log_transform,
-        engine=kmer_engine,
-        parsed=parsed_path,
-        gtf_dir=gtf_dir,
-        fna_dir=fna_dir,
-        environment=str(environment) if environment is not None else None,
-        window=window,
-        genetic_code=genetic_code,
-    )
-    split_root = run_split(
-        split_csv,
-        parsed_target=panel_root / "PREDICT",
-        parsed_data=panel_root / "PARSED",
-        outdir=out_root,
-        strategy="traintestval",
-        intersect_allow=True,
-        id_csv=panel_root / "ID.csv",
-    )
+    if reuse_folds and source_artifacts is not None:
+        rerun_stage_info = stage_source_into_out_root(
+            source_artifacts, out_root, include_split_tree=False
+        )
+        split_csv = out_root / "split.csv"
+        # Rematerialize into the *new* out_root only (source untouched).
+        split_root = run_split(
+            split_csv,
+            parsed_target=panel_root / "PREDICT",
+            parsed_data=panel_root / "PARSED",
+            outdir=out_root,
+            strategy="traintestval",
+            intersect_allow=True,
+            id_csv=panel_root / "ID.csv",
+        )
+        print(
+            f"rerun: reused folds from {source_artifacts.split_csv} → "
+            f"{split_csv}; materialized {split_root}",
+            flush=True,
+        )
+    else:
+        split_csv = run_split_predict(
+            outdir=out_root,
+            type=split_type,
+            seed=seed,
+            id_csv=panel_root / "ID.csv",
+            fold_csv=panel_root / "fold.csv",
+            ratios=ratios,
+            marked_fasta=marked_path,
+            max_ids=max_ids,
+            plot=plot_split and split_type in {"gc", "kmer"},
+            cluster_method=cluster_method,
+            threshold=threshold,
+            p_train=p_train,
+            p_test=p_test,
+            threads=threads,
+            force=force_split,
+            kmer_size=kmer_size,
+            log_transform=log_transform,
+            engine=kmer_engine,
+            parsed=parsed_path,
+            gtf_dir=gtf_dir,
+            fna_dir=fna_dir,
+            environment=str(environment) if environment is not None else None,
+            window=window,
+            genetic_code=genetic_code,
+        )
+        split_root = run_split(
+            split_csv,
+            parsed_target=panel_root / "PREDICT",
+            parsed_data=panel_root / "PARSED",
+            outdir=out_root,
+            strategy="traintestval",
+            intersect_allow=True,
+            id_csv=panel_root / "ID.csv",
+        )
+
+    if rerun:
+        manifest = {
+            "rerun": True,
+            "run_id": str(cfg.run_id),
+            "out_root": str(out_root),
+            "panel_root": str(panel_root),
+            "reuse_folds": reuse_folds,
+            "source_split": source_hint,
+            "ratios": list(ratios) if ratios is not None else None,
+            "epochs": epochs,
+            "min_epochs": min_epochs,
+            "early_stopping_patience": early_stop,
+            "eval_max_samples": ALIGNED_EVAL_MAX_SAMPLES,
+            "train": train_name,
+            "split": split_type,
+            "stage": rerun_stage_info,
+        }
+        write_rerun_manifest(out_root, manifest)
+        # Snapshot effective aligned settings (not only pre-default YAML).
+        with OmegaConf.open_dict(cfg):
+            cfg.epochs = epochs
+            cfg.min_epochs = min_epochs
+            cfg.early_stopping_patience = early_stop
+            cfg.out_root = str(out_root)
+            cfg.rerun = True
+            if ratios is not None:
+                cfg.ratios = list(ratios)
+            if source_hint is not None:
+                cfg.source_split = source_hint
+    _write_hydra_resolved(cfg, out_root)
 
     if train_name in {"legnet", "human_legnet"}:
         direct_tsv = build_legnet_tsv(
@@ -196,13 +314,16 @@ def _run_stages(cfg: DictConfig) -> int:
 
     max_length = int(cfg.get("max_length", 512))
     ckpt_every = int(cfg.get("checkpoint_every_n_epochs", 10))
-    early_stop = int(cfg.get("early_stopping_patience", 0) or 0)
-    min_epochs = int(cfg.get("min_epochs", 0) or 0)
+    direct_outdir = out_root / "direct"
+    if rerun and direct_outdir.exists():
+        raise FileExistsError(
+            f"rerun refuses to overwrite existing train dir: {direct_outdir}"
+        )
     run_train(
         model=train_name,
         type=str(cfg.task_type),
         folders=folders,
-        outdir=out_root / "direct",
+        outdir=direct_outdir,
         strategy=str(cfg.split),
         smoke=not run_training,
         epochs=epochs,
@@ -258,6 +379,10 @@ def _run_stages(cfg: DictConfig) -> int:
     # --- adversarial: copy → re-split → fold-class PREDICT → materialize → train ---
     adv_root = out_root / "adversarial"
     if adv_root.exists():
+        if rerun:
+            raise FileExistsError(
+                f"rerun refuses to overwrite existing adversarial tree: {adv_root}"
+            )
         import shutil
 
         shutil.rmtree(adv_root)
@@ -418,12 +543,14 @@ def main(argv: list[str] | None = None) -> int:
     """
     from hydra import compose, initialize_config_dir
 
+    from src.pipeline.rerun_aligned import parse_override_keys
+
     overrides = list(sys.argv[1:] if argv is None else argv)
     cfg_dir = str((ROOT / "configs").resolve())
     with initialize_config_dir(version_base=None, config_dir=cfg_dir):
         cfg = compose(config_name="pipeline", overrides=overrides)
     try:
-        return _run_stages(cfg)
+        return _run_stages(cfg, cli_overrides=parse_override_keys(overrides))
     except Exception as exc:
         print(f"ERROR: {type(exc).__name__}: {exc}", file=sys.stderr)
         raise

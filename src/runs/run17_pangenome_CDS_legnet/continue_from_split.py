@@ -29,7 +29,8 @@ N_DEVICES = 4
 BATCH_SIZE = 4096
 NUM_WORKERS = 8
 SEED = 42
-RATIOS = (1, 1, 3)
+# Caduceus-aligned default (~81% / 10% / 9% train/test/val); see run_split_cpu.
+RATIOS = None
 WAIT_GPUS = (0, 1, 2, 3)
 MEM_FREE_MIB = 500
 POLL_SEC = 60

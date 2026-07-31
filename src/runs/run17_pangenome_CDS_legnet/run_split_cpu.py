@@ -26,7 +26,9 @@ OUT_ROOT = ROOT / "runs" / RUN_ID
 RAW_GTF = ROOT / "raw" / "gtf"
 RAW_FNA = ROOT / "raw" / "fna"
 SEED = 42
-RATIOS = (1, 1, 3)
+# Caduceus-aligned default (~81% / 10% / 9% train/test/val). Do not use (1,1,3):
+# that weight puts most samples in val and LegNet evaluates the full val set.
+RATIOS = None
 ENVIRONMENT = "gene"
 WINDOW = {"pos1": 0, "pos2": 100}
 # Pangenome contingency uses C++ native; single k (default 21).
@@ -100,7 +102,7 @@ def main(argv: list[str] | None = None) -> int:
         "window": WINDOW,
         "kmer_size": kmer_size,
         "seed": SEED,
-        "ratios": list(RATIOS),
+        "ratios": list(RATIOS) if RATIOS is not None else None,
         "force": force,
         "max_ids": max_ids,
         "panel_root": str(PANEL_ROOT),
@@ -136,7 +138,7 @@ def main(argv: list[str] | None = None) -> int:
         "kmer_size": kmer_size,
         "kmer_engine": ENGINE,
         "seed": SEED,
-        "ratios": list(RATIOS),
+        "ratios": list(RATIOS) if RATIOS is not None else None,
     }
     try:
         from omegaconf import OmegaConf

@@ -31,6 +31,8 @@
 | `wiki/sbs.md` | SBS architecture contracts |
 | `src/caduceus.py` | `@caduceus` fine-tune (`python -m src.caduceus`) |
 | `src/hydra_pipeline.py` | `/pipeline` Hydra orchestrator |
+| `src/pipeline/rerun_aligned.py` | `/pipeline` `rerun=true` (aligned suite) |
+| `runs_aligned/` | Aligned reproducibility out root for reruns |
 | `src/hydra_train.py` | `/train` Hydra entry (LegNet/Caduceus) |
 | `src/tb_logging.py` | Dual SummaryWriter + TensorBoardLogger |
 | `src/metrics_logging.py` | `metrics.md` TorchMetrics helpers |

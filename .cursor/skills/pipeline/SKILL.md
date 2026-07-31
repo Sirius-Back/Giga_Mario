@@ -23,6 +23,7 @@ reproducible (not ad-hoc `model_dir` on the orchestrator).
 |---------|----------|
 | **`mode=run`** | Execute stages end-to-end; monitor long jobs |
 | **`mode=dry`** | Stage split / fold-class rewrite / smoke train logs; **no** full GPU train |
+| **`rerun=true`** | Aligned fine-tune under `runs_aligned/`; reuse prior `split.csv` **or** new ~3:1:1 folds; **never overwrite** source or existing outdirs |
 
 ```bash
 # dry
@@ -31,7 +32,30 @@ python -m src.hydra_pipeline mode=dry run_id=run0
 # run (example)
 CUDA_VISIBLE_DEVICES=0,1,2,3 python -m src.hydra_pipeline mode=run \
   run_id=run0 epochs=3 n_devices=4 train=legnet
+
+# rerun with different strategy (reuse prior split; write to runs_aligned/)
+CUDA_VISIBLE_DEVICES=0,1,2,3 python -m src.hydra_pipeline mode=run \
+  rerun=true source_split=runs/run3 \
+  run_id=run3_caduceus_aligned train=caduceus \
+  panel_root=ready_caduceus split=gc adversarial=false
 ```
+
+### Rerun with different strategy (`rerun=true`)
+
+Aligned reproducibility suite — see [`runs_aligned/README.md`](../../../runs_aligned/README.md).
+
+| Rule | Detail |
+|------|--------|
+| **Destination** | Default `out_root=runs_aligned/${run_id}` (override with `out_root=…`) |
+| **No overwrite** | Refuses if `out_root` already has `split.csv` / `SPLIT` / `direct` / `adversarial` / …; never mutates `source_split` |
+| **`source_split`** | Prior run root or path to `split.csv` (user usually hints). Stages `split.csv` + known intermediates; rematerializes `SPLIT/` into the new outdir |
+| **Without `source_split`** | New train:test:val only at **≈3:1:1** (rejects other ratio schedules) |
+| **Schedule defaults** | `epochs=30` (max), `min_epochs=10`, `early_stopping_patience=10` (early stop allowed) unless CLI overrides those keys |
+| **Epoch eval** | Cap **8192** samples per split (`--eval-max-samples` / `--train-eval-max-samples`) |
+| **Train** | Fresh fine-tune under `{out_root}/direct` (and adversarial if enabled) |
+| **Provenance** | `{out_root}/rerun_manifest.json` + Hydra snapshots |
+
+Helpers: `src/pipeline/rerun_aligned.py` (wired from `src.hydra_pipeline`).
 
 Resolved configs + command templates are written to
 `{out_root}/hydra_resolved_config.yaml` and `hydra_resolved_commands.yaml`.
@@ -103,8 +127,10 @@ Outputs: `split_metrics_compare.csv/.json`, `Figure_*_split_compare_train_val_te
 
 | Key | Meaning |
 |-----|---------|
-| **`run_id`** | Experiment id → `panel_root` / `out_root` default `run/${run_id}` |
+| **`run_id`** | Experiment id → `panel_root` / `out_root` default `run/${run_id}` (`runs_aligned/${run_id}` when `rerun=true`) |
 | **`mode`** | `dry` \| `run` |
+| **`rerun`** | `true` → aligned rerun-with-different-strategy (no overwrite; see above) |
+| **`source_split`** | Prior run root or `split.csv` path (optional; required to reuse folds) |
 | **`data`** | Data panel id (metadata) |
 | **`split`** | Split strategy (`random` for adversarial path) |
 | **`train`** | Config group: `legnet` \| `caduceus` (`configs/train/`) |
@@ -173,6 +199,7 @@ Model CLIs are declared in `configs/train/{legnet,caduceus}.yaml`
 pipeline:
 - [ ] Confirm Hydra overrides (run_id, mode, train, epochs, gpus, adversarial, zsv, checkpoint_every_n_epochs)
 - [ ] Confirm panel_root complete
+- [ ] If rerun: confirm source_split hint (or intentional new 3:1:1) and fresh runs_aligned/ out_root
 - [ ] dry: python -m src.hydra_pipeline mode=dry …
 - [ ] run: python -m src.hydra_pipeline mode=run …
 - [ ] Verify fold-class sidecar adversarial/PREDICT/predict_target.json when adversarial
@@ -182,6 +209,7 @@ pipeline:
 - [ ] Verify `{direct,adversarial/train}/figures/train_monitor/` learning curves mark final/best ★
 - [ ] Verify `{direct,adversarial/train}/figures/split_compare/` (cnsplots + Altair) when metrics exist
 - [ ] Verify `{direct,adversarial/train}/tensorboard/` has train metrics event files
+- [ ] If rerun: verify source run untouched + `rerun_manifest.json`
 - [ ] method-decision + artifact-registry
 ```
 
@@ -193,6 +221,7 @@ pipeline:
 | `/train` | Fine-tune + optional ZSV |
 | `/adversarial` | Copy + random split + **fold-class PREDICT** |
 | `src.hydra_pipeline` | This orchestrator |
+| `src.pipeline.rerun_aligned` | `rerun=true` helpers (discover/stage/no-overwrite) |
 | `src.hydra_train` | Hydra `/train` entry (LegNet/Caduceus) |
 | `src.pipeline.zsv_eval` | Universal ZSV dispatch (`load_zsv_pairs` + model adapters) |
 | `src.caduceus.evaluate_zsv_root` | Caduceus HF ZSV adapter |
@@ -213,6 +242,7 @@ pipeline:
 
 - Hydra `ratios: null` → Caduceus-aligned ~81% / 9% / 10% (train / val / test).
 - Explicit `ratios` are always **train:test:val** (same as `split_predict --ratios` and `train_test_val_weights`).
+- **`rerun=true` without `source_split`:** only ≈**3:1:1** train:test:val (e.g. `[3,1,1]` or `[0.6,0.2,0.2]`); other schedules are rejected.
 
 ## Rules
 

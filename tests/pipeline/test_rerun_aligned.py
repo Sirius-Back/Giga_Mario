@@ -1,0 +1,122 @@
+"""Tests for aligned pipeline rerun helpers + Hydra wiring."""
+from __future__ import annotations
+
+from pathlib import Path
+
+import pytest
+
+from src.pipeline.common import write_csv
+from src.pipeline.rerun_aligned import (
+    ALIGNED_EPOCHS,
+    ALIGNED_MIN_EPOCHS,
+    ALIGNED_RATIOS,
+    apply_rerun_schedule,
+    assert_fresh_out_root,
+    is_aligned_ratios,
+    parse_override_keys,
+    require_aligned_ratios,
+    resolve_source_artifacts,
+    stage_source_into_out_root,
+)
+
+
+def _write_split(path: Path) -> Path:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    write_csv(
+        path,
+        [
+            {"ID": "a", "train_test": "train", "fold": "0"},
+            {"ID": "b", "train_test": "test", "fold": "0"},
+            {"ID": "c", "train_test": "val", "fold": "0"},
+        ],
+        ["ID", "train_test", "fold"],
+    )
+    return path
+
+
+def test_aligned_ratios_accept_3_1_1_and_fractions() -> None:
+    assert is_aligned_ratios((3, 1, 1))
+    assert is_aligned_ratios((0.6, 0.2, 0.2))
+    assert is_aligned_ratios((6, 2, 2))
+    assert not is_aligned_ratios((1, 1, 3))
+    assert not is_aligned_ratios((0.81, 0.1, 0.09))
+    assert require_aligned_ratios(None) == ALIGNED_RATIOS
+    with pytest.raises(ValueError, match="3:1:1"):
+        require_aligned_ratios((1, 1, 3))
+
+
+def test_resolve_and_stage_does_not_mutate_source(tmp_path: Path) -> None:
+    src_root = tmp_path / "runs" / "prior"
+    split = _write_split(src_root / "split.csv")
+    (src_root / "gc_features").mkdir()
+    (src_root / "gc_features" / "feat.txt").write_text("x\n", encoding="utf-8")
+    src_text = split.read_text(encoding="utf-8")
+
+    arts = resolve_source_artifacts(src_root, project_root=tmp_path)
+    assert arts.split_csv == split.resolve()
+    assert "gc_features" in arts.intermediates
+
+    out = tmp_path / "runs_aligned" / "new"
+    info = stage_source_into_out_root(arts, out, include_split_tree=False)
+    assert (out / "split.csv").is_file()
+    assert (out / "gc_features" / "feat.txt").is_file()
+    assert not (out / "SPLIT").exists()
+    assert info["reuse_folds"] is True
+    # Source inode content unchanged
+    assert split.read_text(encoding="utf-8") == src_text
+    # Dest split is a real copy (overwrite source text must not change dest)
+    split.write_text(src_text + "# mutated\n", encoding="utf-8")
+    assert "# mutated" not in (out / "split.csv").read_text(encoding="utf-8")
+
+
+def test_assert_fresh_out_root_refuses_existing(tmp_path: Path) -> None:
+    out = tmp_path / "out"
+    out.mkdir()
+    assert_fresh_out_root(out)
+    (out / "split.csv").write_text("ID|train_test|fold\n", encoding="utf-8")
+    with pytest.raises(FileExistsError, match="refuses to overwrite"):
+        assert_fresh_out_root(out)
+
+
+def test_apply_rerun_schedule_defaults_and_overrides() -> None:
+    e, m, p = apply_rerun_schedule(
+        epochs=50, min_epochs=25, early_stopping_patience=0, overridden=set()
+    )
+    assert (e, m, p) == (ALIGNED_EPOCHS, ALIGNED_MIN_EPOCHS, 10)
+    e2, m2, p2 = apply_rerun_schedule(
+        epochs=20,
+        min_epochs=12,
+        early_stopping_patience=5,
+        overridden={"epochs", "min_epochs", "early_stopping_patience"},
+    )
+    assert (e2, m2, p2) == (20, 12, 5)
+
+
+def test_parse_override_keys() -> None:
+    keys = parse_override_keys(
+        ["mode=run", "rerun=true", "+epochs=20", "train=caduceus"]
+    )
+    assert "epochs" in keys
+    assert "rerun" in keys
+    assert "train" in keys
+
+
+def test_hydra_pipeline_rerun_compose_defaults() -> None:
+    pytest.importorskip("hydra")
+    from hydra import compose, initialize_config_dir
+
+    cfg_dir = str((Path(__file__).resolve().parents[2] / "configs").resolve())
+    with initialize_config_dir(version_base=None, config_dir=cfg_dir):
+        cfg = compose(
+            config_name="pipeline",
+            overrides=[
+                "mode=dry",
+                "rerun=true",
+                "source_split=runs/run3",
+                "run_id=run3_aligned",
+                "adversarial=false",
+            ],
+        )
+    assert cfg.rerun is True
+    assert cfg.source_split == "runs/run3"
+    assert cfg.mode == "dry"
