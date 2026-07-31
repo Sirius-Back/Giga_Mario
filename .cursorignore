@@ -159,6 +159,9 @@ credentials*
 *.Rdata
 *.tsv
 *.csv
+*.xlsx
+*.xls
+*.ods
 
 # Model weights / checkpoints
 *.pt

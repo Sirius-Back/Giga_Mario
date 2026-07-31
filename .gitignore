@@ -216,6 +216,16 @@ ready_small/
 *.rds
 *.RData
 *.Rdata
+*.tsv
+*.csv
+*.xlsx
+*.xls
+*.ods
+# Keep tiny skill/test fixtures trackable despite table globs
+!.cursor/skills/**/*.csv
+!.cursor/skills/**/*.tsv
+!tests/**/*.csv
+!tests/**/*.tsv
 
 # Model weights / checkpoints
 *.pt
