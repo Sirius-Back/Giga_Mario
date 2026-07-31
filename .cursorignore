@@ -19,8 +19,9 @@ legnet_ready/
 legnet_ready_*/
 software/
 mag/
-run/
-run0/
+# Root scratch only (keep src/run/ indexable)
+/run/
+/run0/
 prokaryotes/
 genomes_smoketest/
 random/

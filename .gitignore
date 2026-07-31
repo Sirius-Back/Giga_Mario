@@ -7,7 +7,7 @@ bin/
 .conda/
 .local/
 
-# mag/ source is tracked; bulky downloads / venvs stay local
+# mag/ source is tracked; bulky downloads / venvs / regenerable graph dumps stay local
 mag/**/data/
 mag/**/logs/
 mag/**/venv/
@@ -15,6 +15,11 @@ mag/**/__pycache__/
 mag/**/*.gz
 mag/orthoDB/
 mag/orthodb/**/data/
+mag/homology_graph/**
+!mag/homology_graph/README.md
+!mag/homology_graph/summary.json
+!mag/homology_graph/manifest.json
+
 
 # --- Secrets & private shell state ---
 .ssh/
@@ -285,9 +290,13 @@ build/
 # --- Archived local trees (keep on disk; not in public repo) ---
 archive/
 
-# --- Local run scratch ---
-run0/
-run/
+# --- Local run scratch (repo-root only; do not ignore src/run/) ---
+/run0/
+/run/
+!src/run/
+!src/run/**
+src/run/**/__pycache__/
+src/run/**/*.py[cod]
 launch.md
 data.md
 expr_file_mappings.csv
