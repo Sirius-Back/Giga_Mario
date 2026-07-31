@@ -434,6 +434,12 @@ def _train_caduceus(
         "--min-epochs",
         str(TARGET_EPOCHS),
         "--resume",
+        # Match parent runs: cap epoch eval. Without this, full val (n≈2.8e5)
+        # dominates wall time (~70 min/epoch vs ~90s train).
+        "--eval-max-samples",
+        "8192",
+        "--train-eval-max-samples",
+        "4096",
     ]
     return _conda_run("caduceus_env", *cmd, cwd=ROOT, log=log, gpus=gpus)
 
@@ -769,9 +775,35 @@ def main(argv: list[str] | None = None) -> int:
         action="store_true",
         help="List candidates and planned commands; do not train",
     )
+    ap.add_argument(
+        "--skip-caduceus",
+        action="store_true",
+        default=True,
+        help="Skip Caduceus continues (default True; LegNet-only). "
+        "Use --no-skip-caduceus to include Caduceus again.",
+    )
+    ap.add_argument(
+        "--no-skip-caduceus",
+        action="store_false",
+        dest="skip_caduceus",
+        help="Include Caduceus continues (requires eval caps; 4 free GPUs).",
+    )
     args = ap.parse_args(argv)
     only = args.only.split(",") if args.only else None
     cands = discover_candidates(args.runs_root, only=only)
+    if args.skip_caduceus:
+        before = len(cands)
+        cands = [c for c in cands if c.model != "caduceus"]
+        print(
+            json.dumps(
+                {
+                    "skip_caduceus": True,
+                    "dropped": before - len(cands),
+                    "remaining": [c.run_id for c in cands],
+                }
+            ),
+            flush=True,
+        )
     summary: dict[str, Any] = {
         "target_epochs": TARGET_EPOCHS,
         "legnet_min_gpus": LEGNET_MIN_GPUS,
