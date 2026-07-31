@@ -266,3 +266,28 @@ def test_pangenome_three_genomes_ready_legnet(tmp_path: Path) -> None:
     assert Path(summary["split_csv"]).is_file()
     figs = tmp_path / "pg_3g" / "figures"
     assert (figs / "contingency_graph.json").is_file()
+
+
+def test_refine_large_components_by_modularity_splits_large_cc() -> None:
+    from src.splits.pangenome import refine_large_components_by_modularity
+
+    # Two motif families inside one oversized fake CC → Louvain should split.
+    shared_a = ("ACGT" * 30)
+    shared_b = ("TGCA" * 30)
+    ids = [str(i) for i in range(12)]
+    sequences = [shared_a + ("A" * i) for i in range(6)] + [
+        shared_b + ("T" * i) for i in range(6)
+    ]
+    cluster_ids = [0] * 12
+    out, meta = refine_large_components_by_modularity(
+        ids,
+        sequences,
+        cluster_ids,
+        k=4,
+        max_fold_size=5,
+        max_edges=50_000,
+        seed=42,
+    )
+    assert meta["n_large_components"] == 1
+    assert len(set(out)) >= 2
+    assert len(out) == 12

@@ -1413,8 +1413,8 @@ def run_pangenome_split_assign(
 
     seq_map = load_fna_directory(marked_parsed, ids=kept)
     sequences = [seq_map[rid] for rid in kept]
-    # Always collect edges when persisting the graph (independent of plot=).
-    collect_edges = bool(save_graph) or bool(plot)
+    # Always collect edges when persisting / modularizing / plotting.
+    collect_edges = bool(save_graph) or bool(plot) or bool(modularity_refine)
     graph = build_contingency_clusters(
         sequences,
         k=k,
@@ -1422,6 +1422,28 @@ def run_pangenome_split_assign(
         max_edges=max_edges,
         collect_edges=collect_edges,
     )
+
+    import numpy as np
+    from dataclasses import replace
+
+    cluster_ids = [int(c) for c in graph.cluster_ids.tolist()]
+    modularity_meta: dict[str, Any] | None = None
+    if modularity_refine:
+        cluster_ids, modularity_meta = refine_large_components_by_modularity(
+            kept,
+            sequences,
+            cluster_ids,
+            k=int(k),
+            min_shared=int(min_shared),
+            max_fold_size=int(max_fold_size),
+            max_edges=int(modularity_max_edges),
+            seed=int(seed),
+        )
+        graph = replace(
+            graph,
+            cluster_ids=np.asarray(cluster_ids, dtype=np.int32),
+            n_clusters=int(len(set(cluster_ids))),
+        )
 
     graph_meta: dict[str, Any] | None = None
     if save_graph:
@@ -1433,17 +1455,23 @@ def run_pangenome_split_assign(
             min_shared=int(min_shared),
             max_edges=int(max_edges),
             seed=int(seed),
-            extra_meta={"marked_parsed": str(marked_parsed)},
+            extra_meta={
+                "marked_parsed": str(marked_parsed),
+                "modularity_refine": bool(modularity_refine),
+                "modularity": modularity_meta,
+            },
         )
 
     rows, assign_meta = assign_from_contingency(
         kept,
-        graph.cluster_ids.tolist(),
+        cluster_ids,
         fold_csv=fold_csv,
         stratification_csv=stratification_csv,
         seed=seed,
         ratios=ratios,
     )
+    if modularity_meta is not None:
+        assign_meta = {**assign_meta, "modularity_refine": modularity_meta}
     assign_path = write_assignment_table(rows, outdir / "pangenome_assignment.csv")
     split_csv = assignment_rows_to_split_csv(rows, outdir)
 
@@ -1467,7 +1495,7 @@ def run_pangenome_split_assign(
             graph.edge_u.tolist(),
             graph.edge_v.tolist(),
             graph.edge_w.tolist(),
-            graph.cluster_ids.tolist(),
+            cluster_ids,
             outdir / "figures",
             train_test=tt_aligned,
             fold=fold_aligned,
@@ -1489,6 +1517,9 @@ def run_pangenome_split_assign(
         "split_csv": str(split_csv),
         "assignment_csv": str(assign_path),
         "assign_meta": assign_meta,
+        "modularity_refine": bool(modularity_refine),
+        "modularity": modularity_meta,
+        "max_fold_size": int(max_fold_size) if modularity_refine else None,
         "graph": graph_meta,
         "graph_dir": str(outdir / "graph") if graph_meta else None,
         "plot": plot_meta,

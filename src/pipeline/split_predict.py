@@ -345,6 +345,8 @@ def _run_pangenome_split_predict(
     fna_dir: Path | None = None,
     environment: str | None = None,
     window: dict[str, int] | None = None,
+    modularity_refine: bool = False,
+    max_fold_size: int | None = None,
 ) -> Path:
     """Pangenome path: resolve MARKED_pangenome → MARKED_parsed → C++ CC → split.csv."""
     from src.splits.pangenome import run_pangenome_split_assign
@@ -353,6 +355,8 @@ def _run_pangenome_split_predict(
     k = _normalize_pangenome_k(kmer_size)
     # Default: if caller only passed --marked (panel), require explicit reuse flag
     # unless they also provided adapt window / marked_pangenome.
+    from src.splits.pangenome import DEFAULT_MAX_FOLD_SIZE
+
     summary = run_pangenome_split_assign(
         outdir=outdir,
         parsed=Path(parsed) if parsed is not None else None,
@@ -366,6 +370,8 @@ def _run_pangenome_split_predict(
         min_shared=int(min_shared),
         ratios=ratios,
         plot=plot,
+        modularity_refine=bool(modularity_refine),
+        max_fold_size=int(max_fold_size) if max_fold_size is not None else DEFAULT_MAX_FOLD_SIZE,
         marked_pangenome=Path(marked_pangenome) if marked_pangenome else None,
         panel_marked=Path(panel_marked) if panel_marked else None,
         reuse_panel_marked=reuse_panel_marked,
@@ -677,6 +683,8 @@ def run_split_predict(
             fna_dir=fna_dir,
             environment=environment,
             window=window,
+            modularity_refine=modularity_refine,
+            max_fold_size=max_fold_size,
         )
 
     if type == "blastp":

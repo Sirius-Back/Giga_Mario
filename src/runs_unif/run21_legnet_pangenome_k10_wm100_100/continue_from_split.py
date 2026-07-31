@@ -1,30 +1,20 @@
-"""Continue legacy run4 with rebuilt 3:1:1 split → LegNet direct only (no adversarial).
+"""Continue run21: 1-GPU LegNet direct + adversarial (after split_done).
 
-Legacy (read-only):
-  ``src/runs/run4``, ``runs/run4`` (GC / kmeans_elbow)
+Expects ``runs_unif/legnet/run21_legnet_pangenome_k10_wm100_100/{split.csv,SPLIT,legnet_input}``.
+Waits for **1** free GPU unless ``skip_wait``.
 
-New (write):
-  ``src/runs_unif/run4_legnet_gc_kmeans_elbow``
-  ``runs_unif/legnet/run4_legnet_gc_kmeans_elbow``
-
-Flow:
-  1. Rewrite ``split.csv`` from the present table to train:test:val ≈ 3:1:1
-     (prefer train↔val swap when legacy was inverted; never mutate ``runs/run4``).
-  2. Stage GC intermediates (feature_table / sbs_assignment / gc meta) + materialize.
-  3. Wait until **1** GPU is free, then direct train
-     (min 15 / max 30 / early-stop patience 10) + mice ZSV.
-  4. No adversarial.
+Direct: min15 / max30 / patience10 + mice ZSV.
+Adversarial: random split, max10 / patience5 + ZSV.
 
 Launch::
 
   conda run -n legnet --no-capture-output \\
-    python -m src.runs_unif.run4_legnet_gc_kmeans_elbow.continue_from_split
+    python -m src.runs_unif.run21_legnet_pangenome_k10_wm100_100.continue_from_split
 """
 from __future__ import annotations
 
 import json
 import os
-import shutil
 import subprocess
 import sys
 import time
@@ -33,34 +23,29 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[3]
 
-RUN_I = 4
+RUN_I = 21
 MODEL = "legnet"
-SPLIT = "gc"
-SPLIT_PARAMS = "kmeans_elbow"
+SPLIT = "pangenome"
+SPLIT_PARAMS = "k10_wm100_100"
 RUN_NAME = f"run{RUN_I}_{MODEL}_{SPLIT}_{SPLIT_PARAMS}"
 
-LEGACY_OUT = ROOT / "runs" / f"run{RUN_I}"
 PANEL_ROOT = ROOT / "ready_legnet"
 OUT_ROOT = ROOT / "runs_unif" / MODEL / RUN_NAME
 
 SEED = 42
+RATIOS = (3.0, 1.0, 1.0)
 EPOCHS = 30
 MIN_EPOCHS = 15
 EARLY_STOPPING_PATIENCE = 10
+ADV_EPOCHS = 10
+ADV_MIN_EPOCHS = 0
+ADV_EARLY_STOPPING_PATIENCE = 5
 BATCH_SIZE = 8192
 NUM_WORKERS = 8
 PREFERRED_GPUS = (0, 1, 2, 3)
 MEM_FREE_MIB = 1500
 POLL_SEC = 60
 PEAK_RAM_GIB_TRAIN = 24.0
-PEAK_RAM_GIB_SPLIT = 16.0
-
-# Extra GC intermediates to stage from legacy (never mutate source).
-GC_INTERMEDIATES = (
-    "feature_table.csv",
-    "sbs_assignment.csv",
-    "gc_split_meta.json",
-)
 
 
 def _require(path: Path, kind: str = "path") -> Path:
@@ -115,6 +100,9 @@ def _parse_argv(argv: list[str]) -> dict[str, object]:
         "epochs": EPOCHS,
         "min_epochs": MIN_EPOCHS,
         "patience": EARLY_STOPPING_PATIENCE,
+        "adv_epochs": ADV_EPOCHS,
+        "adv_min_epochs": ADV_MIN_EPOCHS,
+        "adv_patience": ADV_EARLY_STOPPING_PATIENCE,
         "skip_wait": False,
         "split_only": False,
     }
@@ -131,6 +119,15 @@ def _parse_argv(argv: list[str]) -> dict[str, object]:
         elif tok.startswith("early_stopping_patience="):
             cfg["patience"] = int(tok.split("=", 1)[1])
             argv.remove(tok)
+        elif tok.startswith("adversarial_epochs="):
+            cfg["adv_epochs"] = int(tok.split("=", 1)[1])
+            argv.remove(tok)
+        elif tok.startswith("adversarial_min_epochs="):
+            cfg["adv_min_epochs"] = int(tok.split("=", 1)[1])
+            argv.remove(tok)
+        elif tok.startswith("adversarial_early_stopping_patience="):
+            cfg["adv_patience"] = int(tok.split("=", 1)[1])
+            argv.remove(tok)
         elif tok in {"skip_wait=true", "--skip-wait"}:
             cfg["skip_wait"] = True
             argv.remove(tok)
@@ -140,137 +137,25 @@ def _parse_argv(argv: list[str]) -> dict[str, object]:
     return cfg
 
 
-def stage_split(*, seed: int = SEED) -> dict:
-    """Rewrite split table + stage GC sidecars + materialize SPLIT + LegNet TSV."""
-    from src.pipeline.job_queue import (
-        CLASS_CPU_RAM_HEAVY,
-        append_queue_entry,
-        wait_until_launchable,
-    )
-    from src.pipeline.legnet_input import build_legnet_tsv
-    from src.pipeline.rerun_aligned import (
-        assert_fresh_out_root,
-        rewrite_split_table_aligned,
-        write_rerun_manifest,
-    )
-    from src.pipeline.split import run_split
-
-    _require(LEGACY_OUT / "split.csv", "file")
-    _require(PANEL_ROOT / "ID.csv", "file")
-    _require(PANEL_ROOT / "PARSED", "dir")
-    _require(PANEL_ROOT / "PREDICT", "dir")
-    _require(PANEL_ROOT / "fold.csv", "file")
-
-    OUT_ROOT.parent.mkdir(parents=True, exist_ok=True)
-    assert_fresh_out_root(OUT_ROOT)
-    OUT_ROOT.mkdir(parents=True, exist_ok=True)
-
-    wait_until_launchable(
-        peak_ram_gib=PEAK_RAM_GIB_SPLIT,
-        gpus=(),
-        job_class=CLASS_CPU_RAM_HEAVY,
-        label=f"{RUN_NAME}_split",
-    )
-    append_queue_entry(
-        f"{RUN_NAME}_split",
-        job=f"python -m src.runs_unif.{RUN_NAME}.continue_from_split split_only=true",
-        pid=os.getpid(),
-        estimated_time="1-3h",
-        job_class=CLASS_CPU_RAM_HEAVY,
-        peak_ram_gib=PEAK_RAM_GIB_SPLIT,
-        log=str(ROOT / "logs" / f"{RUN_NAME}_split.log"),
-    )
-
-    rewrite_info = rewrite_split_table_aligned(
-        LEGACY_OUT / "split.csv",
-        OUT_ROOT / "split.csv",
-        seed=seed,
-        prefer_label_swap=True,
-        assignment_csv=LEGACY_OUT / "sbs_assignment.csv",
-        allow_id_reassign=False,  # SBS: never random ID sweep
-    )
-    print(f"split rewrite: {json.dumps(rewrite_info, sort_keys=True)}", flush=True)
-
-    staged_extra: dict[str, str] = {}
-    for rel in GC_INTERMEDIATES:
-        src = LEGACY_OUT / rel
-        if not src.is_file():
-            continue
-        dest = OUT_ROOT / rel
-        if dest.exists():
-            staged_extra[rel] = str(dest)
-            print(f"reuse staged {rel}", flush=True)
-            continue
-        shutil.copy2(src, dest)
-        staged_extra[rel] = str(dest)
-        print(f"staged {rel}", flush=True)
-
-    split_csv = OUT_ROOT / "split.csv"
-    split_root = run_split(
-        split_csv,
-        parsed_target=PANEL_ROOT / "PREDICT",
-        parsed_data=PANEL_ROOT / "PARSED",
-        outdir=OUT_ROOT,
-        strategy="traintestval",
-        intersect_allow=True,
-        id_csv=PANEL_ROOT / "ID.csv",
-    )
-    print(f"SPLIT ready: {split_root}", flush=True)
-
-    tsv = build_legnet_tsv(
-        split_root=split_root, out_tsv=OUT_ROOT / "legnet_input" / "all.tsv"
-    )
-    print(f"legnet TSV: {tsv}", flush=True)
-
-    manifest = {
-        "rerun": True,
-        "aligned_run": RUN_I,
-        "run_name": RUN_NAME,
-        "legacy": {
-            "src": str(ROOT / "src" / "runs" / f"run{RUN_I}"),
-            "out": str(LEGACY_OUT),
-        },
-        "out_root": str(OUT_ROOT),
-        "panel_root": str(PANEL_ROOT),
-        "model": MODEL,
-        "split": SPLIT,
-        "split_params": SPLIT_PARAMS,
-        "ratios": [3, 1, 1],
-        "rewrite": rewrite_info,
-        "staged_extra": staged_extra,
-        "zsv": "mice",
-        "adversarial": False,
-        "direct": {
-            "epochs": EPOCHS,
-            "min_epochs": MIN_EPOCHS,
-            "early_stopping_patience": EARLY_STOPPING_PATIENCE,
-            "n_devices": 1,
-        },
-        "staged_at": datetime.now(timezone.utc).isoformat(),
-    }
-    write_rerun_manifest(OUT_ROOT, manifest)
-    (OUT_ROOT / "split_done.json").write_text(
-        json.dumps(
-            {"status": "ok", "split_csv": str(split_csv), "tsv": str(tsv)},
-            indent=2,
-        )
-        + "\n",
-        encoding="utf-8",
-    )
-    return {"split_csv": split_csv, "tsv": tsv, "manifest": manifest}
-
-
-def run_train_direct(
+def run_train_stages(
     *,
     batch: int,
     epochs: int,
     min_epochs: int,
     patience: int,
+    adv_epochs: int,
+    adv_min_epochs: int,
+    adv_patience: int,
     gpu: int,
 ) -> None:
+    from src.pipeline.adversarial import apply_fold_class_targets, run_adversarial
     from src.pipeline.job_queue import CLASS_GPU_TRAIN, append_queue_entry
+    from src.pipeline.legnet_input import build_legnet_tsv
+    from src.pipeline.split import run_split
+    from src.pipeline.split_predict import run_split_predict
     from src.pipeline.train import run_train
 
+    split_csv = _require(OUT_ROOT / "split.csv", "file")
     tsv = _require(OUT_ROOT / "legnet_input" / "all.tsv", "file")
     _require(OUT_ROOT / "SPLIT", "dir")
     _require(OUT_ROOT / "PARSED" / "zero-shot-validation", "dir")
@@ -285,11 +170,14 @@ def run_train_direct(
             f"python -m src.runs_unif.{RUN_NAME}.continue_from_split n_devices=1"
         ),
         pid=os.getpid(),
-        estimated_time="4-12h",
+        estimated_time="6-20h",
         job_class=CLASS_GPU_TRAIN,
         peak_ram_gib=PEAK_RAM_GIB_TRAIN,
         gpus=(gpu,),
-        resources=f"batch {batch}; direct {epochs}/{min_epochs}/p{patience}; no adversarial",
+        resources=(
+            f"batch {batch}; direct {epochs}/{min_epochs}/p{patience}; "
+            f"adv {adv_epochs}/p{adv_patience}"
+        ),
         log=str(ROOT / "logs" / f"{RUN_NAME}_train.log"),
     )
 
@@ -298,7 +186,7 @@ def run_train_direct(
         raise FileExistsError(f"refusing overwrite: {direct_out}")
 
     print(
-        f"direct LegNet train n_devices=1 gpu={gpu} epochs={epochs} "
+        f"direct LegNet train gpu={gpu} epochs={epochs} "
         f"min_epochs={min_epochs} patience={patience}",
         flush=True,
     )
@@ -332,12 +220,87 @@ def run_train_direct(
             run_id=RUN_NAME,
             seed=SEED,
             plot_train=True,
-            plot_sbs=True,
+            plot_sbs=False,
             include_split_compare=True,
             viz_conda_env="caduceus_env",
         )
     except Exception as exc:  # noqa: BLE001
-        print(f"WARNING: viz skipped: {type(exc).__name__}: {exc}", flush=True)
+        print(f"WARNING: viz[direct] skipped: {type(exc).__name__}: {exc}", flush=True)
+
+    adv_root = OUT_ROOT / "adversarial"
+    if adv_root.exists():
+        raise FileExistsError(f"refusing overwrite: {adv_root}")
+
+    print("adversarial: copy + random split + fold-class …", flush=True)
+    run_adversarial(
+        outdir_new=adv_root,
+        split_csv=split_csv,
+        parsed_target=PANEL_ROOT / "PREDICT",
+        parsed_data=PANEL_ROOT / "PARSED",
+        intersect_allow=True,
+    )
+    adv_split = run_split_predict(
+        outdir=adv_root,
+        type="random",
+        seed=SEED + 1,
+        id_csv=PANEL_ROOT / "ID.csv",
+        fold_csv=PANEL_ROOT / "fold.csv",
+        ratios=RATIOS,
+    )
+    apply_fold_class_targets(
+        predict_root=adv_root / "PREDICT",
+        label_split_csv=split_csv,
+    )
+    run_split(
+        adv_split,
+        parsed_target=adv_root / "PREDICT",
+        parsed_data=adv_root / "PARSED",
+        outdir=adv_root,
+        strategy="traintestval",
+        intersect_allow=True,
+        id_csv=PANEL_ROOT / "ID.csv",
+    )
+    adv_tsv = build_legnet_tsv(
+        split_root=adv_root / "SPLIT",
+        out_tsv=adv_root / "legnet_input" / "all.tsv",
+    )
+    print(
+        f"adversarial LegNet train gpu={gpu} epochs={adv_epochs} "
+        f"patience={adv_patience}",
+        flush=True,
+    )
+    run_train(
+        model="legnet",
+        type="classification",
+        folders=adv_tsv,
+        outdir=adv_root / "train",
+        strategy="random",
+        smoke=False,
+        epochs=adv_epochs,
+        batch_size=batch,
+        seed=SEED,
+        n_devices=1,
+        num_workers=NUM_WORKERS,
+        legnet_demo=True,
+        zsv_root=adv_root,
+        eval_zsv=True,
+        checkpoint_every_n_epochs=10,
+        early_stopping_patience=adv_patience,
+        min_epochs=adv_min_epochs,
+    )
+
+    try:
+        from src.train_viz.train_monitor import refresh_pipeline_monitors
+
+        mon = refresh_pipeline_monitors(
+            OUT_ROOT, run_id=RUN_NAME, include_split_compare=True
+        )
+        print(f"pipeline_monitors status={mon.get('status')}", flush=True)
+    except Exception as exc:  # noqa: BLE001
+        print(
+            f"WARNING: pipeline_monitors skipped: {type(exc).__name__}: {exc}",
+            flush=True,
+        )
 
     (OUT_ROOT / "pipeline_done.json").write_text(
         json.dumps(
@@ -346,7 +309,7 @@ def run_train_direct(
                 "run_name": RUN_NAME,
                 "out_root": str(OUT_ROOT),
                 "gpu": gpu,
-                "adversarial": False,
+                "adversarial": True,
                 "finished_at": datetime.now(timezone.utc).isoformat(),
             },
             indent=2,
@@ -363,18 +326,20 @@ def main(argv: list[str] | None = None) -> int:
         sys.path.insert(0, str(ROOT))
 
     print(
-        f"{RUN_NAME}: legacy={LEGACY_OUT} → out={OUT_ROOT} "
-        f"panel={PANEL_ROOT} split_only={cfg['split_only']} "
-        f"adversarial=false",
+        f"{RUN_NAME}: out={OUT_ROOT} panel={PANEL_ROOT} "
+        f"split_only={cfg['split_only']} adversarial=true",
         flush=True,
     )
 
     split_done = OUT_ROOT / "split_done.json"
     if not split_done.is_file():
-        stage_split(seed=SEED)
+        from src.runs_unif.run21_legnet_pangenome_k10_wm100_100.run_split_cpu import (
+            main as split_main,
+        )
+
+        split_main([])
     else:
         print(f"reuse staged split: {split_done}", flush=True)
-        _require(LEGACY_OUT / "split.csv", "file")
 
     if cfg["split_only"]:
         print("split_only=true — skipping train", flush=True)
@@ -393,11 +358,14 @@ def main(argv: list[str] | None = None) -> int:
     else:
         gpu = wait_for_one_gpu()
 
-    run_train_direct(
+    run_train_stages(
         batch=int(cfg["batch_size"]),
         epochs=int(cfg["epochs"]),
         min_epochs=int(cfg["min_epochs"]),
         patience=int(cfg["patience"]),
+        adv_epochs=int(cfg["adv_epochs"]),
+        adv_min_epochs=int(cfg["adv_min_epochs"]),
+        adv_patience=int(cfg["adv_patience"]),
         gpu=gpu,
     )
     print(f"{RUN_NAME} COMPLETED → {OUT_ROOT}", flush=True)

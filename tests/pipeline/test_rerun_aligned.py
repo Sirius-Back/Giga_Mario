@@ -116,6 +116,89 @@ def test_rewrite_split_table_swap_train_val(tmp_path: Path) -> None:
     assert "t0|train|" in src.read_text(encoding="utf-8")
 
 
+def test_rewrite_refuses_id_reassign_without_assignment(tmp_path: Path) -> None:
+    from src.pipeline.common import write_csv
+    from src.pipeline.rerun_aligned import rewrite_split_table_aligned
+
+    src = tmp_path / "legacy" / "split.csv"
+    # Sizes that no pairwise swap maps to ≈3:1:1
+    rows = (
+        [{"ID": f"t{i}", "train_test": "train", "fold": "0"} for i in range(27)]
+        + [{"ID": f"e{i}", "train_test": "test", "fold": "0"} for i in range(56)]
+        + [{"ID": f"v{i}", "train_test": "val", "fold": "0"} for i in range(17)]
+        + [{"ID": "z0", "train_test": "zsv", "fold": "zsv"}]
+    )
+    write_csv(src, rows, ["ID", "train_test", "fold"])
+    dest = tmp_path / "unif" / "split.csv"
+    with pytest.raises(RuntimeError, match="ID-level reassign is disabled"):
+        rewrite_split_table_aligned(
+            src, dest, prefer_label_swap=True, allow_id_reassign=False
+        )
+
+
+def test_rewrite_from_sbs_assignment_cluster_grain(tmp_path: Path) -> None:
+    from src.pipeline.common import write_csv
+    from src.pipeline.rerun_aligned import (
+        is_aligned_ratios,
+        rewrite_split_from_sbs_assignment,
+    )
+    from src.splits.sbs.assign import ASSIGNMENT_COLUMNS
+
+    assign = tmp_path / "legacy" / "sbs_assignment.csv"
+    # Ten equal clusters of 10 → fold-grain greedy can hit exact 6:2:2 (=3:1:1).
+    rows = []
+    n = 0
+    for fold in range(10):
+        for _ in range(10):
+            rows.append(
+                {
+                    "region": str(n),
+                    "cluster": str(fold),
+                    "train_test": "train",
+                    "fold": str(fold),
+                    "additional": "",
+                }
+            )
+            n += 1
+    rows.append(
+        {
+            "region": "z0",
+            "cluster": "zsv",
+            "train_test": "zsv",
+            "fold": "zsv",
+            "additional": "",
+        }
+    )
+    write_csv(assign, rows, ASSIGNMENT_COLUMNS)
+    dest = tmp_path / "unif" / "split.csv"
+    info = rewrite_split_from_sbs_assignment(assign, dest, seed=42)
+    assert info["method"] == "sbs_cluster_to_train_test_val"
+    after = info["counts_after"]
+    assert is_aligned_ratios((after["train"], after["test"], after["val"]))
+    assert after["zsv"] == 1
+    assert (tmp_path / "unif" / "sbs_assignment.csv").is_file()
+    # each ID once; no train/test/val intersections
+    by_tt: dict[str, set[str]] = {"train": set(), "test": set(), "val": set()}
+    seen: set[str] = set()
+    for line in dest.read_text(encoding="utf-8").strip().splitlines()[1:]:
+        rid, tt, _fold = line.split("|")
+        assert rid not in seen
+        seen.add(rid)
+        if tt in by_tt:
+            by_tt[tt].add(rid)
+    assert not (by_tt["train"] & by_tt["test"])
+    assert not (by_tt["train"] & by_tt["val"])
+    assert not (by_tt["test"] & by_tt["val"])
+    # whole-cluster integrity: all members of a fold share train_test
+    fold_labels: dict[str, set[str]] = {}
+    for line in dest.read_text(encoding="utf-8").strip().splitlines()[1:]:
+        _rid, tt, fold = line.split("|")
+        if tt == "zsv":
+            continue
+        fold_labels.setdefault(fold, set()).add(tt)
+    assert all(len(v) == 1 for v in fold_labels.values())
+
+
 def test_parse_override_keys() -> None:
     keys = parse_override_keys(
         ["mode=run", "rerun=true", "+epochs=20", "train=caduceus"]

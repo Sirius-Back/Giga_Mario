@@ -295,17 +295,16 @@ def rewrite_split_from_sbs_assignment(
     write_assignment_table(out_assign, assign_dest)
 
     after = count_train_test_val(out_split)
-    if not is_aligned_ratios((after["train"], after["test"], after["val"])):
-        # Fold-grain assignment may miss exact 3:1:1 when cluster sizes are coarse;
-        # still require best-effort within 2× tol, else fail loudly.
-        if not is_aligned_ratios(
-            (after["train"], after["test"], after["val"]),
-            tol=_RATIO_FRAC_TOL * 2,
-        ):
-            raise RuntimeError(
-                f"cluster→train/test/val failed to reach ≈3:1:1: "
-                f"before={before} after={after} n_folds={len(fold_members)}"
-            )
+    # Exact 3:1:1 is not required: whole-cluster assignment can only get near
+    # enough given cluster sizes. Do not rewrite stratification to force ratios.
+    if not is_aligned_ratios(
+        (after["train"], after["test"], after["val"]),
+        tol=_RATIO_FRAC_TOL * 2,
+    ):
+        raise RuntimeError(
+            f"cluster→train/test/val not near ≈3:1:1: "
+            f"before={before} after={after} n_folds={len(fold_members)}"
+        )
 
     return {
         "method": "sbs_cluster_to_train_test_val",
