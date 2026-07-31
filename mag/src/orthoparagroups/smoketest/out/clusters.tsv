@@ -1,0 +1,2 @@
+fna_name	component_id	n_nodes	n_distinct_orthology_groups	n_ortholog_edges	n_paralog_edges	n_written_orthologs	n_written_paralogs	nodes_per_species
+cluster_0.fna	0	12	4	11	6	4	3	capra_hircus:1;bos_taurus:3;mus_musculus:4;homo_sapiens:4
