@@ -1,6 +1,7 @@
 # @package train
 name: caduceus
 module: src.caduceus
+# Epoch eval: train→train, val→val, test→test. Shared sample caps prefer speed over full-fold precision.
 direct_cmd: >-
   python -m src.caduceus
   --splits-dir ${out_root}/direct/caduceus_input
@@ -13,6 +14,8 @@ direct_cmd: >-
   --checkpoint-every-n-epochs ${checkpoint_every_n_epochs}
   --early-stopping-patience ${early_stopping_patience}
   --min-epochs ${min_epochs}
+  --eval-max-samples 8192
+  --train-eval-max-samples 8192
 adversarial_cmd: >-
   python -m src.caduceus
   --splits-dir ${out_root}/adversarial/train/caduceus_input
@@ -25,6 +28,8 @@ adversarial_cmd: >-
   --checkpoint-every-n-epochs ${checkpoint_every_n_epochs}
   --early-stopping-patience ${early_stopping_patience}
   --min-epochs ${min_epochs}
+  --eval-max-samples 8192
+  --train-eval-max-samples 8192
 zsv_cmd: >-
   python -m src.pipeline.zsv_eval
   --model caduceus

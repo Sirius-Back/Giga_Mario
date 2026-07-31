@@ -188,7 +188,7 @@ def test_hydra_pipeline_imports_and_config() -> None:
     assert cfg.train.name == "legnet"
     assert "src.legnet" in str(cfg.train.direct_cmd)
     assert "src.pipeline.zsv_eval" in str(cfg.train.zsv_cmd)
-    assert list(cfg.ratios) == [1, 1, 3]
+    assert cfg.ratios is None
 
 
 def test_hydra_pipeline_gc_caduceus_overrides() -> None:

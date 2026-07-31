@@ -439,7 +439,7 @@ def _train_caduceus(
         "--eval-max-samples",
         "8192",
         "--train-eval-max-samples",
-        "4096",
+        "8192",
     ]
     return _conda_run("caduceus_env", *cmd, cwd=ROOT, log=log, gpus=gpus)
 

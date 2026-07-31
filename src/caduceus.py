@@ -460,14 +460,16 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     p.add_argument(
         "--train-eval-max-samples",
         type=int,
-        default=None,
-        help="Cap train-split epoch eval (default: full on 1 GPU; 8192 under DDP)",
+        default=8192,
+        help="Cap train-split epoch eval (same default as --eval-max-samples; "
+        "speed over full-fold precision). Pass 0 for uncapped.",
     )
     p.add_argument(
         "--eval-max-samples",
         type=int,
-        default=None,
-        help="Cap val/test epoch eval sample count (default: full fold)",
+        default=8192,
+        help="Cap val/test epoch eval sample count (default 8192; speed over "
+        "full-fold precision). Pass 0 for uncapped.",
     )
     p.add_argument(
         "--resume",
@@ -521,9 +523,18 @@ def run(args: argparse.Namespace) -> int:
     if torch.cuda.is_available():
         torch.cuda.manual_seed_all(args.seed + rank)
 
-    train_eval_cap = args.train_eval_max_samples
-    if train_eval_cap is None and world > 1:
-        train_eval_cap = 8192
+    # 0 → uncapped; None should not occur with new defaults but keep DDP fallback.
+    def _cap(v):
+        if v is None:
+            return 8192
+        if int(v) <= 0:
+            return None
+        return int(v)
+
+    eval_cap = _cap(args.eval_max_samples)
+    train_eval_cap = _cap(args.train_eval_max_samples)
+    if train_eval_cap is None and args.train_eval_max_samples is None:
+        train_eval_cap = eval_cap
 
     logs_dir = out / "logs"
     tb_dir = out / "tensorboard"
@@ -652,7 +663,7 @@ def run(args: argparse.Namespace) -> int:
         train_eval_loader, _, _ = make_loader(
             "train", args.eval_batch_size, False, False, max_samples=train_eval_cap
         )
-        eval_cap = args.eval_max_samples
+        # eval_cap set above from --eval-max-samples
         val_loader, val_ds, _ = make_loader(
             "val", args.eval_batch_size, False, False, max_samples=eval_cap
         )
@@ -690,7 +701,7 @@ def run(args: argparse.Namespace) -> int:
             "batch_size": args.batch_size,
             "eval_batch_size": args.eval_batch_size,
             "train_eval_max_samples": train_eval_cap,
-            "eval_max_samples": args.eval_max_samples,
+            "eval_max_samples": eval_cap,
             "world_size": world,
             "max_length": args.max_length,
             "amp": bool(args.amp),

@@ -14,6 +14,28 @@ TEST_FRACTION = 0.10
 VAL_FRACTION_OF_TRAINPOOL = 0.10  # Caduceus-style 90/10 on train pool
 
 
+def train_test_val_weights(
+    ratios: tuple[float, float, float] | None = None,
+) -> dict[str, float]:
+    """Positive weights for train/test/val (explicit order is always train:test:val).
+
+    ``ratios=None`` matches Caduceus-aligned defaults used by ``assign_folds_random``:
+    ~10% test, then ~10% of the remainder as val (~81% / 9% / 10%).
+    """
+    if ratios is None:
+        n_test = float(TEST_FRACTION)
+        n_val = (1.0 - n_test) * float(VAL_FRACTION_OF_TRAINPOOL)
+        n_train = 1.0 - n_test - n_val
+        return {"train": n_train, "test": n_test, "val": n_val}
+    if len(ratios) != 3 or any(value <= 0 for value in ratios):
+        raise ValueError("ratios must contain three positive train:test:val values")
+    return {
+        "train": float(ratios[0]),
+        "test": float(ratios[1]),
+        "val": float(ratios[2]),
+    }
+
+
 def sanitize_id(s: str) -> str:
     return re.sub(r"[^A-Za-z0-9_.-]+", "_", s).strip("_") or "sample"
 

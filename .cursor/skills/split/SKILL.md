@@ -160,6 +160,7 @@ split:
 - Never invent TPM, fold, or strat labels
 - Never change `src/pipeline` I/O contracts silently
 - Fixed seeds; relative project paths
+- Explicit `ratios` are **train:test:val** (reuse `train_test_val_weights` / `assign_folds_random`; do not invent a second order)
 - Legacy `python -m src.splits.main --raw --ready` is **not** the `/split` primary path
 
 ## Coordination

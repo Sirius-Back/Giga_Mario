@@ -202,6 +202,18 @@ pipeline:
 | `src.train_viz.split_compare` | train/val/test/ZSV metric bars (cnsplots + Altair) |
 | `configs/` | Reproducible parameters + model commands |
 
+## Epoch evaluation (Caduceus)
+
+- Each epoch evaluates **train → train fold**, **val → val fold**, **test → test fold** (never the whole panel as one pool).
+- Prefer speed over full-fold precision: always pass matching caps
+  `--eval-max-samples 8192` and `--train-eval-max-samples 8192` (defaults in `src.caduceus`; `0` = uncapped).
+- Wired in `configs/train/caduceus.yaml` and `src.pipeline.train.run_train`.
+
+## Split ratios
+
+- Hydra `ratios: null` → Caduceus-aligned ~81% / 9% / 10% (train / val / test).
+- Explicit `ratios` are always **train:test:val** (same as `split_predict --ratios` and `train_test_val_weights`).
+
 ## Rules
 
 - Prefer Hydra over hand-rolled argparse orchestrators for new runs

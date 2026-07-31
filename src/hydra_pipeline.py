@@ -48,9 +48,15 @@ def _run_stages(cfg: DictConfig) -> int:
         if not path.exists():
             raise FileNotFoundError(f"Panel missing {required}: {path}")
 
-    ratios = tuple(int(x) for x in cfg.ratios)
-    if len(ratios) != 3:
-        raise ValueError(f"ratios must be length-3 train:test:val, got {ratios}")
+    ratios_cfg = cfg.get("ratios", None)
+    if ratios_cfg is None:
+        ratios = None
+    else:
+        ratios = tuple(float(x) for x in ratios_cfg)
+        if len(ratios) != 3 or any(v <= 0 for v in ratios):
+            raise ValueError(
+                f"ratios must be null or length-3 positive train:test:val, got {ratios_cfg!r}"
+            )
 
     seed = int(cfg.seed)
     epochs = int(cfg.epochs)

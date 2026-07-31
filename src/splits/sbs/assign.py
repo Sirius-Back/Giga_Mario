@@ -603,8 +603,10 @@ def _assign_folds_to_train_test(
         labels = assign_folds_stratified(fold_ids, strata, rng, ratios=ratios)
         return dict(zip(fold_ids, labels))
     if fold_sizes:
-        r = ratios or (1.0, 1.0, 3.0)
-        w = {"train": float(r[0]), "val": float(r[1]), "test": float(r[2])}
+        # Same contract as assign_folds_random / hydra: ratios are train:test:val.
+        from src.splits.common import train_test_val_weights
+
+        w = train_test_val_weights(ratios)
         tw = sum(w.values()) or 1.0
         target = {k: w[k] / tw for k in w}
         totals = {"train": 0, "val": 0, "test": 0}

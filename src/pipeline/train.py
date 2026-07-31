@@ -342,7 +342,7 @@ def run_train(
                 "--num-workers", str(nw),
                 "--amp",
                 "--eval-max-samples", "8192",
-                "--train-eval-max-samples", "4096",
+                "--train-eval-max-samples", "8192",
                 "--checkpoint-every-n-epochs", str(int(checkpoint_every_n_epochs)),
             ]
             if int(early_stopping_patience) > 0:

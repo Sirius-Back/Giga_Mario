@@ -27,7 +27,9 @@ n_devices: 4
 batch_size: 1024
 max_length: 512  # Caduceus tokenizer pad/truncate; override for short windows
 num_workers: 8
-ratios: [1, 1, 3]
+# null → Caduceus-aligned (~81% train / ~9% val / ~10% test).
+# Explicit values are always ordered train:test:val (same as split_predict --ratios).
+ratios: null
 panel_root: run/${run_id}
 out_root: run/${run_id}
 zsv: true

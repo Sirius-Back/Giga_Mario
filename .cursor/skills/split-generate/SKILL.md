@@ -58,6 +58,7 @@ Architecture may be complex (multi-fold CV, chromosome holdout, species holdout)
 | Existing | Use for |
 |----------|---------|
 | `src.splits.random.assign_folds_random` | Unstratified train/val/test sizes (Caduceus-aligned ratios) |
+| `src.splits.common.train_test_val_weights` | **Locked** weight order: explicit ratios = **train:test:val**; `None` = Caduceus ~81/9/10 |
 | `src.splits.random.assign_folds_stratified` | Stratified assignment |
 | `src.splits.common` | Shared fold sizing / I/O helpers when still applicable |
 | `src.pipeline.split_predict.run_split_predict` | Consumer of strategy `type=` |
