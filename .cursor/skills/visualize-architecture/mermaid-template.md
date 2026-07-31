@@ -1,8 +1,23 @@
 # Mermaid Architecture Templates
 
-## Main Diagram Template
+## Nature theme (project default)
+
+Use soft earth tones via `%%{init}%%` + `classDef`. Apply to every workflow diagram in README / wiki / architecture reports.
+
+**Convention:** put **process / tool names on arrows** (`A -->|adapt| B`), not as intermediate nodes. Use empty join cells for multi-input merges. README: data objects only — no exact folder trees (those belong in architecture).
+
+| Class | Hex fill / stroke | Role |
+|-------|-------------------|------|
+| `earth` | `#F4EDE4` / `#A67C52` | Raw inputs (FASTQ, GTF, FNA, tables) |
+| `ocean` | `#E3EEF3` / `#5B8FA8` | Intermediate artifacts |
+| `liposome` | `#F8E8EC` / `#C47A8A` | Models, figures, final outputs |
+| `moss` | `#EEF3E8` / `#7A9E5A` | Generated code / helpers |
+| `detail` | `#FBF8F4` / `#C4B5A0` | Path / schema annotations |
+| `join` | transparent / dashed | Empty merge points |
+| `inferred` | dashed stroke | Inferred edges |
 
 ```mermaid
+%%{init: {'theme':'base','themeVariables':{'primaryColor':'#E8F0E6','primaryTextColor':'#2C3E2D','primaryBorderColor':'#6B8F71','lineColor':'#8B7355','secondaryColor':'#E3EEF3','tertiaryColor':'#F4EDE4','clusterBkg':'#FBF8F4','clusterBorder':'#C4B5A0','edgeLabelBackground':'#FBF8F4','fontFamily':'ui-sans-serif, system-ui, sans-serif'}}}%%
 flowchart LR
     subgraph Inputs
         META([Sample Metadata])
@@ -10,26 +25,24 @@ flowchart LR
         FQ[FASTQ]
     end
 
-    subgraph QC
-        FQ -->|FastQC| QC_RPT[QC Report]
-        FQ -->|Trimmomatic| TRIM[Trimmed FASTQ]
-    end
-
-    subgraph Classification
-        TRIM -->|Kraken2| TAX[Taxonomic Profiles]
-    end
-
-    subgraph Statistics
-        TAX -->|Normalization| NORM[Normalized Matrix]
-        NORM -->|Wilcoxon + BH-FDR| DE[Differential Abundance Table]
-        NORM -->|PCA| PCO[PCoA Coordinates]
-        PCO -->|PERMANOVA| PERM[PERMANOVA Results]
-    end
-
+    FQ -->|FastQC| QC_RPT[QC Report]
+    FQ -->|Trimmomatic| TRIM[Trimmed FASTQ]
+    TRIM -->|Kraken2| TAX[Taxonomic Profiles]
+    TAX -->|Normalization| NORM[Normalized Matrix]
+    NORM -->|Wilcoxon + BH-FDR| DE[Differential Abundance Table]
+    NORM -->|PCA| PCO[PCoA Coordinates]
+    PCO -->|PERMANOVA| PERM[PERMANOVA Results]
     META -.->|join sample_id| TAX
     META -.->|group labels| DE
 
+    classDef earth fill:#F4EDE4,stroke:#A67C52,stroke-width:1.5px,color:#3E2723
+    classDef ocean fill:#E3EEF3,stroke:#5B8FA8,stroke-width:1.5px,color:#1A3A4A
+    classDef liposome fill:#F8E8EC,stroke:#C47A8A,stroke-width:1.8px,color:#4A2C35
     classDef inferred stroke-dasharray: 5 5
+
+    class FQ,META earth
+    class QC_RPT,TRIM,TAX,NORM,DE,PCO,PERM ocean
+    class REF liposome
 ```
 
 ## Edge Style Conventions

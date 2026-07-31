@@ -1,7 +1,31 @@
 # Conversion: `raw/` or `prokaryotes/` → `data_ready/` / `ready_small/`
 
 **Producer:** `src/preprocessing.py` (`@adapt`)  
-**Date:** 2026-07-27
+**Date:** 2026-07-31
+
+```mermaid
+%%{init: {'theme':'base','themeVariables':{'primaryColor':'#E8F0E6','primaryTextColor':'#2C3E2D','primaryBorderColor':'#6B8F71','lineColor':'#8B7355','secondaryColor':'#E3EEF3','tertiaryColor':'#F4EDE4','clusterBkg':'#FBF8F4','clusterBorder':'#C4B5A0','edgeLabelBackground':'#FBF8F4','fontFamily':'ui-sans-serif, system-ui, sans-serif'}}}%%
+flowchart LR
+    FNA[(FNA)] --- E1[" "]
+    GTF[(GTF)] --- E1
+    TPM[(TPM)] --- E1
+    E1 -->|discover| BUNDLES[complete bundles]
+    BUNDLES -->|CDS ±flank| WINDOWS[gene windows]
+    WINDOWS -->|neighbour trim| TRIMMED[trimmed windows]
+    TRIMMED -->|extract DNA| DNA[sequences + GC]
+    DNA -->|gene rows| GENE[gene table]
+    DNA -->|non-coding match| NC[non-coding table]
+    GENE -->|export| OUT["ready.fna · ready.csv · caduceus_ready/"]
+    NC -->|export| OUT
+
+    classDef earth fill:#F4EDE4,stroke:#A67C52,stroke-width:1.5px,color:#3E2723
+    classDef ocean fill:#E3EEF3,stroke:#5B8FA8,stroke-width:1.5px,color:#1A3A4A
+    classDef join fill:transparent,stroke:#C4B5A0,stroke-width:1px,stroke-dasharray:3 3,color:#8B7355
+
+    class FNA,GTF,TPM earth
+    class BUNDLES,WINDOWS,TRIMMED,DNA,GENE,NC,OUT ocean
+    class E1 join
+```
 
 ## Input layouts
 

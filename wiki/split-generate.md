@@ -34,22 +34,26 @@ Output is code under `src/splits/<id>.py` (plus registry / pipeline `type=` hook
 
 ## How `splits/*.md` maps to code
 
-```text
-splits/<id>.md
-  frontmatter id/aliases     →  module + registry keys
-  # Description              →  docstring / justification
-  # Split                    →  train/val/test/zsv labels
-  # Implementations          →  ratios, seeds, reference behavior
-  # References               →  citations in decisions (no invented DOIs)
-        │
-        ▼
-src/splits/<id>.py  ──imports──►  src.splits.common / random helpers
-        │
-        ▼
-src.pipeline.split_predict (type=<id>)  →  split.csv
-        │
-        ▼
-/split runner  →  src.pipeline.split  →  SPLIT/
+```mermaid
+%%{init: {'theme':'base','themeVariables':{'primaryColor':'#E8F0E6','primaryTextColor':'#2C3E2D','primaryBorderColor':'#6B8F71','lineColor':'#8B7355','secondaryColor':'#E3EEF3','tertiaryColor':'#F4EDE4','clusterBkg':'#FBF8F4','clusterBorder':'#C4B5A0','edgeLabelBackground':'#FBF8F4','fontFamily':'ui-sans-serif, system-ui, sans-serif'}}}%%
+flowchart TD
+    MD["splits/{id}.md"] -->|/split-generate| CODE["src/splits/{id}.py"]
+    MD -.->|frontmatter| REG[registry keys]
+    MD -.->|Description| DOC[docstring]
+    MD -.->|Split| ROLES["train / val / test / zsv"]
+    MD -.->|Implementations| IMP["ratios · seeds · refs"]
+    CODE -->|imports| HELPERS["src.splits.common / random"]
+    CODE -->|split_predict type={id}| CSV[split.csv]
+    REG -->|split_predict type={id}| CSV
+    CSV -->|/split| SPL["SPLIT/"]
+
+    classDef earth fill:#F4EDE4,stroke:#A67C52,stroke-width:1.5px,color:#3E2723
+    classDef ocean fill:#E3EEF3,stroke:#5B8FA8,stroke-width:1.5px,color:#1A3A4A
+    classDef moss fill:#EEF3E8,stroke:#7A9E5A,stroke-width:1.8px,color:#2F3E2E
+
+    class MD earth
+    class CSV,SPL,REG,DOC,ROLES,IMP ocean
+    class CODE,HELPERS moss
 ```
 
 Complex architectures (CV folds, chromosome/species holdout, adversarial panels) are allowed when the caption and locks require them. Do not invent unspecified rules.

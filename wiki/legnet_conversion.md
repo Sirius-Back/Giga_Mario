@@ -1,7 +1,23 @@
 # Conversion: `raw/` or BED → `legnet_ready/`
 
 **Producer:** `src/legnet_preprocess.py` (`@legnet-adapt`)  
-**Date:** 2026-07-27
+**Date:** 2026-07-31
+
+```mermaid
+%%{init: {'theme':'base','themeVariables':{'primaryColor':'#E8F0E6','primaryTextColor':'#2C3E2D','primaryBorderColor':'#6B8F71','lineColor':'#8B7355','secondaryColor':'#E3EEF3','tertiaryColor':'#F4EDE4','clusterBkg':'#FBF8F4','clusterBorder':'#C4B5A0','edgeLabelBackground':'#FBF8F4','fontFamily':'ui-sans-serif, system-ui, sans-serif'}}}%%
+flowchart LR
+    RAW[(raw/ or BED)] -->|TSS ±100 bp| CRS[200 bp CRS]
+    CRS -->|gene orientation| DNA[oriented DNA]
+    DNA -->|stitch adapters| OLIGO[230 bp oligo]
+    OLIGO -->|TPM label| LABELED[labeled sequences]
+    LABELED -->|export| OUT["legnet_ready/ · all.tsv"]
+
+    classDef earth fill:#F4EDE4,stroke:#A67C52,stroke-width:1.5px,color:#3E2723
+    classDef ocean fill:#E3EEF3,stroke:#5B8FA8,stroke-width:1.5px,color:#1A3A4A
+
+    class RAW earth
+    class CRS,DNA,OLIGO,LABELED,OUT ocean
+```
 
 ## Input layouts
 

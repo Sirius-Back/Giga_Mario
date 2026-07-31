@@ -1,14 +1,32 @@
 # Split & train
 
-Use the `src/` entry points directly for the full Caduceus pipeline:
+Use the `src/` entry points directly for the full Caduceus pipeline. This page documents the **code path only** — it does not use the old do-fast orchestration or re-run `@adapt` when `ready/` already exists.
+
+```mermaid
+%%{init: {'theme':'base','themeVariables':{'primaryColor':'#E8F0E6','primaryTextColor':'#2C3E2D','primaryBorderColor':'#6B8F71','lineColor':'#8B7355','secondaryColor':'#E3EEF3','tertiaryColor':'#F4EDE4','clusterBkg':'#FBF8F4','clusterBorder':'#C4B5A0','edgeLabelBackground':'#FBF8F4','fontFamily':'ui-sans-serif, system-ui, sans-serif'}}}%%
+flowchart LR
+    RAW[(raw/)] -->|preprocessing.py| READY[(ready/)]
+    READY -->|splits.main| FOLDS["M1 / M2 folds"]
+    FOLDS -->|caduceus| LOGS[logs]
+    LOGS -->|train_viz| FIGS[figures]
+    FOLDS -->|caduceus_full| LOGS
+    FOLDS -->|caduceus_full| ZS[zero-shot metrics]
+    ZS -->|train_viz| FIGS
+
+    classDef earth fill:#F4EDE4,stroke:#A67C52,stroke-width:1.5px,color:#3E2723
+    classDef ocean fill:#E3EEF3,stroke:#5B8FA8,stroke-width:1.5px,color:#1A3A4A
+    classDef liposome fill:#F8E8EC,stroke:#C47A8A,stroke-width:1.8px,color:#4A2C35
+
+    class RAW earth
+    class READY,FOLDS,LOGS,ZS ocean
+    class FIGS liposome
+```
 
 1. `src/preprocessing.py` prepares `ready/` from `raw/` when needed.
 2. `src/splits.main` or `src.splits.random.run_random_split` materializes folds.
-3. `src.caduceus.py` trains M1 or M2 from a splits directory.
+3. `src.caduceus` trains M1 or M2 from a splits directory.
 4. `src.train_viz` renders training curves.
 5. `src.runs.caduceus_full` orchestrates split → train → zero-shot eval → viz.
-
-This page documents the **code path only**. It does not use the old do-fast orchestration or re-run `@adapt` when `ready/` already exists.
 
 ## Preconditions
 

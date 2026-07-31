@@ -1,30 +1,37 @@
 # Split-by-similarity (SBS)
 
 **Status:** current contract  
-**Date:** 2026-07-29  
+**Date:** 2026-07-31  
 **Companion:** [architecture.md](architecture.md), [split-generate.md](split-generate.md)
 
-General architecture for similarity-aware fold assignment. Strategies (`gc`, future `mmseqs`, …) extract a **feature table** from FNA and cluster in feature space (\(O(n\cdot d)\)), not a dense pairwise distance matrix (\(O(n^2)\)).
+General architecture for similarity-aware fold assignment. Strategies (`gc`, `kmer`, …) extract a **feature table** from FNA and cluster in feature space (\(O(n\cdot d)\)), not a dense pairwise distance matrix (\(O(n^2)\)).
 
 ## Pipeline
 
 ```mermaid
+%%{init: {'theme':'base','themeVariables':{'primaryColor':'#E8F0E6','primaryTextColor':'#2C3E2D','primaryBorderColor':'#6B8F71','lineColor':'#8B7355','secondaryColor':'#E3EEF3','tertiaryColor':'#F4EDE4','clusterBkg':'#FBF8F4','clusterBorder':'#C4B5A0','edgeLabelBackground':'#FBF8F4','fontFamily':'ui-sans-serif, system-ui, sans-serif'}}}%%
 flowchart TD
-    FNA["FNA input\n(dir of *.fa — default)\n(single multi-FASTA — hook)"] --> FB["feature backend\n(gc_aaa: GC%, AAA% | …)"]
-    FB --> FT["FeatureTable\nids × features"]
-    FT --> C["cluster → folds\n(default DBSCAN;\nkmeans / elbow / …)"]
-    FoldCSV["fold.csv"] -->|hold out zsv| C
-    Strat["stratification.csv"] -->|aggregate per fold| TT["fold → train/test/val"]
-    C --> TT
-    TT --> AT["assignment table\nregion|cluster|train_test|fold|additional"]
+    FNA["FNA input"] -->|feature backend| FT["FeatureTable\nids × features"]
+    FT -->|cluster → folds| C["folds\n(DBSCAN default)"]
+    FoldCSV[fold.csv] -->|hold out zsv| C
+    C -->|fold-grain assign| TT["train / test / val"]
+    Strat[stratification.csv] -->|aggregate per fold| TT
+    TT --> AT["assignment\nregion|cluster|train_test|fold|additional"]
     AT --> SC["split.csv\nID|train_test|fold"]
-    SC --> SPL["src.pipeline.split → SPLIT/"]
-    FT --> PCA["PCA diagnostics\ncnsplots + Altair"]
-    AT --> PCA
-    IDcsv["ID.csv"] -->|genome colors| PCA
-    Strat2["optional label CSV + column"] --> PCA
-```
+    SC -->|pipeline.split| SPL["SPLIT/"]
+    FT -->|PCA diagnostics| PCA["cnsplots + Altair"]
+    AT -->|PCA diagnostics| PCA
+    IDcsv[ID.csv] -->|genome colors| PCA
+    Strat2["optional label CSV"] -->|custom column| PCA
 
+    classDef earth fill:#F4EDE4,stroke:#A67C52,stroke-width:1.5px,color:#3E2723
+    classDef ocean fill:#E3EEF3,stroke:#5B8FA8,stroke-width:1.5px,color:#1A3A4A
+    classDef liposome fill:#F8E8EC,stroke:#C47A8A,stroke-width:1.8px,color:#4A2C35
+
+    class FNA,FoldCSV,Strat,IDcsv,Strat2 earth
+    class FT,C,TT,AT,SC,SPL ocean
+    class PCA liposome
+```
 ## Two obligatory contracts (pytest)
 
 | Contract | Input | Output |

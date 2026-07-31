@@ -1,21 +1,24 @@
 # Architecture
 
 **Status:** current pipeline contract  
-**Date:** 2026-07-28  
-**Companion:** [refactoring.md](../refactoring.md)
+**Date:** 2026-07-31  
+**Companion:** [refactoring.md](../refactoring.md) · [sbs.md](sbs.md)
 
 Reusable stages under `src/pipeline/`. Path labels (`MARKED/`, `PARSED/`, `PREDICT/`, `SPLIT/`) are **contracts**. Legacy Caduceus `raw/` → `ready/` paths remain available via `@adapt-legacy` / `src/preprocessing.py` until fully retired.
 
 ## Pipeline
 
 ```mermaid
+%%{init: {'theme':'base','themeVariables':{'primaryColor':'#E8F0E6','primaryTextColor':'#2C3E2D','primaryBorderColor':'#6B8F71','lineColor':'#8B7355','secondaryColor':'#E3EEF3','tertiaryColor':'#F4EDE4','clusterBkg':'#FBF8F4','clusterBorder':'#C4B5A0','edgeLabelBackground':'#FBF8F4','fontFamily':'ui-sans-serif, system-ui, sans-serif'}}}%%
 flowchart TD
     subgraph raw["raw data"]
         A[(GTF)]
-        A1["./GTF/genome.gtf"]
+        A1("./GTF/genome.gtf")
         C[(FNA)]
-        C1["./FNA/genome.fna"]
-        D["raw TARGET data"]
+        C1("./FNA/genome.fna")
+        D[raw TARGET data]
+        IDT[ID.csv]
+        PF[prepare_fold.csv]
         E1[" "]
     end
 
@@ -24,42 +27,52 @@ flowchart TD
     C --- E1
     C --- C1
     E1 -->|adapt| E4[" "]
-    E4 --> B["marked FASTA"]
-    E4 --> J["intersect.csv"]
+    E4 --> B[marked FASTA]
+    E4 --> J[intersect.csv]
     J --- J1["ID1|ID2|intersection_size"]
     B --- B1["./MARKED/ID.fa"]
-    B -->|parse_data| M["parsed sequences"]
+    B -->|parse_data| M[parsed sequences]
     M --- M1["./PARSED/ID.ext"]
 
-    D -->|parse_target| F["parsed TARGET"]
+    D -->|parse_target| F[parsed TARGET]
     F --- F1["merged: PREDICT/ID.ext + predict.csv"]
     F --- F2["mapped: PREDICT/{sample}/ID.ext\n+ predict.csv id|sample_id|predict_var1"]
 
-    IDT["ID.csv"] -->|generate_fold| HF["fold.csv"]
-    PF["prepare_fold.csv"] -->|generate_fold| HF
-    G["stratification.csv"] --- G1["ID|strat1|strat2|…"]
+    IDT -->|generate_fold| HF[fold.csv]
+    PF -->|generate_fold| HF
+    G[stratification.csv] --- G1["ID|strat1|strat2|…"]
     HF --- H1["ID|…|fold  (zsv held out)"]
 
-    A --- E2[" "]
-    B --- E2
-    C --- E2
+    B --- E2[" "]
     G --- E2
     HF --- E2
     J --- E2
-    E2 -->|split-predict type=random| I["split.csv"]
+    E2 -->|split-predict| I[split.csv]
     I --- I1["ID|train_test|fold"]
 
     I --- E3[" "]
     M --- E3
     F --- E3
-    E3 -->|split intersect_allow=T/F| K[("SPLIT")]
+    E3 -->|split| K[(SPLIT)]
     K --- K1["SPLIT/FASTA/{TRAIN|TEST|VAL|FOLD*}/ID.ext"]
     K --- K2["SPLIT/PREDICT/{TRAIN|TEST|VAL|FOLD*}/[sample/]ID.ext"]
-    K --- K3["outdir/PREDICT|PARSED/zero-shot-validation/  (unused in train)"]
+    K --- K3["outdir/PREDICT|PARSED/zero-shot-validation/\n(unused in train)"]
     K ---> L(["train → train-viz"])
+
+    classDef earth fill:#F4EDE4,stroke:#A67C52,stroke-width:1.5px,color:#3E2723
+    classDef ocean fill:#E3EEF3,stroke:#5B8FA8,stroke-width:1.5px,color:#1A3A4A
+    classDef liposome fill:#F8E8EC,stroke:#C47A8A,stroke-width:1.8px,color:#4A2C35
+    classDef detail fill:#FBF8F4,stroke:#C4B5A0,stroke-width:1px,color:#5C4E3A
+    classDef join fill:transparent,stroke:#C4B5A0,stroke-width:1px,stroke-dasharray:3 3,color:#8B7355
+
+    class A,C,D,IDT,PF,G earth
+    class B,J,M,F,HF,I,K ocean
+    class L liposome
+    class A1,C1,B1,J1,M1,F1,F2,G1,H1,I1,K1,K2,K3 detail
+    class E1,E2,E3,E4 join
 ```
 
-Empty nodes (`E1`–`E4`) are **join points only**.
+Empty nodes (`E1`–`E4`) are **join points only** — process names live on the arrows (`adapt`, `parse_data`, `parse_target`, `generate_fold`, `split-predict`, `split`).
 
 **Linkage:** every training ID has a prediction; ID with no gene/target → prediction **0**.
 
