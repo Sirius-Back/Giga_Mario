@@ -107,3 +107,8 @@ Thumbs.db
 *.o
 src/orthoparagroups/orthoparagroups
 
+# Orthoparagroups results + local smoketest (sources stay under src/)
+/src/orthoparagroups/smoketest/
+/orthoparagroups/**
+!/orthoparagroups/README.md
+

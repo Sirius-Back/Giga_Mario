@@ -281,6 +281,11 @@ build/
 # C++ build products under mag tools
 mag/src/orthoparagroups/orthoparagroups
 
+# Orthoparagroups: keep C++/Python sources; ignore results + smoketest
+mag/src/orthoparagroups/smoketest/
+mag/orthoparagroups/**
+!mag/orthoparagroups/README.md
+
 .sudo_as_admin_successful
 
 # --- Exceptions: track tiny pipeline pytest fixtures ---
@@ -292,9 +297,6 @@ mag/src/orthoparagroups/orthoparagroups
 !tests/fixtures/mini_raw/**/*.fai
 !tests/fixtures/mini_raw/**/*.fa
 
-# mag orthoparagroups smoketest fixtures (tiny)
-!mag/src/orthoparagroups/smoketest/**/*.fa
-!mag/src/orthoparagroups/smoketest/**/*.fna
 
 # --- Archived local trees (keep on disk; not in public repo) ---
 archive/
