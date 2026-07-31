@@ -286,6 +286,14 @@ mag/src/orthoparagroups/smoketest/
 mag/orthoparagroups/**
 !mag/orthoparagroups/README.md
 
+# Orthoparagroups alignment outputs (large FASTA/TSV/JSON dumps)
+mag/orthoparagroups_aligned/
+mag/orthoparagroups_aligned_smoke/
+
+# Aligned Hydra rerun scratch (repo-root); keep README only
+/runs_aligned/**
+!/runs_aligned/README.md
+
 .sudo_as_admin_successful
 
 # --- Exceptions: track tiny pipeline pytest fixtures ---

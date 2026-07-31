@@ -112,3 +112,7 @@ src/orthoparagroups/orthoparagroups
 /orthoparagroups/**
 !/orthoparagroups/README.md
 
+# Alignment / consensus dumps (large tables + aln FASTAs)
+/orthoparagroups_aligned/
+/orthoparagroups_aligned_smoke/
+

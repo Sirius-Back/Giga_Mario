@@ -237,3 +237,4 @@ blastdb/
 # Allow all content under runs/ despite broad globs (*.ckpt, *.csv, figures/, …)
 !runs/
 !runs/**
+/runs_aligned/
