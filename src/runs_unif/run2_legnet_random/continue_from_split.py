@@ -134,6 +134,8 @@ def _parse_argv(argv: list[str]) -> dict[str, object]:
         "skip_wait": False,
         "split_only": False,
         "n_devices": None,
+        "skip_direct": False,
+        "force_adv": False,
     }
     for tok in list(argv):
         if tok.startswith("batch_size="):
@@ -165,6 +167,12 @@ def _parse_argv(argv: list[str]) -> dict[str, object]:
             argv.remove(tok)
         elif tok in {"split_only=true", "--split-only"}:
             cfg["split_only"] = True
+            argv.remove(tok)
+        elif tok in {"skip_direct=true", "--skip-direct"}:
+            cfg["skip_direct"] = True
+            argv.remove(tok)
+        elif tok in {"force_adv=true", "--force-adv"}:
+            cfg["force_adv"] = True
             argv.remove(tok)
     return cfg
 
@@ -284,16 +292,15 @@ def run_train_stages(
     adv_patience: int,
     gpus: tuple[int, ...],
     skip_wait: bool = False,
+    skip_direct: bool = False,
+    force_adv: bool = False,
 ) -> None:
-    from src.pipeline.adversarial import apply_fold_class_targets, run_adversarial
+    from src.pipeline.adversarial import setup_adversarial_random_fold_class
     from src.pipeline.job_queue import (
         CLASS_GPU_TRAIN,
         append_queue_entry,
         wait_until_launchable,
     )
-    from src.pipeline.legnet_input import build_legnet_tsv
-    from src.pipeline.split import run_split
-    from src.pipeline.split_predict import run_split_predict
     from src.pipeline.train import run_train
 
     split_csv = _require(OUT_ROOT / "split.csv", "file")
@@ -331,75 +338,67 @@ def run_train_stages(
         peak_ram_gib=PEAK_RAM_GIB_TRAIN,
         gpus=gpus,
         resources=f"batch {batch}; direct {epochs}/{min_epochs}/p{patience}; "
-        f"adv {adv_epochs}/p{adv_patience}",
+        f"adv {adv_epochs}/p{adv_patience}; skip_direct={skip_direct}",
         log=str(ROOT / "logs" / f"{RUN_NAME}.log"),
     )
 
     direct_out = OUT_ROOT / "direct"
-    if direct_out.exists():
-        raise FileExistsError(f"refusing overwrite: {direct_out}")
+    if skip_direct:
+        if not (direct_out / "best_model" / "best_meta.json").is_file():
+            raise FileNotFoundError(
+                f"skip_direct=true but missing {direct_out / 'best_model' / 'best_meta.json'}"
+            )
+        print(f"skip_direct=true — reuse {direct_out}", flush=True)
+    else:
+        if direct_out.exists():
+            raise FileExistsError(f"refusing overwrite: {direct_out}")
 
-    print(
-        f"direct LegNet train n_devices={n_devices} epochs={epochs} "
-        f"min_epochs={min_epochs} patience={patience}",
-        flush=True,
-    )
-    run_train(
-        model="legnet",
-        type="regression",
-        folders=tsv,
-        outdir=direct_out,
-        strategy=SPLIT,
-        smoke=False,
-        epochs=epochs,
-        batch_size=batch,
-        seed=SEED,
-        n_devices=n_devices,
-        num_workers=NUM_WORKERS,
-        legnet_demo=True,
-        zsv_root=OUT_ROOT,
-        eval_zsv=True,
-        checkpoint_every_n_epochs=10,
-        early_stopping_patience=patience,
-        min_epochs=min_epochs,
-    )
+        print(
+            f"direct LegNet train n_devices={n_devices} epochs={epochs} "
+            f"min_epochs={min_epochs} patience={patience}",
+            flush=True,
+        )
+        run_train(
+            model="legnet",
+            type="regression",
+            folders=tsv,
+            outdir=direct_out,
+            strategy=SPLIT,
+            smoke=False,
+            epochs=epochs,
+            batch_size=batch,
+            seed=SEED,
+            n_devices=n_devices,
+            num_workers=NUM_WORKERS,
+            legnet_demo=True,
+            zsv_root=OUT_ROOT,
+            eval_zsv=True,
+            checkpoint_every_n_epochs=10,
+            early_stopping_patience=patience,
+            min_epochs=min_epochs,
+        )
 
     adv_root = OUT_ROOT / "adversarial"
     if adv_root.exists():
-        raise FileExistsError(f"refusing overwrite: {adv_root}")
+        if not force_adv:
+            raise FileExistsError(
+                f"refusing overwrite: {adv_root} (pass force_adv=true to archive)"
+            )
+        stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+        archived = OUT_ROOT / f"adversarial_FAILED_{stamp}"
+        print(f"force_adv=true — archive {adv_root} → {archived}", flush=True)
+        adv_root.rename(archived)
 
-    print("adversarial: copy + random split + fold-class …", flush=True)
-    run_adversarial(
-        outdir_new=adv_root,
-        split_csv=split_csv,
+    print("adversarial: copy + random(⊆direct IDs) + fold-class …", flush=True)
+    _adv_split, adv_tsv = setup_adversarial_random_fold_class(
+        adv_root=adv_root,
+        label_split_csv=split_csv,
         parsed_target=PANEL_ROOT / "PREDICT",
         parsed_data=PANEL_ROOT / "PARSED",
-        intersect_allow=True,
-    )
-    adv_split = run_split_predict(
-        outdir=adv_root,
-        type="random",
-        seed=SEED + 1,
-        id_csv=PANEL_ROOT / "ID.csv",
         fold_csv=PANEL_ROOT / "fold.csv",
-        ratios=(3, 1, 1),
-    )
-    apply_fold_class_targets(
-        predict_root=adv_root / "PREDICT",
-        label_split_csv=split_csv,
-    )
-    run_split(
-        adv_split,
-        parsed_target=adv_root / "PREDICT",
-        parsed_data=adv_root / "PARSED",
-        outdir=adv_root,
-        strategy="traintestval",
+        seed=SEED + 1,
+        ratios=(3.0, 1.0, 1.0),
         intersect_allow=True,
-        id_csv=PANEL_ROOT / "ID.csv",
-    )
-    adv_tsv = build_legnet_tsv(
-        split_root=adv_root / "SPLIT",
-        out_tsv=adv_root / "legnet_input" / "all.tsv",
     )
     print(
         f"adversarial LegNet train epochs={adv_epochs} "
@@ -452,6 +451,7 @@ def run_train_stages(
                 "run_name": RUN_NAME,
                 "out_root": str(OUT_ROOT),
                 "gpus": list(gpus),
+                "adversarial": True,
                 "finished_at": datetime.now(timezone.utc).isoformat(),
             },
             indent=2,
@@ -540,6 +540,8 @@ def main(argv: list[str] | None = None) -> int:
         adv_patience=int(cfg["adv_patience"]),
         gpus=gpus,
         skip_wait=bool(cfg["skip_wait"]),
+        skip_direct=bool(cfg["skip_direct"]),
+        force_adv=bool(cfg["force_adv"]),
     )
     print(f"{RUN_NAME} COMPLETED → {OUT_ROOT}", flush=True)
     return 0

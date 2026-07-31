@@ -92,6 +92,53 @@ def _break_write(path: Path, text: str) -> None:
     path.write_text(text, encoding="utf-8")
 
 
+def write_id_csv_from_split(split_csv: Path, out_csv: Path) -> Path:
+    """Write ``ID.csv`` listing exactly the IDs in ``split.csv``.
+
+    Use for adversarial random re-split so assignment stays ⊆ the direct/M1
+    label set (e.g. pangenome MARKED∩PARSED subsets that omit some panel IDs).
+    """
+    split_csv = Path(split_csv)
+    out_csv = Path(out_csv)
+    rows = read_csv(split_csv)
+    if not rows:
+        raise ValueError(f"split.csv is empty: {split_csv}")
+    if "ID" not in rows[0]:
+        raise ValueError(f"split.csv missing ID column: {split_csv}")
+    out_rows = [{"ID": r["ID"].strip()} for r in rows if r.get("ID", "").strip()]
+    if not out_rows:
+        raise ValueError(f"no IDs in split.csv: {split_csv}")
+    out_csv.parent.mkdir(parents=True, exist_ok=True)
+    write_csv(out_csv, out_rows, ["ID"])
+    return out_csv
+
+
+def write_fold_csv_from_split(split_csv: Path, out_csv: Path) -> Path:
+    """Write ``fold.csv`` (ID|fold) from ``split.csv`` for the same ID set.
+
+    Preserves ZSV fold labels when adversarial random assignment must not
+    reassign zero-shot IDs, while staying ⊆ the direct split ID set.
+    """
+    split_csv = Path(split_csv)
+    out_csv = Path(out_csv)
+    rows = read_csv(split_csv)
+    if not rows:
+        raise ValueError(f"split.csv is empty: {split_csv}")
+    required = {"ID", "fold"}
+    if required - set(rows[0]):
+        raise ValueError(
+            f"split.csv missing {sorted(required - set(rows[0]))}: {split_csv}"
+        )
+    out_rows = [
+        {"ID": r["ID"].strip(), "fold": r["fold"].strip()}
+        for r in rows
+        if r.get("ID", "").strip()
+    ]
+    out_csv.parent.mkdir(parents=True, exist_ok=True)
+    write_csv(out_csv, out_rows, ["ID", "fold"])
+    return out_csv
+
+
 def apply_fold_class_targets(
     *,
     predict_root: Path,
@@ -108,6 +155,12 @@ def apply_fold_class_targets(
     Uses the Locked M1/M2 map ``train→0, val→1, test→2`` (``M1_FOLD_TO_CLASS``).
     ZSV rows keep their existing continuous ``predict_var1``. Destination files
     are unlinked before write so hardlinked source panels stay intact.
+
+    Panel IDs absent from the previous split (e.g. outside a pangenome
+    MARKED∩PARSED subset) are left continuous and counted as
+    ``n_skipped_unlabeled`` — callers should restrict the adversarial random
+    ``id_csv`` to ``write_id_csv_from_split(label_split_csv, …)`` so those IDs
+    are not assigned train/test/val.
     """
     predict_root = Path(predict_root)
     if (predict_root / "PREDICT").is_dir():
@@ -153,14 +206,14 @@ def apply_fold_class_targets(
 
     mapped = 0
     kept_zsv = 0
-    missing: list[str] = []
+    skipped_unlabeled = 0
     for row in rows:
         rid = row["id"].strip()
         if rid in zsv_ids:
             kept_zsv += 1
             continue
         if rid not in id_to_class:
-            missing.append(rid)
+            skipped_unlabeled += 1
             continue
         new_val = str(id_to_class[rid])
         row["predict_var1"] = new_val
@@ -182,10 +235,10 @@ def apply_fold_class_targets(
                 raise FileNotFoundError(f"PREDICT .ext missing for {rid}")
         _break_write(ext, new_val + "\n")
 
-    if missing:
+    if mapped == 0:
         raise ValueError(
-            "split.csv IDs missing from class assignment (non-ZSV): "
-            f"{missing[:5]}{'…' if len(missing) > 5 else ''}"
+            "no PREDICT IDs mapped to fold-class labels from "
+            f"{label_csv} (n_skipped_unlabeled={skipped_unlabeled})"
         )
 
     fields = list(rows[0].keys())
@@ -200,6 +253,7 @@ def apply_fold_class_targets(
         "class_map": mapping,
         "n_mapped": mapped,
         "n_zsv_kept_continuous": kept_zsv,
+        "n_skipped_unlabeled": skipped_unlabeled,
         "predict_root": str(predict_root),
         "split_csv": str(label_csv),
         "label_split_csv": str(label_csv),
@@ -209,6 +263,71 @@ def apply_fold_class_targets(
         meta_path.unlink()
     meta_path.write_text(json.dumps(meta, indent=2) + "\n", encoding="utf-8")
     return meta
+
+
+def setup_adversarial_random_fold_class(
+    *,
+    adv_root: Path,
+    label_split_csv: Path,
+    parsed_target: Path,
+    parsed_data: Path,
+    fold_csv: Path | None = None,
+    seed: int,
+    ratios: tuple[float, float, float],
+    intersect_allow: bool = True,
+) -> tuple[Path, Path]:
+    """Copy panel → random re-split on label IDs → fold-class PREDICT → materialize.
+
+    Returns ``(adv_split_csv, adv_legnet_tsv)``.
+
+    ``fold_csv`` is ignored for assignment scope: fold labels are taken from
+    ``label_split_csv`` so ZSV stays marked and IDs stay ⊆ the direct split
+    (avoids full-panel fold.csv vs subset id_csv mismatch).
+    """
+    _ = fold_csv
+    from .legnet_input import build_legnet_tsv
+    from .split import run_split
+    from .split_predict import run_split_predict
+
+    adv_root = Path(adv_root)
+    label_split_csv = Path(label_split_csv)
+    run_adversarial(
+        outdir_new=adv_root,
+        split_csv=label_split_csv,
+        parsed_target=parsed_target,
+        parsed_data=parsed_data,
+        intersect_allow=intersect_allow,
+    )
+    id_csv = write_id_csv_from_split(label_split_csv, adv_root / "ID_from_direct_split.csv")
+    fold_from_split = write_fold_csv_from_split(
+        label_split_csv, adv_root / "fold_from_direct_split.csv"
+    )
+    adv_split = run_split_predict(
+        outdir=adv_root,
+        type="random",
+        seed=seed,
+        id_csv=id_csv,
+        fold_csv=fold_from_split,
+        ratios=ratios,
+    )
+    apply_fold_class_targets(
+        predict_root=adv_root / "PREDICT",
+        label_split_csv=label_split_csv,
+    )
+    run_split(
+        adv_split,
+        parsed_target=adv_root / "PREDICT",
+        parsed_data=adv_root / "PARSED",
+        outdir=adv_root,
+        strategy="traintestval",
+        intersect_allow=intersect_allow,
+        id_csv=id_csv,
+    )
+    adv_tsv = build_legnet_tsv(
+        split_root=adv_root / "SPLIT",
+        out_tsv=adv_root / "legnet_input" / "all.tsv",
+    )
+    return adv_split, Path(adv_tsv)
 
 
 def run_adversarial(

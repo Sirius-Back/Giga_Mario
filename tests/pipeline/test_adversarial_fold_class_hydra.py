@@ -85,6 +85,36 @@ def test_apply_fold_class_targets_rewrites_and_keeps_zsv(tmp_path: Path) -> None
     assert {by_id["3"], by_id["4"]} == {"2", "1"}
 
 
+def test_apply_fold_class_skips_panel_ids_outside_label_split(tmp_path: Path) -> None:
+    from src.pipeline.adversarial import (
+        apply_fold_class_targets,
+        write_fold_csv_from_split,
+        write_id_csv_from_split,
+    )
+
+    panel = _write_panel(tmp_path, n=8)
+    # Direct/M1 labels only for 1..6; panel has extras 7,8
+    label = panel / "split.csv"
+    id_csv = write_id_csv_from_split(label, tmp_path / "id_sub.csv")
+    fold_csv = write_fold_csv_from_split(label, tmp_path / "fold_sub.csv")
+    assert id_csv.is_file() and fold_csv.is_file()
+    ids = {r["ID"] for r in read_csv(id_csv)}
+    assert ids == {"1", "2", "3", "4", "5", "6"}
+    assert "7" not in ids
+
+    adv = tmp_path / "adv"
+    run_adversarial(outdir=panel, outdir_new=adv, intersect_allow=True)
+    meta = apply_fold_class_targets(
+        predict_root=adv / "PREDICT",
+        label_split_csv=label,
+    )
+    assert meta["n_mapped"] == 4
+    assert meta["n_skipped_unlabeled"] == 2
+    by_id = {r["id"]: r["predict_var1"] for r in read_csv(adv / "PREDICT" / "predict.csv")}
+    assert by_id["1"] == "0"
+    assert float(by_id["7"]) == pytest.approx(17.0)  # unlabeled kept continuous
+
+
 def test_zsv_load_pairs_and_metrics(tmp_path: Path) -> None:
     parsed = tmp_path / "PARSED" / "zero-shot-validation"
     predict = tmp_path / "PREDICT" / "zero-shot-validation"
