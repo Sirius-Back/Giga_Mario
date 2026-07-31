@@ -57,6 +57,13 @@ Aligned reproducibility suite — see [`runs_aligned/README.md`](../../../runs_a
 
 Helpers: `src/pipeline/rerun_aligned.py` (wired from `src.hydra_pipeline`).
 
+**Unified layout (`runs_unif/`):** legacy `src/runs/run{i}` + `runs/run{i}` stay read-only; new runs write
+`src/runs_unif/run{i}_{model}_{split}[_params]` and `runs_unif/{model}/run{i}_{model}_{split}[_params]`.
+Example aligned run 2: `run2_legnet_random` — rewrite present split table to 3:1:1 (train↔val swap when
+legacy was inverted 1:1:3), stage on CPU, wait for 4 GPUs (else 2), direct min15/max30/p10 + mice ZSV,
+adversarial random max10/p5. Entry: `python -m src.runs_unif.run2_legnet_random.continue_from_split`.
+
+
 Resolved configs + command templates are written to
 `{out_root}/hydra_resolved_config.yaml` and `hydra_resolved_commands.yaml`.
 

@@ -83,6 +83,7 @@ def test_apply_rerun_schedule_defaults_and_overrides() -> None:
         epochs=50, min_epochs=25, early_stopping_patience=0, overridden=set()
     )
     assert (e, m, p) == (ALIGNED_EPOCHS, ALIGNED_MIN_EPOCHS, 10)
+    assert m == 15
     e2, m2, p2 = apply_rerun_schedule(
         epochs=20,
         min_epochs=12,
@@ -90,6 +91,29 @@ def test_apply_rerun_schedule_defaults_and_overrides() -> None:
         overridden={"epochs", "min_epochs", "early_stopping_patience"},
     )
     assert (e2, m2, p2) == (20, 12, 5)
+
+
+def test_rewrite_split_table_swap_train_val(tmp_path: Path) -> None:
+    from src.pipeline.common import write_csv
+    from src.pipeline.rerun_aligned import rewrite_split_table_aligned
+
+    src = tmp_path / "legacy" / "split.csv"
+    rows = (
+        [{"ID": f"t{i}", "train_test": "train", "fold": "0"} for i in range(20)]
+        + [{"ID": f"e{i}", "train_test": "test", "fold": "0"} for i in range(20)]
+        + [{"ID": f"v{i}", "train_test": "val", "fold": "0"} for i in range(60)]
+        + [{"ID": "z0", "train_test": "zsv", "fold": "zsv"}]
+    )
+    write_csv(src, rows, ["ID", "train_test", "fold"])
+    dest = tmp_path / "unif" / "split.csv"
+    info = rewrite_split_table_aligned(src, dest, prefer_label_swap=True)
+    assert info["method"] == "swap_train_val"
+    assert info["counts_after"]["train"] == 60
+    assert info["counts_after"]["test"] == 20
+    assert info["counts_after"]["val"] == 20
+    assert info["counts_after"]["zsv"] == 1
+    # source untouched
+    assert "t0|train|" in src.read_text(encoding="utf-8")
 
 
 def test_parse_override_keys() -> None:

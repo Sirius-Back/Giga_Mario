@@ -33,6 +33,8 @@
 | `src/hydra_pipeline.py` | `/pipeline` Hydra orchestrator |
 | `src/pipeline/rerun_aligned.py` | `/pipeline` `rerun=true` (aligned suite) |
 | `runs_aligned/` | Aligned reproducibility out root for reruns |
+| `runs_unif/` | Unified aligned outs: `runs_unif/{model}/run{i}_…` |
+| `src/runs_unif/` | Unified continue orchestrators |
 | `src/hydra_train.py` | `/train` Hydra entry (LegNet/Caduceus) |
 | `src/tb_logging.py` | Dual SummaryWriter + TensorBoardLogger |
 | `src/metrics_logging.py` | `metrics.md` TorchMetrics helpers |

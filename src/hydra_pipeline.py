@@ -426,6 +426,24 @@ def _run_stages(cfg: DictConfig, *, cli_overrides: set[str] | None = None) -> in
     else:
         adv_folders = adv_root / "SPLIT"
 
+    adv_epochs_cfg = cfg.get("adversarial_epochs", None)
+    adv_epochs = (
+        int(adv_epochs_cfg)
+        if adv_epochs_cfg not in (None, "", "null")
+        else epochs
+    )
+    adv_min_cfg = cfg.get("adversarial_min_epochs", None)
+    adv_min_epochs = (
+        int(adv_min_cfg)
+        if adv_min_cfg not in (None, "", "null")
+        else min_epochs
+    )
+    adv_pat_cfg = cfg.get("adversarial_early_stopping_patience", None)
+    adv_early_stop = (
+        int(adv_pat_cfg)
+        if adv_pat_cfg not in (None, "", "null")
+        else early_stop
+    )
     run_train(
         model=train_name,
         type=str(cfg.adversarial_task_type),
@@ -433,7 +451,7 @@ def _run_stages(cfg: DictConfig, *, cli_overrides: set[str] | None = None) -> in
         outdir=adv_root / "train",
         strategy="random",
         smoke=not run_training,
-        epochs=epochs,
+        epochs=adv_epochs,
         batch_size=int(cfg.batch_size),
         max_length=int(cfg.get("max_length", 512)),
         seed=seed,
@@ -443,8 +461,8 @@ def _run_stages(cfg: DictConfig, *, cli_overrides: set[str] | None = None) -> in
         zsv_root=adv_root if eval_zsv else None,
         eval_zsv=eval_zsv and run_training,
         checkpoint_every_n_epochs=ckpt_every,
-        early_stopping_patience=early_stop,
-        min_epochs=min_epochs,
+        early_stopping_patience=adv_early_stop,
+        min_epochs=adv_min_epochs,
     )
     try:
         from src.pipeline.pipeline_viz import run_pipeline_viz_auto
