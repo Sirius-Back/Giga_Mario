@@ -294,6 +294,10 @@ mag/orthoparagroups_aligned_smoke/
 /runs_aligned/**
 !/runs_aligned/README.md
 
+# Unified suite run artifacts (large PARSED/PREDICT tables); keep README
+/runs_unif/**
+!/runs_unif/README.md
+
 .sudo_as_admin_successful
 
 # --- Exceptions: track tiny pipeline pytest fixtures ---

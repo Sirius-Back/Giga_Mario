@@ -238,3 +238,4 @@ blastdb/
 !runs/
 !runs/**
 /runs_aligned/
+/runs_unif/
