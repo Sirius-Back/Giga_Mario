@@ -37,14 +37,14 @@ Output is code under `src/splits/<id>.py` (plus registry / pipeline `type=` hook
 ```mermaid
 %%{init: {'theme':'base','themeVariables':{'primaryColor':'#E8F0E6','primaryTextColor':'#2C3E2D','primaryBorderColor':'#6B8F71','lineColor':'#8B7355','secondaryColor':'#E3EEF3','tertiaryColor':'#F4EDE4','clusterBkg':'#FBF8F4','clusterBorder':'#C4B5A0','edgeLabelBackground':'#FBF8F4','fontFamily':'ui-sans-serif, system-ui, sans-serif'}}}%%
 flowchart TD
-    MD["splits/{id}.md"] -->|/split-generate| CODE["src/splits/{id}.py"]
+    MD["splits/&lt;id&gt;.md"] -->|/split-generate| CODE["src/splits/&lt;id&gt;.py"]
     MD -.->|frontmatter| REG[registry keys]
     MD -.->|Description| DOC[docstring]
     MD -.->|Split| ROLES["train / val / test / zsv"]
     MD -.->|Implementations| IMP["ratios · seeds · refs"]
     CODE -->|imports| HELPERS["src.splits.common / random"]
-    CODE -->|split_predict type={id}| CSV[split.csv]
-    REG -->|split_predict type={id}| CSV
+    CODE -->|split_predict type=id| CSV[split.csv]
+    REG -->|split_predict type=id| CSV
     CSV -->|/split| SPL["SPLIT/"]
 
     classDef earth fill:#F4EDE4,stroke:#A67C52,stroke-width:1.5px,color:#3E2723

@@ -14,14 +14,14 @@ Toolkit for preparing genomic intervals, linking prediction targets, building le
 ```mermaid
 %%{init: {'theme':'base','themeVariables':{'primaryColor':'#E8F0E6','primaryTextColor':'#2C3E2D','primaryBorderColor':'#6B8F71','lineColor':'#8B7355','secondaryColor':'#E3EEF3','tertiaryColor':'#F4EDE4','clusterBkg':'#FBF8F4','clusterBorder':'#C4B5A0','edgeLabelBackground':'#FBF8F4','fontFamily':'ui-sans-serif, system-ui, sans-serif'}}}%%
 flowchart TD
-    raw[GTF + FNA + TARGET] -->|/preprocess| arts[ID.csv · MARKED · PARSED · PREDICT · parse.md]
-    caption[splits/*.md] -->|/split-generate| stratCode[src/splits/{id}.py]
-    arts -->|/split| SPLIT[SPLIT · optional ZSV]
+    raw["GTF + FNA + TARGET"] -->|/preprocess| arts["ID.csv · MARKED · PARSED · PREDICT · parse.md"]
+    caption["splits/*.md"] -->|/split-generate| stratCode["src/splits/&lt;id&gt;.py"]
+    arts -->|/split| SPLIT["SPLIT · optional ZSV"]
     stratCode -->|/split| SPLIT
-    SPLIT -->|/train| logs[logs · TensorBoard · figures · final_model]
-    SPLIT -->|/adversarial| ADVpanel[adversarial panel + random SPLIT]
-    ADVpanel -->|/train mode=adversarial| logsAdv[logs · figures · final_model]
-    PIPE["/pipeline dry|run"] -.-> SPLIT
+    SPLIT -->|/train| logs["logs · TensorBoard · figures · final_model"]
+    SPLIT -->|/adversarial| ADVpanel["adversarial panel + random SPLIT"]
+    ADVpanel -->|/train mode=adversarial| logsAdv["logs · figures · final_model"]
+    PIPE["/pipeline dry or run"] -.-> SPLIT
     PIPE -.-> logs
     PIPE -.-> ADVpanel
 
