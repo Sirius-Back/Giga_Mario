@@ -32,7 +32,9 @@
     "mag/homology_graph/figures/Figure_04_linked_cluster_sizes_altair.png",
     "mag/homology_graph/figures/Figure_05_linked_cluster_size_ratio_altair.html",
     "mag/homology_graph/figures/Figure_05_linked_cluster_size_ratio_altair.vl.json",
-    "mag/homology_graph/figures/Figure_05_linked_cluster_size_ratio_altair.png"
+    "mag/homology_graph/figures/Figure_05_linked_cluster_size_ratio_altair.png",
+    "mag/homology_graph/graph_network_full.png",
+    "mag/homology_graph/graph_network_full.pdf"
   ],
   "n_edges": 4770536,
   "n_nodes": 229527
