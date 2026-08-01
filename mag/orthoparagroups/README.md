@@ -40,3 +40,16 @@ python -m src.run.orthoparagroups.plot_clusters \
 ```
 
 cnsplots: `Figure_01`–`Figure_10` (PDF/SVG/PNG). Altair: matching `*_altair` HTML/VL/PNG plus `Figure_11` species median occupancy.
+
+## Hash lookup table (all MARKED)
+
+```bash
+python3 mag/src/orthoparagroups/build_hash_table.py \
+  --id-csv ready_legnet/ID.csv \
+  --nodes mag/homology_graph/maps/nodes_extract.tsv \
+  --edges mag/homology_graph/edges.tsv.gz \
+  --out mag/homology_graph/maps/gene_ortho_para_hash.tsv
+```
+
+Output columns: `id_MARKED|id_MARKED_hash|id|genome|orthogroup|orthogroup_hash|paragroup|paragroup_hash`
+(sorted by `id_MARKED_hash`). Genes without homology have empty `id` / group fields.
