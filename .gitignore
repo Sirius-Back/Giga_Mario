@@ -53,6 +53,8 @@ queue.md
 !.cursor/rules/**
 .cursor/plugins/
 .cursor/projects/
+*.canvas.status.json
+\\home\\
 .cursor/skills-cursor/
 .cursor/hooks/
 .cursor/debug-logs/

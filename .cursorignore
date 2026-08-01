@@ -54,6 +54,7 @@ splits_small/
 
 # --- Tooling / caches / IDE state ---
 .cursor-server/
+*.canvas.status.json
 .vscode-server/
 .vscode/
 .cache/
