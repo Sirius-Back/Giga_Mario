@@ -555,12 +555,14 @@ def _series(
         if r.get(x_key) is None:
             continue
         try:
+            # Skip non-numeric x (e.g. epoch == "final" / ZSV rows in full jsonl).
+            x = float(r[x_key])
             val = float(r["value"])
         except (TypeError, ValueError):
             continue
-        if not math.isfinite(val):
+        if not math.isfinite(x) or not math.isfinite(val):
             continue
-        pts.append((r[x_key], val))
+        pts.append((x, val))
     if not pts:
         return np.array([]), np.array([])
     pts.sort(key=lambda t: t[0])
@@ -738,52 +740,12 @@ def copy_manuscript(outdir: Path, written: list[Path]) -> list[Path]:
 
 
 def _pick_log_file(directory: Path) -> Path | None:
-    """Prefer caduceus-style train_metrics.jsonl inside a run or logs/ dir."""
+    """Prefer epoch-only metrics when present, else full train_metrics.jsonl."""
     candidates = [
-        directory / "train_metrics.jsonl",
-        directory / "logs" / "train_metrics.jsonl",
-        directory / "metrics.log",
-        directory / "logs" / "metrics.log",
-    ]
-    for c in candidates:
-        if c.is_file() and c.stat().st_size > 0:
-            return c
-    # any *.jsonl / *.log with epoch content
-    for pat in ("*.jsonl", "*.log", "logs/*.jsonl", "logs/*.log"):
-        for hit in sorted(directory.glob(pat)):
-            if hit.is_file() and hit.stat().st_size > 0:
-                return hit
-    return None
-
-
-def resolve_one_input(spec: str | Path) -> Path:
-    """Resolve a log file, glob hit, or run/logs directory to a single log file."""
-    path = Path(spec)
-    if any(ch in str(spec) for ch in "*?["):
-        hits = (
-            sorted(path.parent.glob(path.name))
-            if path.is_absolute()
-            else sorted(Path.cwd().glob(str(spec)))
-        )
-        files = [h for h in hits if h.is_file()]
-        if not files:
-            raise FileNotFoundError(f"No files matched glob: {spec}")
-        return files[0]
-    if path.is_file():
-        return path
-    if path.is_dir():
-        picked = _pick_log_file(path)
-        if picked is None:
-            raise FileNotFoundError(
-                f"No train_metrics.jsonl / metrics.log under directory: {path}"
-            )
-        return picked
-    raise FileNotFoundError(f"Log input not found: {spec}")
-
-
-def _pick_log_file(directory: Path) -> Path | None:
-    """Prefer caduceus-style train_metrics.jsonl inside a run or logs/ dir."""
-    candidates = [
+        # Epoch-only avoids epoch=="final" breaking numeric learning-curve x-axes;
+        # ZSV is reattached from zero_shot_metrics.json in main().
+        directory / "train_metrics_epochs.jsonl",
+        directory / "logs" / "train_metrics_epochs.jsonl",
         directory / "train_metrics.jsonl",
         directory / "logs" / "train_metrics.jsonl",
         directory / "metrics.log",

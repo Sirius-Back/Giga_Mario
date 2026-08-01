@@ -118,6 +118,8 @@ def _parse_argv(argv: list[str]) -> dict[str, object]:
         "adv_patience": ADV_EARLY_STOPPING_PATIENCE,
         "skip_wait": False,
         "split_only": False,
+        "skip_direct": False,
+        "force_adv": False,
     }
     for tok in list(argv):
         if tok.startswith("batch_size="):
@@ -146,6 +148,12 @@ def _parse_argv(argv: list[str]) -> dict[str, object]:
             argv.remove(tok)
         elif tok in {"split_only=true", "--split-only"}:
             cfg["split_only"] = True
+            argv.remove(tok)
+        elif tok in {"skip_direct=true", "--skip-direct"}:
+            cfg["skip_direct"] = True
+            argv.remove(tok)
+        elif tok in {"force_adv=true", "--force-adv"}:
+            cfg["force_adv"] = True
             argv.remove(tok)
     return cfg
 
@@ -261,6 +269,8 @@ def run_train_stages(
     adv_min_epochs: int,
     adv_patience: int,
     gpu: int,
+    skip_direct: bool = False,
+    force_adv: bool = False,
 ) -> None:
     from src.pipeline.adversarial import setup_adversarial_random_fold_class
     from src.pipeline.job_queue import CLASS_GPU_TRAIN, append_queue_entry
@@ -278,7 +288,8 @@ def run_train_stages(
         f"{RUN_NAME}_train",
         job=(
             f"CUDA_VISIBLE_DEVICES={gpu} "
-            f"python -m src.runs_unif.{RUN_NAME}.continue_from_split"
+            f"python -m src.runs_unif.{RUN_NAME}.continue_from_split "
+            f"skip_direct={str(skip_direct).lower()} force_adv={str(force_adv).lower()}"
         ),
         pid=os.getpid(),
         estimated_time="8-24h",
@@ -288,63 +299,77 @@ def run_train_stages(
         resources=(
             f"batch {batch} max_len {MAX_LENGTH}; "
             f"direct {epochs}/{min_epochs}/p{patience}; "
-            f"adv {adv_epochs}/p{adv_patience}"
+            f"adv {adv_epochs}/p{adv_patience}; skip_direct={skip_direct}"
         ),
         log=str(ROOT / "logs" / f"{RUN_NAME}_train.log"),
     )
 
     direct_out = OUT_ROOT / "direct"
-    if direct_out.exists():
-        raise FileExistsError(f"refusing overwrite: {direct_out}")
+    if skip_direct:
+        if not (direct_out / "best_model" / "best_meta.json").is_file():
+            raise FileNotFoundError(
+                f"skip_direct=true but missing {direct_out / 'best_model' / 'best_meta.json'}"
+            )
+        print(f"skip_direct=true — reuse {direct_out}", flush=True)
+    else:
+        if direct_out.exists():
+            raise FileExistsError(f"refusing overwrite: {direct_out}")
 
-    print(
-        f"direct Caduceus train gpu={gpu} epochs={epochs} "
-        f"min_epochs={min_epochs} patience={patience} batch={batch}",
-        flush=True,
-    )
-    run_train(
-        model="caduceus",
-        type="regression",
-        folders=split_root,
-        outdir=direct_out,
-        strategy=SPLIT,
-        smoke=False,
-        epochs=epochs,
-        batch_size=batch,
-        max_length=MAX_LENGTH,
-        seed=SEED,
-        n_devices=1,
-        num_workers=NUM_WORKERS,
-        zsv_root=OUT_ROOT,
-        eval_zsv=True,
-        checkpoint_every_n_epochs=10,
-        early_stopping_patience=patience,
-        min_epochs=min_epochs,
-    )
-
-    try:
-        from src.pipeline.pipeline_viz import run_pipeline_viz_auto
-
-        run_pipeline_viz_auto(
-            out_root=OUT_ROOT,
-            panel_root=PANEL_ROOT,
-            train_dir=direct_out,
-            run_id=RUN_NAME,
-            seed=SEED,
-            plot_train=True,
-            plot_sbs=False,
-            include_split_compare=True,
-            viz_conda_env="caduceus_env",
+        print(
+            f"direct Caduceus train gpu={gpu} epochs={epochs} "
+            f"min_epochs={min_epochs} patience={patience} batch={batch}",
+            flush=True,
         )
-    except Exception as exc:  # noqa: BLE001
-        print(f"WARNING: viz[direct] skipped: {type(exc).__name__}: {exc}", flush=True)
+        run_train(
+            model="caduceus",
+            type="regression",
+            folders=split_root,
+            outdir=direct_out,
+            strategy=SPLIT,
+            smoke=False,
+            epochs=epochs,
+            batch_size=batch,
+            max_length=MAX_LENGTH,
+            seed=SEED,
+            n_devices=1,
+            num_workers=NUM_WORKERS,
+            zsv_root=OUT_ROOT,
+            eval_zsv=True,
+            checkpoint_every_n_epochs=10,
+            early_stopping_patience=patience,
+            min_epochs=min_epochs,
+        )
+
+        try:
+            from src.pipeline.pipeline_viz import run_pipeline_viz_auto
+
+            run_pipeline_viz_auto(
+                out_root=OUT_ROOT,
+                panel_root=PANEL_ROOT,
+                train_dir=direct_out,
+                run_id=RUN_NAME,
+                seed=SEED,
+                plot_train=True,
+                plot_sbs=False,
+                include_split_compare=True,
+                viz_conda_env="caduceus_env",
+            )
+        except Exception as exc:  # noqa: BLE001
+            print(f"WARNING: viz[direct] skipped: {type(exc).__name__}: {exc}", flush=True)
 
     adv_root = OUT_ROOT / "adversarial"
     if adv_root.exists():
-        raise FileExistsError(f"refusing overwrite: {adv_root}")
+        if not force_adv:
+            raise FileExistsError(
+                f"refusing overwrite: {adv_root} (pass force_adv=true to archive)"
+            )
+        stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+        archived = OUT_ROOT / f"adversarial_FAILED_{stamp}"
+        print(f"force_adv=true — archive {adv_root} → {archived}", flush=True)
+        adv_root.rename(archived)
 
     print("adversarial: copy + random(⊆direct IDs) + fold-class …", flush=True)
-    _adv_split, _adv_tsv = setup_adversarial_random_fold_class(
+    _adv_split, _adv_folders = setup_adversarial_random_fold_class(
         adv_root=adv_root,
         label_split_csv=split_csv,
         parsed_target=PANEL_ROOT / "PREDICT",
@@ -353,6 +378,7 @@ def run_train_stages(
         seed=SEED + 1,
         ratios=(3.0, 1.0, 1.0),
         intersect_allow=True,
+        build_legnet_input=False,  # Caduceus trains on SPLIT, not 230 bp TSV
     )
     adv_split_root = _require(adv_root / "SPLIT", "dir")
     print(
@@ -462,6 +488,8 @@ def main(argv: list[str] | None = None) -> int:
         adv_min_epochs=int(cfg["adv_min_epochs"]),
         adv_patience=int(cfg["adv_patience"]),
         gpu=gpu,
+        skip_direct=bool(cfg["skip_direct"]),
+        force_adv=bool(cfg["force_adv"]),
     )
     print(f"{RUN_NAME} COMPLETED → {OUT_ROOT}", flush=True)
     return 0

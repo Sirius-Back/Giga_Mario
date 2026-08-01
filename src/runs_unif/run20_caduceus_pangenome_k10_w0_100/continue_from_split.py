@@ -476,6 +476,7 @@ def run_train_stages(
         seed=SEED + 1,
         ratios=RATIOS,
         intersect_allow=True,
+        build_legnet_input=False,  # Caduceus trains on SPLIT, not 230 bp TSV
     )
     adv_split_root = _require(adv_root / "SPLIT", "dir")
     print(

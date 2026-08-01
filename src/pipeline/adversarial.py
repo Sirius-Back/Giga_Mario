@@ -275,17 +275,22 @@ def setup_adversarial_random_fold_class(
     seed: int,
     ratios: tuple[float, float, float],
     intersect_allow: bool = True,
+    build_legnet_input: bool = True,
 ) -> tuple[Path, Path]:
     """Copy panel → random re-split on label IDs → fold-class PREDICT → materialize.
 
-    Returns ``(adv_split_csv, adv_legnet_tsv)``.
+    Returns ``(adv_split_csv, adv_legnet_tsv_or_split)``.
 
     ``fold_csv`` is ignored for assignment scope: fold labels are taken from
     ``label_split_csv`` so ZSV stays marked and IDs stay ⊆ the direct split
     (avoids full-panel fold.csv vs subset id_csv mismatch).
+
+    ``build_legnet_input``: when True (LegNet runs), write ``legnet_input/all.tsv``
+    (requires 230 bp sequences). Set **False for Caduceus** — Caduceus trains from
+    ``SPLIT/`` via ``adapt_split_for_caduceus`` and must not run the 230 bp TSV
+    builder on long/short Caduceus panels.
     """
     _ = fold_csv
-    from .legnet_input import build_legnet_tsv
     from .split import run_split
     from .split_predict import run_split_predict
 
@@ -323,6 +328,11 @@ def setup_adversarial_random_fold_class(
         intersect_allow=intersect_allow,
         id_csv=id_csv,
     )
+    if not build_legnet_input:
+        # Caduceus (and other non-LegNet) train on SPLIT trees, not LegNet TSV.
+        return adv_split, adv_root / "SPLIT"
+    from .legnet_input import build_legnet_tsv
+
     adv_tsv = build_legnet_tsv(
         split_root=adv_root / "SPLIT",
         out_tsv=adv_root / "legnet_input" / "all.tsv",

@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 
-from src.train_viz.viz import flatten_epochs, main, parse_log
+from src.train_viz.viz import _series, flatten_epochs, main, parse_log, resolve_one_input
 
 REAL_M1 = Path("archive/results/output/small_random/runs/M1/logs/train_metrics.jsonl")
 REAL_M2 = Path("archive/results/output/small_random/runs/M2/logs/train_metrics.jsonl")
@@ -29,6 +29,30 @@ def _assert_pub_bundle(outdir: Path, *, min_figures: int = 1) -> None:
     assert list(outdir.glob("Figure_*_altair.html")), "expected Altair HTML"
     assert list(outdir.glob("Figure_*_altair.vl.json")), "expected Vega-Lite JSON"
     assert (outdir / "manuscript").is_dir()
+
+
+def test_series_skips_non_numeric_epoch() -> None:
+    rows = [
+        {"run": "r", "model": "m", "seed": 1, "epoch": 1, "split": "train", "metric": "loss", "value": 1.0},
+        {"run": "r", "model": "m", "seed": 1, "epoch": "final", "split": "train", "metric": "loss", "value": 0.5},
+        {"run": "r", "model": "m", "seed": 1, "epoch": 2, "split": "train", "metric": "loss", "value": 0.8},
+    ]
+    xs, ys = _series(rows, model="m", seed=1, split="train", metric="loss", x_key="epoch")
+    assert xs.tolist() == [1.0, 2.0]
+    assert ys.tolist() == [1.0, 0.8]
+
+
+def test_resolve_prefers_epochs_jsonl(tmp_path: Path) -> None:
+    logs = tmp_path / "logs"
+    logs.mkdir()
+    (logs / "train_metrics.jsonl").write_text(
+        '{"epoch":"final","zero-shot-validation":{"spearman":0.1}}\n', encoding="utf-8"
+    )
+    (logs / "train_metrics_epochs.jsonl").write_text(
+        '{"epoch":1,"train":{"loss":1.0},"validation":{"loss":1.1}}\n', encoding="utf-8"
+    )
+    picked = resolve_one_input(tmp_path)
+    assert picked.name == "train_metrics_epochs.jsonl"
 
 
 def test_parse_and_flatten_synthetic(tmp_path: Path) -> None:
