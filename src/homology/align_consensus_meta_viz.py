@@ -486,33 +486,31 @@ def plot_meta_cnsplots(
         cns.setup_ax(ax)
         written.extend(save_cns_figure(outdir / f"Figure_10_meta_profile_{scope}", dpi))
 
-    # Violin by bin — numeric order (zero-padded labels avoid lexical "10" < "2")
+    # Violin by bin — sns treats x as strings; without order= sorts lexically ("10"<"2")
     metas = sorted(int(x) for x in bin_sim["meta_cluster"].dropna().unique())
     show = metas[: min(8, len(metas))]
     sub = bin_sim[bin_sim["meta_cluster"].isin(show)].copy()
-    sub["meta_cluster"] = sub["meta_cluster"].astype(int).astype(str)
     present_bins = sorted(int(b) for b in sub["pos_bin"].unique())
-    pad = max(2, len(str(max(present_bins) if present_bins else 0)))
-    sub["pos_bin_s"] = sub["pos_bin"].map(lambda b: f"{int(b):0{pad}d}")
-    bin_order = [f"{b:0{pad}d}" for b in present_bins]
+    bin_order = [str(b) for b in present_bins]
+    sub["bin_lab"] = sub["pos_bin"].astype(int).astype(str)
+    hue_order = [s for s in SCOPES if s in set(sub["scope"].astype(str))]
 
     cns.figure(width=560, height=320)
     ax = cns.violinplot(
         data=sub,
-        x="pos_bin_s",
+        x="bin_lab",
         y="similarity",
         hue="scope",
         order=bin_order,
+        hue_order=hue_order or None,
         add_box=False,
     )
-    ax.set_xlabel("Position bin (ordered by genomic relative position)")
+    ax.set_xlabel("Position bin (0→max, left→right)")
     ax.set_ylabel("Similarity")
     ax.set_title("Similarity by bin (subset of meta-clusters pooled)")
-    # sparse tick labels if many bins
-    if len(bin_order) > 20:
-        ticks = list(range(0, len(bin_order), max(1, len(bin_order) // 10)))
-        ax.set_xticks(ticks)
-        ax.set_xticklabels([bin_order[i] for i in ticks], rotation=0)
+    ticks = list(range(0, len(bin_order), max(1, len(bin_order) // 10)))
+    ax.set_xticks(ticks)
+    ax.set_xticklabels([bin_order[i] for i in ticks], rotation=0)
     cns.setup_ax(ax)
     written.extend(save_cns_figure(outdir / "Figure_11_similarity_violin_by_bin_pooled", dpi))
 
@@ -547,12 +545,13 @@ def plot_meta_cnsplots(
                 ms=7,
                 capsize=3,
                 label="ATG mean±sd (y=0)",
-                zorder=5,
+                zorder=6,
+                clip_on=False,
             )
         ax.set_xlabel("Position bin")
         ax.set_ylabel("Similarity (per OPG×bin)")
         ax.set_title(f"Meta-cluster {int(mc)} — points + means (TSS dashed, ATG at y=0)")
-        ax.set_ylim(bottom=min(-0.05, float(g["similarity"].min()) - 0.05))
+        ax.set_ylim(0.0, 1.02)
         cns.setup_ax(ax)
         written.extend(save_cns_figure(outdir / f"Figure_12_meta{int(mc):02d}_points", dpi))
 
