@@ -5,6 +5,7 @@
 # --- Measured large directories (2026-07-29) ---
 archive/
 miniconda3/
+mag/miniconda3/
 anaconda3/
 data/
 # runs/ — fully visible (logs, figures, checkpoints)

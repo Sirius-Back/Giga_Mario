@@ -1,6 +1,8 @@
 # --- Outsourced / third-party programs ---
 software/
 miniconda3/
+miniconda3
+mag/miniconda3/
 anaconda3/
 bin/
 .anaconda/
@@ -298,6 +300,7 @@ build/
 
 # C++ build products under mag tools
 mag/src/orthoparagroups/orthoparagroups
+mag/src/split_check_othoparagroup/split_check_othoparagroup
 
 # Orthoparagroups: keep C++/Python sources; ignore results + smoketest
 mag/src/orthoparagroups/smoketest/
