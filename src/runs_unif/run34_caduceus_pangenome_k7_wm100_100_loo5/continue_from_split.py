@@ -43,7 +43,8 @@ BATCH_SIZE = 192
 MAX_LENGTH = 256
 NUM_WORKERS = 4
 PREFERRED_GPUS = (0, 1, 2, 3)
-MEM_FREE_MIB = 200
+MEM_FREE_MIB = 1500
+GPU_CONFIRM_SEC = 30
 POLL_SEC = 60
 SOURCE_POLL_SEC = 120
 PEAK_RAM_GIB_STAGE = 28.0
@@ -91,20 +92,31 @@ def wait_for_one_gpu(
     prefer: tuple[int, ...] = PREFERRED_GPUS,
     thresh: int = MEM_FREE_MIB,
     poll_sec: int = POLL_SEC,
+    confirm_sec: int = GPU_CONFIRM_SEC,
 ) -> int:
     print(
         f"Waiting for any GPU in {prefer} free (memory.used < {thresh} MiB); "
-        f"poll every {poll_sec}s …",
+        f"poll every {poll_sec}s; re-confirm {confirm_sec}s …",
         flush=True,
     )
     while True:
         used = {g: _gpu_used_mib(g) for g in prefer}
         print(f"GPU memory.used MiB: {used}", flush=True)
         free = [g for g in prefer if used.get(g) is not None and used[g] < thresh]
-        if free:
-            print(f"GPU {free[0]} free — starting train", flush=True)
-            return free[0]
-        time.sleep(poll_sec)
+        if not free:
+            time.sleep(poll_sec)
+            continue
+        gpu = free[0]
+        print(f"GPU {gpu} candidate — confirming idle for {confirm_sec}s …", flush=True)
+        time.sleep(confirm_sec)
+        used2 = _gpu_used_mib(gpu)
+        if used2 is not None and used2 < thresh:
+            print(f"GPU {gpu} free (used={used2} MiB) — starting train", flush=True)
+            return gpu
+        print(
+            f"GPU {gpu} no longer free (used={used2} MiB) — keep waiting",
+            flush=True,
+        )
 
 
 def _parse_argv(argv: list[str]) -> dict[str, object]:
