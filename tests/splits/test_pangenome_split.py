@@ -109,10 +109,61 @@ def test_contingency_shared_kmers_same_cluster() -> None:
     b = shared + "TTTTTTTTTT"
     c = "GGGGGGGGGGGGGGGGGGGGGGGG"
     res = build_contingency_clusters([a, b, c], k=8, collect_edges=True)
+    assert res.method == "hash_majority"
     assert res.cluster_ids[0] == res.cluster_ids[1]
     assert res.cluster_ids[0] != res.cluster_ids[2]
     assert res.n_clusters >= 2
     assert len(res.edge_u) >= 1
+
+
+def test_hash_majority_unique_seq_singleton() -> None:
+    from src.splits.pangenome import build_hash_majority_clusters
+
+    ensure_built()
+    shared = "ACGTACGTACGTACGTACGTACGT"
+    a = shared + "AAAAAAAAAA"
+    b = shared + "TTTTTTTTTT"
+    unique = "ATATATATATATATATATATAT"
+    res = build_hash_majority_clusters([a, b, unique], k=8, min_df=2)
+    assert res.cluster_ids[0] == res.cluster_ids[1]
+    assert res.cluster_ids[2] != res.cluster_ids[0]
+    assert res.n_clusters == 2
+
+
+def test_hash_majority_picks_dominant_repeat_cluster() -> None:
+    from src.splits.pangenome import build_hash_majority_clusters
+
+    ensure_built()
+    m1 = "ACGT" * 10
+    m2 = "TGCA" * 10
+    # Two sequences establish repeat motif families.
+    s_a1 = m1 + "AAAAAAAA"
+    s_a2 = m1 + "TTTTTTTT"
+    s_b1 = m2 + "GGGGGGGG"
+    s_b2 = m2 + "CCCCCCCC"
+    # Bridge: more m1 k-mers than m2 → majority should match family A.
+    bridge = m1 + m1 + m1 + m2
+    res = build_hash_majority_clusters(
+        [s_a1, s_a2, s_b1, s_b2, bridge], k=4, min_df=2
+    )
+    assert res.cluster_ids[0] == res.cluster_ids[1]
+    assert res.cluster_ids[2] == res.cluster_ids[3]
+    assert res.cluster_ids[0] != res.cluster_ids[2]
+    assert res.cluster_ids[4] == res.cluster_ids[0]
+
+
+def test_legacy_region_contingency_still_available() -> None:
+    ensure_built()
+    shared = "ACGTACGTACGTACGTACGTACGT"
+    a = shared + "AAAAAAAAAA"
+    b = shared + "TTTTTTTTTT"
+    c = "GGGGGGGGGGGGGGGGGGGGGGGG"
+    res = build_contingency_clusters(
+        [a, b, c], k=8, method="region_contingency", collect_edges=True
+    )
+    assert res.method == "region_contingency"
+    assert res.cluster_ids[0] == res.cluster_ids[1]
+    assert res.cluster_ids[0] != res.cluster_ids[2]
 
 
 def test_pangenome_split_on_mock(tmp_path: Path) -> None:

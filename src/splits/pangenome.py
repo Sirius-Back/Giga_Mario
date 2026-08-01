@@ -9,9 +9,10 @@ Pipeline:
      missing; do not silently reuse panel ``MARKED`` unless
      ``reuse_panel_marked=True``.
   2. **Filter** — ``MARKED_pangenome`` ∩ ``PARSED`` → ``MARKED_parsed``.
-  3. Build C++ k-mer contingency / repeat graph on ``MARKED_parsed``.
-  4. Cluster by connected components; assign train/val/test (+ ZSV).
-  5. Render connected nodes only.
+  3. Build C++ **hash-graph**: k-mer hashes as nodes; keep repeat hashes
+     (``min_df≥2``); UF on hash nodes via per-sequence co-occurrence.
+  4. Per sequence: majority hash-cluster → fold; then train/val/test (+ ZSV).
+  5. Render connected nodes only (capped region–region edges for viz).
 """
 from __future__ import annotations
 
@@ -44,6 +45,7 @@ __all__ = (
     "adapt_pangenome_from_raw",
     "ensure_marked_pangenome",
     "build_contingency_clusters",
+    "build_hash_majority_clusters",
     "refine_large_components_by_modularity",
     "save_contingency_graph",
     "load_contingency_graph",
@@ -78,6 +80,8 @@ _FOLD_PALETTE = (
 SPLIT_ID = "pangenome"
 DEFAULT_K = 21
 DEFAULT_MIN_SHARED = 1
+DEFAULT_MIN_DF = 2
+DEFAULT_CLUSTER_METHOD = "hash_majority"
 
 A2A_ADAPT_HINT = (
     "A2A: pangenome windows may differ from panel MARKED. "
@@ -341,6 +345,34 @@ def ensure_marked_pangenome(
     )
 
 
+def build_hash_majority_clusters(
+    sequences: list[str],
+    *,
+    k: int = DEFAULT_K,
+    min_df: int = DEFAULT_MIN_DF,
+    max_edges: int = 100_000,
+    collect_edges: bool = True,
+) -> Any:
+    """C++ hash-graph clustering: repeat k-mers → UF → majority fold per sequence.
+
+    1. Extract ACGT k-mer hashes per sequence.
+    2. Keep hashes with document frequency ≥ ``min_df`` (default 2).
+    3. Count hash–hash co-occurrence across sequences; union-find unite pairs
+       seen together in ≥2 sequences.
+    4. Assign each sequence the majority hash-cluster (ties → smaller id);
+       sequences without repeat hashes get a singleton fold.
+    """
+    from src.splits.pangenome_native import get_native_graph
+
+    return get_native_graph().hash_majority_clusters(
+        sequences,
+        k=k,
+        min_df=min_df,
+        max_edges=max_edges,
+        collect_edges=collect_edges,
+    )
+
+
 def build_contingency_clusters(
     sequences: list[str],
     *,
@@ -348,17 +380,15 @@ def build_contingency_clusters(
     min_shared: int = DEFAULT_MIN_SHARED,
     max_edges: int = 100_000,
     collect_edges: bool = True,
+    method: str = DEFAULT_CLUSTER_METHOD,
+    min_df: int = DEFAULT_MIN_DF,
 ) -> Any:
-    """C++ contingency clustering on sequences; returns ``ContingencyGraphResult``.
+    """Build pangenome fold labels (default: hash-majority).
 
-    Clustering is **union-find connected components** on the bipartite
-    region↔k-mer contingency (regions that share ≥ ``min_shared`` identical
-    ACGT k-mers are united). This is **not** Leiden/Louvain modularity,
-    spectral/Laplacian clustering, or Markov clustering (MCL).
-
-    Optional ``edge_*`` arrays are a **capped** region–region co-occurrence
-    edge list for visualization / persistence (≤ ``max_edges``); the CC labels
-    themselves use the full streaming contingency, not only the capped edges.
+    ``method='hash_majority'`` (default) — see :func:`build_hash_majority_clusters`.
+    ``method='region_contingency'`` — legacy region UF on shared k-mers.
+    ``min_shared`` applies only to the legacy path / edge emission threshold
+    documentation; hash-majority uses ``min_df``.
     """
     from src.splits.pangenome_native import get_native_graph
 
@@ -368,6 +398,8 @@ def build_contingency_clusters(
         min_shared=min_shared,
         max_edges=max_edges,
         collect_edges=collect_edges,
+        method=method,
+        min_df=min_df,
     )
 
 
@@ -527,11 +559,12 @@ def save_contingency_graph(
     *,
     k: int,
     min_shared: int = DEFAULT_MIN_SHARED,
+    min_df: int = DEFAULT_MIN_DF,
     max_edges: int = 100_000,
     seed: int | None = None,
     extra_meta: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    """Persist the contingency graph for later reload / figure rebuild.
+    """Persist the contingency / hash-majority graph for later reload.
 
     Layout under ``{outdir}/graph/``::
 
@@ -588,21 +621,44 @@ def save_contingency_graph(
                 continue
             fh.write(f"{ids_list[ui]}|{ids_list[vi]}|{int(w)}\n")
 
-    meta = {
-        "format": "gigamario_pangenome_contingency_graph_v1",
-        "clustering": "union_find_connected_components",
-        "clustering_note": (
-            "Clusters = connected components via union-find on regions that "
-            "share ≥ min_shared ACGT k-mers (bipartite region↔k-mer contingency). "
-            "Not modularity (Louvain/Leiden), not Laplacian/spectral, not MCL."
-        ),
-        "edges_note": (
+    method = str(getattr(graph, "method", DEFAULT_CLUSTER_METHOD) or DEFAULT_CLUSTER_METHOD)
+    if method == "hash_majority":
+        clustering = "hash_uf_majority"
+        clustering_note = (
+            "Graph nodes = ACGT k-mer hashes. Keep repeat hashes with "
+            "document frequency ≥ min_df ({int(min_df)}). Union-find on hash "
+            "nodes: unite hash pairs that co-occur in ≥2 sequences; each "
+            "sequence fold = majority hash-cluster (ties → smaller id). "
+            "Sequences without repeat hashes get a singleton fold. "
+            "Not Louvain/Leiden/MCL."
+        )
+        edges_note = (
+            "edges.tsv are capped region–region edges weighted by shared "
+            "repeat hashes (≤ max_edges) for visualization. Fold labels come "
+            "from hash-majority, not from this capped edge list alone."
+        )
+    else:
+        clustering = "union_find_connected_components"
+        clustering_note = (
+            "Legacy: clusters = connected components via union-find on regions "
+            "that share ≥ min_shared ACGT k-mers (bipartite region↔k-mer "
+            "contingency). Not modularity (Louvain/Leiden), not Laplacian, not MCL."
+        )
+        edges_note = (
             "edges.tsv / edge_* arrays are a capped co-occurrence edge list for "
             "visualization and figure rebuild (≤ max_edges). CC labels in "
             "cluster_ids use the full streaming contingency, not only these edges."
-        ),
+        )
+
+    meta = {
+        "format": "gigamario_pangenome_contingency_graph_v1",
+        "clustering": clustering,
+        "method": method,
+        "clustering_note": clustering_note,
+        "edges_note": edges_note,
         "k": int(k),
         "min_shared": int(min_shared),
+        "min_df": int(min_df),
         "max_edges": int(max_edges),
         "seed": seed,
         "n_ids": n,
@@ -716,12 +772,14 @@ def assign_from_contingency(
     stratification_csv: Path | None = None,
     seed: int = 42,
     ratios: tuple[float, float, float] | None = None,
+    method: str = DEFAULT_CLUSTER_METHOD,
 ) -> tuple[list[dict[str, str]], dict[str, Any]]:
-    """Map contingency clusters → assignment rows (ZSV held out)."""
+    """Map contingency / majority clusters → assignment rows (ZSV held out)."""
     if len(ids) != len(cluster_ids):
         raise ValueError("ids and cluster_ids length mismatch")
     fold_map = _load_fold_map(fold_csv)
     strat_map = _load_strat_map(stratification_csv)
+    method_used = str(method or DEFAULT_CLUSTER_METHOD)
 
     zsv_ids: list[str] = []
     assignable: list[str] = []
@@ -740,7 +798,7 @@ def assign_from_contingency(
         "n_zsv": len(zsv_ids),
         "n_assignable": len(assignable),
         "seed": seed,
-        "method_used": "contingency_cc",
+        "method_used": method_used,
     }
     for rid in zsv_ids:
         rows.append(
@@ -749,7 +807,7 @@ def assign_from_contingency(
                 "cluster": "zsv",
                 "train_test": "zsv",
                 "fold": "zsv",
-                "additional": json.dumps({"method": "contingency_cc"}),
+                "additional": json.dumps({"method": method_used}),
             }
         )
 
@@ -791,7 +849,7 @@ def assign_from_contingency(
             "train_test": fold_to_tt[fold_label],
             "fold": fold_label,
             "additional": json.dumps(
-                {"method": "contingency_cc", "cluster": int(fold_label)},
+                {"method": method_used, "cluster": int(fold_label)},
                 sort_keys=True,
             ),
         }
@@ -1335,6 +1393,8 @@ def run_pangenome_split_assign(
     genomes: Sequence[str] | None = None,
     k: int = DEFAULT_K,
     min_shared: int = DEFAULT_MIN_SHARED,
+    min_df: int = DEFAULT_MIN_DF,
+    cluster_method: str = DEFAULT_CLUSTER_METHOD,
     ratios: tuple[float, float, float] | None = None,
     plot: bool = True,
     max_edges: int = 100_000,
@@ -1421,6 +1481,8 @@ def run_pangenome_split_assign(
         min_shared=min_shared,
         max_edges=max_edges,
         collect_edges=collect_edges,
+        method=cluster_method,
+        min_df=min_df,
     )
 
     import numpy as np
@@ -1445,6 +1507,7 @@ def run_pangenome_split_assign(
             n_clusters=int(len(set(cluster_ids))),
         )
 
+    method_used = str(getattr(graph, "method", cluster_method) or cluster_method)
     graph_meta: dict[str, Any] | None = None
     if save_graph:
         graph_meta = save_contingency_graph(
@@ -1453,12 +1516,14 @@ def run_pangenome_split_assign(
             graph,
             k=int(k),
             min_shared=int(min_shared),
+            min_df=int(min_df),
             max_edges=int(max_edges),
             seed=int(seed),
             extra_meta={
                 "marked_parsed": str(marked_parsed),
                 "modularity_refine": bool(modularity_refine),
                 "modularity": modularity_meta,
+                "cluster_method": method_used,
             },
         )
 
@@ -1469,6 +1534,7 @@ def run_pangenome_split_assign(
         stratification_csv=stratification_csv,
         seed=seed,
         ratios=ratios,
+        method=method_used,
     )
     if modularity_meta is not None:
         assign_meta = {**assign_meta, "modularity_refine": modularity_meta}
@@ -1512,6 +1578,8 @@ def run_pangenome_split_assign(
         "n_ids": len(kept),
         "k": k,
         "min_shared": min_shared,
+        "min_df": min_df,
+        "cluster_method": method_used,
         "n_clusters": int(graph.n_clusters),
         "n_edges": int(len(graph.edge_u)),
         "split_csv": str(split_csv),

@@ -9,10 +9,11 @@ aliases:
 
 # Description
 
-Construct a pangenome-style **repeat / contingency graph** from
-**pangenome-window** sequences and assign train / validation / test at
-**connected-component** grain. Highly similar regions that share k-mers fall
-into the same fold without pairwise distance matrices or full bubble resolution.
+Construct a pangenome-style **repeat hash graph** from **pangenome-window**
+sequences. Graph **nodes are k-mer hashes**; each sequence links to many
+hashes. Hash nodes are clustered (union-find on repeat co-occurrence), then
+each sequence gets a **majority** hash-cluster as its fold. Train / validation
+/ test are assigned at **fold grain**.
 
 **Important:** the pangenome genomic window may differ from panel `MARKED`
 (LegNet/Caduceus). Do **not** silently reuse panel `MARKED`. Produce
@@ -22,14 +23,14 @@ documented **A2A** handoff — then filter to `MARKED_parsed`.
 # Split
 
 train:
-- All regions in contingency clusters assigned to train (fold-grain;
-  Caduceus-aligned ratios by default).
+- All regions whose majority hash-cluster fold is assigned to train
+  (Caduceus-aligned ratios by default).
 
 validation:
-- All regions in contingency clusters assigned to validation.
+- All regions whose fold is assigned to validation.
 
 test:
-- All regions in contingency clusters assigned to test.
+- All regions whose fold is assigned to test.
 
 zero_shot:
 - IDs labeled `zsv` / `zeroshotvalidation` in `fold.csv` (held out; never
@@ -42,34 +43,43 @@ zero_shot:
    from panel MARKED). Writes `intersect_pangenome.csv` when adapting here.
 2. **Filter** — `MARKED_pangenome` ∩ `PARSED` → `MARKED_parsed`
    (`python -m src.splits.intersect_pangenome`).
-3. **Repeat / contingency graph** (C++) on `MARKED_parsed`: stream k-mers;
-   union regions that share ≥1 k-mer (no all-pairs distances).
-4. **Cluster**: connected components of the region contingency graph.
-5. **Assign** clusters → train / val / test (+ optional ZSV).
-6. **Render**: region co-occurrence graph with **connected nodes only**.
+3. **Hash graph** (C++) on `MARKED_parsed`: extract ACGT k-mer hashes; keep
+   **repeat** hashes with document frequency ≥ `min_df` (default 2).
+4. **Cluster hashes**: union-find on hash nodes — unite hash pairs that
+   co-occur in ≥2 sequences (a single multi-motif bridge does not merge
+   families).
+5. **Sequence → fold**: majority hash-cluster per sequence (ties → smaller id);
+   sequences without repeat hashes get a singleton fold.
+6. **Assign** folds → train / val / test (+ optional ZSV).
+7. **Render**: capped region–region co-occurrence edges (connected nodes only).
 
 Opt-in only: `reuse_panel_marked=True` when the panel MARKED window is
 **intentionally identical** to the pangenome window (smoke tests).
 
 # Graph construction
 
-- Extract overlapping ACGT k-mers (default `k=21`; rolling 2-bit codes).
-- Reuse identical k-mer keys as shared graph nodes (contingency join).
-- Single streaming pass; scales approximately linearly with input bases.
+- Extract overlapping ACGT k-mers (default `k=21`; rolling 2-bit codes /
+  `uint64` hashes).
+- One sequence ↔ many hash nodes; link stored during the streaming pass.
+- Repeat filter: hash kept only if it appears in ≥ `min_df` sequences.
 - Do **not** compute dense pairwise sequence distances.
+- Do **not** build a full clique on all regions.
 
 # Clustering
 
-- **Default (implemented):** **union-find connected components** on the
-  bipartite region↔k-mer contingency graph. Regions that share ≥ `min_shared`
-  identical ACGT k-mers (default 1) are united into one component. Each
-  connected component becomes one **fold** label; train/val/test are assigned
-  **at fold (component) grain** via Caduceus-aligned ratios (`seed`), not per
-  region independently.
-- **Not used:** Louvain/Leiden modularity, spectral/Laplacian clustering, or
-  Markov clustering (MCL). Those remain future options on the same graph.
-- **ZSV:** IDs labeled zsv in `fold.csv` are held out before CC assignment.
-- Must not require resolving the full repeat graph or all pairwise distances.
+- **Default (implemented):** `hash_majority` —
+  1. Nodes = k-mer hashes with `df ≥ min_df`.
+  2. Union-find CC on hash nodes (unite pairs co-occurring in ≥2 sequences).
+  3. Each sequence fold = **majority** of its repeat-hash cluster ids.
+  4. Train/val/test assigned **at fold grain** via Caduceus-aligned ratios
+     (`seed`), not per region independently.
+- **Legacy (opt-in):** `region_contingency` — union-find directly on regions
+  that share ≥1 k-mer (first-owner join). Use
+  `--pangenome-cluster-method region_contingency`.
+- **Not used as default:** Louvain/Leiden modularity, spectral/Laplacian, MCL
+  (optional Louvain refine remains available for oversized folds).
+- **ZSV:** IDs labeled zsv in `fold.csv` are held out before fold→split
+  assignment.
 
 # Saved graph artifacts
 
@@ -78,16 +88,15 @@ Every pangenome split writes a reusable graph under `{outdir}/graph/`
 
 | File | Content |
 |------|---------|
-| `contingency_graph.npz` | `cluster_ids`, `edge_u`, `edge_v`, `edge_w` (int32) |
+| `contingency_graph.npz` | `cluster_ids` (per-sequence folds), `edge_u/v/w` (int32) |
 | `ids.txt` | Region IDs in array index order |
 | `nodes.tsv` | `ID\|cluster` |
-| `edges.tsv` | `source\|target\|weight` (capped co-occurrence edges) |
-| `contingency_graph_meta.json` | k, min_shared, max_edges, clustering method note |
+| `edges.tsv` | `source\|target\|weight` (capped region–region shared-repeat edges) |
+| `contingency_graph_meta.json` | k, min_df, method=`hash_majority`, notes |
 
-**Important:** `cluster_ids` come from the **full** streaming contingency
-union-find. `edges.*` are a **capped** region–region edge list (≤ `max_edges`,
-default 100 000) for visualization / figure rebuild — reloading CC from the
-capped edge list alone may not recover every component merge.
+**Important:** `cluster_ids` are **majority folds** from the hash UF. `edges.*`
+are a **capped** region–region list for visualization — not the full hash
+graph.
 
 Reload / replot without re-adapt::
 
