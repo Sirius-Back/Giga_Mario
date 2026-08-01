@@ -15,6 +15,7 @@ from src.homology.align_consensus_meta_viz import (
     find_atg_rel_positions,
     per_cluster_bin_similarity,
     profile_matrix,
+    scope_bin_significance,
 )
 
 
@@ -81,3 +82,46 @@ def test_profile_kmeans_and_atg(tmp_path: Path) -> None:
     info = find_atg_rel_positions(aln)
     assert info["n_with_atg"] == 2
     assert 0.0 <= info["atg_rel_mean"] <= 1.0
+
+
+def test_scope_bin_significance_has_winner_column() -> None:
+    rows = []
+    for ci in range(20):
+        for b in (0, 1):
+            # bin0: paralogs higher; bin1: orthologs higher
+            o = 0.4 + 0.01 * ci if b == 0 else 0.7 + 0.01 * ci
+            p = 0.7 + 0.01 * ci if b == 0 else 0.4 + 0.01 * ci
+            rows.append(
+                {
+                    "cluster": f"c{ci}",
+                    "pos_bin": b,
+                    "scope": "orthologs",
+                    "similarity": o,
+                    "meta_cluster": 0,
+                }
+            )
+            rows.append(
+                {
+                    "cluster": f"c{ci}",
+                    "pos_bin": b,
+                    "scope": "paralogs",
+                    "similarity": p,
+                    "meta_cluster": 0,
+                }
+            )
+            rows.append(
+                {
+                    "cluster": f"c{ci}",
+                    "pos_bin": b,
+                    "scope": "full",
+                    "similarity": 0.5,
+                    "meta_cluster": 0,
+                }
+            )
+    out = scope_bin_significance(pd.DataFrame(rows), min_n=5, fdr_q=0.05)
+    assert not out.empty
+    assert set(out["winner"]).issubset({"paralogs", "orthologs", "none"})
+    w0 = out.loc[out["pos_bin"] == 0, "winner"].iloc[0]
+    w1 = out.loc[out["pos_bin"] == 1, "winner"].iloc[0]
+    assert w0 == "paralogs"
+    assert w1 == "orthologs"

@@ -380,6 +380,67 @@ def build_meta_tables(
     }
 
 
+def scope_bin_significance(
+    bin_sim: pd.DataFrame,
+    *,
+    min_n: int = 5,
+    fdr_q: float = 0.05,
+) -> pd.DataFrame:
+    """Per (meta_cluster, pos_bin): Wilcoxon signed-rank orthologs vs paralogs + BH-FDR.
+
+    ``winner`` is ``paralogs`` / ``orthologs`` / ``none`` at q < ``fdr_q``
+    (direction by median paralogs−orthologs).
+    """
+    from scipy import stats
+    from statsmodels.stats.multitest import multipletests
+
+    rows: list[dict[str, Any]] = []
+    for (mc, pos_bin), g in bin_sim.groupby(["meta_cluster", "pos_bin"], sort=False):
+        wide = g.pivot_table(index="cluster", columns="scope", values="similarity", aggfunc="mean")
+        if "orthologs" not in wide.columns or "paralogs" not in wide.columns:
+            continue
+        sub = wide[["orthologs", "paralogs"]].dropna()
+        if len(sub) < min_n:
+            continue
+        diff = sub["paralogs"] - sub["orthologs"]
+        if np.allclose(diff.to_numpy(dtype=float), 0.0):
+            continue
+        try:
+            _stat, pval = stats.wilcoxon(
+                sub["paralogs"].to_numpy(dtype=float),
+                sub["orthologs"].to_numpy(dtype=float),
+                alternative="two-sided",
+                zero_method="wilcox",
+            )
+        except ValueError:
+            continue
+        rows.append(
+            {
+                "meta_cluster": int(mc),
+                "pos_bin": int(pos_bin),
+                "n_paired": int(len(sub)),
+                "median_diff_para_minus_ortho": float(diff.median()),
+                "pvalue": float(pval),
+            }
+        )
+    out = pd.DataFrame(rows)
+    if out.empty:
+        return out.assign(q=pd.Series(dtype=float), winner=pd.Series(dtype=str))
+    out["q"] = multipletests(out["pvalue"].to_numpy(dtype=float), method="fdr_bh")[1]
+    winners: list[str] = []
+    for _, r in out.iterrows():
+        if float(r["q"]) >= fdr_q:
+            winners.append("none")
+        elif float(r["median_diff_para_minus_ortho"]) > 0:
+            winners.append("paralogs")
+        elif float(r["median_diff_para_minus_ortho"]) < 0:
+            winners.append("orthologs")
+        else:
+            winners.append("none")
+    out["winner"] = winners
+    return out
+
+
 def plot_meta_cnsplots(
     bin_sim: pd.DataFrame,
     atg_meta: pd.DataFrame,
@@ -425,12 +486,15 @@ def plot_meta_cnsplots(
         cns.setup_ax(ax)
         written.extend(save_cns_figure(outdir / f"Figure_10_meta_profile_{scope}", dpi))
 
-    # One combined point+violin style: sample up to 8 meta-clusters for static readability
-    metas = sorted(bin_sim["meta_cluster"].dropna().unique())
+    # Violin by bin — numeric order (zero-padded labels avoid lexical "10" < "2")
+    metas = sorted(int(x) for x in bin_sim["meta_cluster"].dropna().unique())
     show = metas[: min(8, len(metas))]
     sub = bin_sim[bin_sim["meta_cluster"].isin(show)].copy()
     sub["meta_cluster"] = sub["meta_cluster"].astype(int).astype(str)
-    sub["pos_bin_s"] = sub["pos_bin"].astype(str)
+    present_bins = sorted(int(b) for b in sub["pos_bin"].unique())
+    pad = max(2, len(str(max(present_bins) if present_bins else 0)))
+    sub["pos_bin_s"] = sub["pos_bin"].map(lambda b: f"{int(b):0{pad}d}")
+    bin_order = [f"{b:0{pad}d}" for b in present_bins]
 
     cns.figure(width=560, height=320)
     ax = cns.violinplot(
@@ -438,15 +502,21 @@ def plot_meta_cnsplots(
         x="pos_bin_s",
         y="similarity",
         hue="scope",
+        order=bin_order,
         add_box=False,
     )
-    ax.set_xlabel("Position bin")
+    ax.set_xlabel("Position bin (ordered by genomic relative position)")
     ax.set_ylabel("Similarity")
     ax.set_title("Similarity by bin (subset of meta-clusters pooled)")
+    # sparse tick labels if many bins
+    if len(bin_order) > 20:
+        ticks = list(range(0, len(bin_order), max(1, len(bin_order) // 10)))
+        ax.set_xticks(ticks)
+        ax.set_xticklabels([bin_order[i] for i in ticks], rotation=0)
     cns.setup_ax(ax)
     written.extend(save_cns_figure(outdir / "Figure_11_similarity_violin_by_bin_pooled", dpi))
 
-    # Per meta-cluster panels (static): mean± points
+    # Per meta-cluster panels: ATG start marker at y=0
     for mc in metas:
         g = bin_sim[bin_sim["meta_cluster"] == mc]
         cns.figure(width=480, height=280)
@@ -460,6 +530,7 @@ def plot_meta_cnsplots(
         )
         means = g.groupby(["pos_bin", "scope"], as_index=False)["similarity"].mean()
         for scope, sg in means.groupby("scope"):
+            sg = sg.sort_values("pos_bin")
             ax.plot(sg["pos_bin"], sg["similarity"], lw=1.5, label=f"mean {scope}")
         ax.axvline(TSS_REL_POS * n_bins - 0.5, color="#666666", ls="--", lw=0.9)
         am = atg_meta[atg_meta["meta_cluster"] == mc]
@@ -469,22 +540,128 @@ def plot_meta_cnsplots(
             xerr = float(r["atg_rel_std"]) * n_bins if np.isfinite(r["atg_rel_std"]) else 0.0
             ax.errorbar(
                 [x],
-                [float(g["similarity"].median())],
+                [0.0],
                 xerr=[xerr],
                 fmt="D",
                 color="#D55E00",
-                ms=6,
-                label="ATG mean±sd",
+                ms=7,
+                capsize=3,
+                label="ATG mean±sd (y=0)",
                 zorder=5,
             )
         ax.set_xlabel("Position bin")
         ax.set_ylabel("Similarity (per OPG×bin)")
-        ax.set_title(f"Meta-cluster {int(mc)} — points + means (TSS dashed, ATG diamond)")
+        ax.set_title(f"Meta-cluster {int(mc)} — points + means (TSS dashed, ATG at y=0)")
+        ax.set_ylim(bottom=min(-0.05, float(g["similarity"].min()) - 0.05))
         cns.setup_ax(ax)
         written.extend(save_cns_figure(outdir / f"Figure_12_meta{int(mc):02d}_points", dpi))
 
     plt.close("all")
     return written
+
+
+def _annotate_figure13_borders_mpl(
+    bin_sim: pd.DataFrame,
+    contrast: pd.DataFrame,
+    out_png: Path,
+    *,
+    n_bins: int,
+    dpi: int = 300,
+    max_facet_rows: int = 25,
+) -> Path:
+    """Draw Figure_13 as a bin×meta grid with colored spines for significant cells."""
+    import matplotlib.pyplot as plt
+    from matplotlib.patches import Rectangle
+
+    border_colors = {"paralogs": "#E69F00", "orthologs": "#CC3311", "none": "#B0B0B0"}
+    df = bin_sim.copy()
+    df["meta_cluster"] = df["meta_cluster"].astype(int)
+    df["pos_bin"] = df["pos_bin"].astype(int)
+    bins = sorted(df["pos_bin"].unique())
+    if len(bins) > max_facet_rows:
+        stride = int(np.ceil(len(bins) / max_facet_rows))
+        bins = bins[::stride]
+    metas = sorted(df["meta_cluster"].unique())
+    winner_lookup = {
+        (int(r.meta_cluster), int(r.pos_bin)): str(r.winner)
+        for _, r in contrast.iterrows()
+    } if contrast is not None and not contrast.empty else {}
+
+    nrows, ncols = len(bins), len(metas)
+    fig_w = max(8.0, 1.15 * ncols)
+    fig_h = max(6.0, 1.05 * nrows)
+    fig, axes = plt.subplots(
+        nrows,
+        ncols,
+        figsize=(fig_w, fig_h),
+        sharex=True,
+        sharey=True,
+        squeeze=False,
+        constrained_layout=True,
+    )
+    scope_order = ["full", "orthologs", "paralogs"]
+    scope_pos = {s: i for i, s in enumerate(scope_order)}
+    for i, pos_bin in enumerate(bins):
+        for j, mc in enumerate(metas):
+            ax = axes[i][j]
+            cell = df[(df["pos_bin"] == pos_bin) & (df["meta_cluster"] == mc)]
+            winner = winner_lookup.get((int(mc), int(pos_bin)), "none")
+            stroke = border_colors.get(winner, "#B0B0B0")
+            lw = 2.8 if winner != "none" else 0.7
+            if not cell.empty:
+                data = [
+                    cell.loc[cell["scope"] == s, "similarity"].dropna().to_numpy(dtype=float)
+                    for s in scope_order
+                ]
+                ax.boxplot(
+                    data,
+                    positions=list(range(len(scope_order))),
+                    widths=0.55,
+                    showfliers=False,
+                    patch_artist=False,
+                )
+                rng = np.random.default_rng(42 + i * 100 + j)
+                for s in scope_order:
+                    vals = cell.loc[cell["scope"] == s, "similarity"].dropna().to_numpy(dtype=float)
+                    if vals.size == 0:
+                        continue
+                    if vals.size > 80:
+                        vals = rng.choice(vals, 80, replace=False)
+                    jitter = rng.uniform(-0.15, 0.15, size=vals.size)
+                    ax.scatter(
+                        np.full(vals.size, scope_pos[s]) + jitter,
+                        vals,
+                        s=6,
+                        alpha=0.25,
+                        c={"full": "#0072B2", "orthologs": "#009E73", "paralogs": "#E69F00"}[s],
+                        linewidths=0,
+                    )
+            ax.set_ylim(0, 1)
+            ax.set_xticks(list(range(len(scope_order))))
+            ax.set_xticklabels(["F", "O", "P"], fontsize=7)
+            for spine in ax.spines.values():
+                spine.set_color(stroke)
+                spine.set_linewidth(lw)
+            title = f"b{pos_bin}|m{mc}"
+            if winner == "paralogs":
+                title += " P↑"
+            elif winner == "orthologs":
+                title += " O↑"
+            ax.set_title(title, fontsize=8, color=stroke if winner != "none" else "#333333")
+            if j == 0:
+                ax.set_ylabel(f"bin {pos_bin}", fontsize=8)
+            if i == nrows - 1:
+                ax.set_xlabel(f"meta {mc}", fontsize=8)
+    fig.suptitle(
+        "Similarity by scope — bin × meta-cluster "
+        "(orange border: paralogs↑; red: orthologs↑; Wilcoxon+BH q<0.05)",
+        fontsize=10,
+    )
+    out_png.parent.mkdir(parents=True, exist_ok=True)
+    fig.savefig(out_png, dpi=dpi, bbox_inches="tight")
+    fig.savefig(out_png.with_suffix(".pdf"), bbox_inches="tight")
+    plt.close(fig)
+    return out_png
 
 
 def plot_meta_altair(
@@ -493,8 +670,10 @@ def plot_meta_altair(
     outdir: Path | str,
     *,
     n_bins: int,
+    contrast: pd.DataFrame | None = None,
+    dpi: int = 300,
 ) -> list[Path]:
-    """Altair facet ``pos_bin ~ meta_cluster`` with point+boxplot (violin-like) by scope."""
+    """Altair interactive charts + matplotlib Figure_13 with colored borders."""
     import altair as alt
 
     from src.train_viz.plotting import save_altair_chart
@@ -507,8 +686,6 @@ def plot_meta_altair(
     plot_df = bin_sim.copy()
     plot_df["meta_cluster"] = plot_df["meta_cluster"].astype(int)
     plot_df["pos_bin"] = plot_df["pos_bin"].astype(int)
-
-    # Subsample OPG points if huge for HTML size
     if len(plot_df) > 120_000:
         plot_df = plot_df.sample(120_000, random_state=42)
 
@@ -517,57 +694,100 @@ def plot_meta_altair(
         atg_df["atg_bin"] = atg_df["atg_rel_mean"] * n_bins - 0.5
         atg_df["tss_bin"] = TSS_REL_POS * n_bins - 0.5
 
-    # Facet grid: rows=pos_bin (decimated if many), cols=meta_cluster
-    # If too many bins, show every other bin in facet and a full non-faceted overview
-    bins = sorted(plot_df["pos_bin"].unique())
+    if contrast is None:
+        contrast = scope_bin_significance(bin_sim)
+    if not contrast.empty:
+        contrast = contrast.copy()
+        contrast["meta_cluster"] = contrast["meta_cluster"].astype(int)
+        contrast["pos_bin"] = contrast["pos_bin"].astype(int)
+        contrast.to_csv(outdir / "table_scope_bin_contrast.tsv", sep="\t", index=False)
+        written.append(outdir / "table_scope_bin_contrast.tsv")
+
+    border_colors = {"paralogs": "#E69F00", "orthologs": "#CC3311", "none": "#B0B0B0"}
+    bins = sorted(int(b) for b in plot_df["pos_bin"].unique())
     if len(bins) > 25:
-        # keep ~25 facet rows: stride
         stride = int(np.ceil(len(bins) / 25))
-        facet_bins = set(bins[::stride])
-        facet_df = plot_df[plot_df["pos_bin"].isin(facet_bins)]
+        facet_bins = bins[::stride]
     else:
-        facet_df = plot_df
+        facet_bins = bins
+    metas = sorted(int(x) for x in plot_df["meta_cluster"].unique())
+    winner_lookup = {
+        (int(r.meta_cluster), int(r.pos_bin)): str(r.winner)
+        for _, r in contrast.iterrows()
+    } if not contrast.empty else {}
 
-    box = (
-        alt.Chart(facet_df)
-        .mark_boxplot(extent="min-max", size=8)
-        .encode(
-            x=alt.X("scope:N", title=None),
-            y=alt.Y("similarity:Q", title="Similarity", scale=alt.Scale(domain=[0, 1])),
-            color=alt.Color("scope:N", legend=None),
+    # Altair HTML: ordered bins, colored titles for significant cells
+    row_charts: list[Any] = []
+    for pos_bin in facet_bins:
+        cols: list[Any] = []
+        for mc in metas:
+            cell = plot_df[(plot_df["pos_bin"] == pos_bin) & (plot_df["meta_cluster"] == mc)]
+            if cell.empty:
+                continue
+            winner = winner_lookup.get((mc, pos_bin), "none")
+            stroke = border_colors.get(winner, "#B0B0B0")
+            box = (
+                alt.Chart(cell)
+                .mark_boxplot(extent="min-max", size=8)
+                .encode(
+                    x=alt.X("scope:N", title=None, sort=["full", "orthologs", "paralogs"]),
+                    y=alt.Y("similarity:Q", title="sim", scale=alt.Scale(domain=[0, 1])),
+                    color=alt.Color("scope:N", legend=None),
+                )
+            )
+            pts = (
+                alt.Chart(cell)
+                .mark_circle(size=10, opacity=0.2)
+                .encode(
+                    x=alt.X("scope:N", sort=["full", "orthologs", "paralogs"]),
+                    y="similarity:Q",
+                    color=alt.Color("scope:N", legend=None),
+                    tooltip=["cluster", "scope", "similarity"],
+                )
+            )
+            title_txt = f"b{pos_bin}|m{mc}"
+            if winner == "paralogs":
+                title_txt += " P↑"
+            elif winner == "orthologs":
+                title_txt += " O↑"
+            cols.append(
+                alt.layer(box, pts).properties(
+                    width=70,
+                    height=90,
+                    title=alt.TitleParams(text=title_txt, fontSize=9, color=stroke),
+                )
+            )
+        if cols:
+            row_charts.append(alt.hconcat(*cols))
+    if row_charts:
+        facet = alt.vconcat(*row_charts).properties(
+            title=(
+                "Similarity by scope — bin×meta "
+                "(orange title=paralogs↑; red=orthologs↑; Wilcoxon+BH q<0.05)"
+            )
         )
-    )
-    pts = (
-        alt.Chart(facet_df)
-        .mark_circle(size=12, opacity=0.25)
-        .encode(
-            x=alt.X("scope:N", title=None),
-            y=alt.Y("similarity:Q"),
-            color=alt.Color("scope:N", title="Scope"),
-            tooltip=["cluster", "scope", "similarity", "n_positions"],
-        )
-    )
-    facet = (
-        alt.layer(box, pts)
-        .properties(width=70, height=90)
-        .facet(
-            row=alt.Row("pos_bin:O", title="Position bin"),
-            column=alt.Column("meta_cluster:O", title="Meta-cluster"),
-        )
-        .resolve_scale(y="shared")
-        .properties(title="Similarity by scope — facets: bin ~ meta-cluster (align≥50%)")
-    )
-    written.extend(save_altair_chart(facet, outdir / "Figure_13_facet_bin_by_metacluster_altair"))
+        written.extend(save_altair_chart(facet, outdir / "Figure_13_facet_bin_by_metacluster_altair"))
 
-    # Readable overview: one panel per meta-cluster (concat, not layered-facet)
+    # Publication PNG/PDF with actual colored borders
+    fig13 = _annotate_figure13_borders_mpl(
+        bin_sim,
+        contrast,
+        outdir / "Figure_13_facet_bin_by_metacluster_altair.png",
+        n_bins=n_bins,
+        dpi=dpi,
+    )
+    written.append(fig13)
+    written.append(fig13.with_suffix(".pdf"))
+
+    # Figure_14: per meta-cluster profiles
     panels: list[Any] = []
-    for mc in sorted(plot_df["meta_cluster"].unique()):
+    for mc in metas:
         sub = plot_df[plot_df["meta_cluster"] == mc]
         box = (
             alt.Chart(sub)
             .mark_boxplot(extent="min-max", outliers=False)
             .encode(
-                x=alt.X("pos_bin:O", title="Position bin"),
+                x=alt.X("pos_bin:O", title="Position bin", sort=sorted(sub["pos_bin"].unique())),
                 y=alt.Y("similarity:Q", title="Similarity", scale=alt.Scale(domain=[0, 1])),
                 color=alt.Color("scope:N", title="Scope"),
             )
@@ -576,7 +796,7 @@ def plot_meta_altair(
             alt.Chart(sub)
             .mark_circle(size=10, opacity=0.2)
             .encode(
-                x="pos_bin:O",
+                x=alt.X("pos_bin:O", sort=sorted(sub["pos_bin"].unique())),
                 y="similarity:Q",
                 color="scope:N",
                 tooltip=["cluster", "scope", "similarity"],
@@ -586,7 +806,9 @@ def plot_meta_altair(
         am = atg_df[atg_df["meta_cluster"] == mc] if not atg_df.empty else atg_df
         tss_df = pd.DataFrame({"x": [TSS_REL_POS * n_bins - 0.5]})
         layers_mc.append(
-            alt.Chart(tss_df).mark_rule(color="#666666", strokeDash=[4, 4], strokeWidth=1.5).encode(x="x:Q")
+            alt.Chart(tss_df)
+            .mark_rule(color="#666666", strokeDash=[4, 4], strokeWidth=1.5)
+            .encode(x="x:Q")
         )
         if not am.empty and np.isfinite(am.iloc[0]["atg_rel_mean"]):
             r = am.iloc[0]
@@ -596,30 +818,31 @@ def plot_meta_altair(
                     "x2": [float(r["atg_rel_q75"]) * n_bins - 0.5],
                 }
             )
-            atg_pt = pd.DataFrame({"x": [float(r["atg_rel_mean"]) * n_bins - 0.5]})
+            atg_pt = pd.DataFrame({"x": [float(r["atg_rel_mean"]) * n_bins - 0.5], "y": [0.0]})
             layers_mc.append(
                 alt.Chart(iqr)
                 .mark_rule(color="#D55E00", strokeWidth=6, opacity=0.3)
                 .encode(x="x:Q", x2="x2:Q")
             )
             layers_mc.append(
-                alt.Chart(atg_pt).mark_rule(color="#D55E00", strokeWidth=2).encode(x="x:Q")
+                alt.Chart(atg_pt)
+                .mark_point(color="#D55E00", size=60, shape="diamond")
+                .encode(x="x:Q", y="y:Q")
             )
         panels.append(
             alt.layer(*layers_mc).properties(width=280, height=150, title=f"meta {int(mc)}")
         )
-    panel = alt.concat(*panels, columns=4).properties(
-        title="Similarity vs bin by meta-cluster (points+box; TSS dashed; ATG orange ± IQR)"
-    )
-    written.extend(save_altair_chart(panel, outdir / "Figure_14_metacluster_bin_profiles_altair"))
+    if panels:
+        panel = alt.concat(*panels, columns=4).properties(
+            title="Similarity vs bin by meta-cluster (ATG diamond at y=0; TSS dashed)"
+        )
+        written.extend(save_altair_chart(panel, outdir / "Figure_14_metacluster_bin_profiles_altair"))
 
-    # Point cloud + mean lines (per meta-cluster concat)
     means = (
-        plot_df.groupby(["meta_cluster", "pos_bin", "scope"], as_index=False)["similarity"]
-        .mean()
+        plot_df.groupby(["meta_cluster", "pos_bin", "scope"], as_index=False)["similarity"].mean()
     )
     traj_panels: list[Any] = []
-    for mc in sorted(plot_df["meta_cluster"].unique()):
+    for mc in metas:
         sub = plot_df[plot_df["meta_cluster"] == mc]
         msub = means[means["meta_cluster"] == mc]
         pts = (
@@ -639,12 +862,33 @@ def plot_meta_altair(
         traj_panels.append(
             alt.layer(pts, line).properties(width=280, height=150, title=f"meta {int(mc)}")
         )
-    layered = alt.concat(*traj_panels, columns=4).properties(
-        title="Point + mean similarity trajectories by meta-cluster"
-    )
-    written.extend(save_altair_chart(layered, outdir / "Figure_15_metacluster_points_means_altair"))
+    if traj_panels:
+        layered = alt.concat(*traj_panels, columns=4).properties(
+            title="Point + mean similarity trajectories by meta-cluster"
+        )
+        written.extend(save_altair_chart(layered, outdir / "Figure_15_metacluster_points_means_altair"))
 
     return written
+
+
+def redraw_meta_figures_from_tables(
+    outdir: Path | str,
+    *,
+    dpi: int = 300,
+) -> list[Path]:
+    """Re-plot Figure_11–15 from existing TSVs (no MAFFT/ATG recompute)."""
+    outdir = Path(outdir)
+    bin_sim = pd.read_csv(outdir / "table_bin_similarity_meta.tsv", sep="\t")
+    atg_meta = pd.read_csv(outdir / "table_atg_by_metacluster.tsv", sep="\t")
+    n_bins = int(bin_sim["pos_bin"].max()) + 1
+    contrast = scope_bin_significance(bin_sim)
+    written: list[Path] = []
+    written.extend(plot_meta_cnsplots(bin_sim, atg_meta, outdir, n_bins=n_bins, dpi=dpi))
+    written.extend(
+        plot_meta_altair(bin_sim, atg_meta, outdir, n_bins=n_bins, contrast=contrast, dpi=dpi)
+    )
+    return written
+
 
 
 def run_meta_viz(
@@ -704,7 +948,17 @@ def run_meta_viz(
             dpi=dpi,
         )
     )
+    contrast = scope_bin_significance(tables["bin_sim"])
+    contrast.to_csv(outdir / "table_scope_bin_contrast.tsv", sep="\t", index=False)
+    written.append(outdir / "table_scope_bin_contrast.tsv")
     written.extend(
-        plot_meta_altair(tables["bin_sim"], tables["atg_meta"], outdir, n_bins=n_bins)
+        plot_meta_altair(
+            tables["bin_sim"],
+            tables["atg_meta"],
+            outdir,
+            n_bins=n_bins,
+            contrast=contrast,
+            dpi=dpi,
+        )
     )
     return written

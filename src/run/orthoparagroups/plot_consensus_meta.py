@@ -46,20 +46,30 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--limit", type=int, default=0)
     p.add_argument("--dpi", type=int, default=300)
     p.add_argument("--seed", type=int, default=42)
-    args = p.parse_args(argv)
-    written = run_meta_viz(
-        args.metrics_dir,
-        args.outdir,
-        aln_dir=args.aln_dir,
-        limit=args.limit,
-        n_bins=args.n_bins,
-        min_align_frac=args.min_align_frac,
-        max_k=args.max_k,
-        min_k=args.min_k,
-        fixed_k=(args.fixed_k if args.fixed_k > 0 else None),
-        dpi=args.dpi,
-        seed=args.seed,
+    p.add_argument(
+        "--from-tables",
+        action="store_true",
+        help="Redraw figures from existing TSVs in --outdir (skip align/cluster)",
     )
+    args = p.parse_args(argv)
+    if args.from_tables:
+        from src.homology.align_consensus_meta_viz import redraw_meta_figures_from_tables
+
+        written = redraw_meta_figures_from_tables(args.outdir, dpi=args.dpi)
+    else:
+        written = run_meta_viz(
+            args.metrics_dir,
+            args.outdir,
+            aln_dir=args.aln_dir,
+            limit=args.limit,
+            n_bins=args.n_bins,
+            min_align_frac=args.min_align_frac,
+            max_k=args.max_k,
+            min_k=args.min_k,
+            fixed_k=(args.fixed_k if args.fixed_k > 0 else None),
+            dpi=args.dpi,
+            seed=args.seed,
+        )
     print(f"[meta_viz] wrote {len(written)} paths under {args.outdir}", flush=True)
     for path in written[:40]:
         print(f"  {path}", flush=True)
