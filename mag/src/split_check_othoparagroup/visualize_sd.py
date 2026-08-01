@@ -308,6 +308,113 @@ def _title_wrap(chart, title: str):
     )
 
 
+def _kde_violin_frame(sub: pd.DataFrame, order_axis: list[str], x_max: float) -> pd.DataFrame:
+    """Precompute per-run KDE on a shared grid for band-aligned horizontal violins."""
+    from scipy.stats import gaussian_kde
+
+    grid = np.linspace(0.0, x_max, 128)
+    idx = {a: i for i, a in enumerate(order_axis)}
+    rows: list[dict] = []
+    for ax in order_axis:
+        part = sub.loc[sub["run_axis"] == ax]
+        vals = part["sd_random"].to_numpy(dtype=float)
+        strat = str(part["strategy"].iloc[0])
+        if vals.size < 5:
+            dens = np.zeros_like(grid)
+        else:
+            # clip tiny jitter for singular KDE
+            if np.unique(vals).size < 2:
+                dens = np.exp(-0.5 * ((grid - float(vals.mean())) / max(x_max * 0.02, 1e-6)) ** 2)
+            else:
+                dens = gaussian_kde(vals)(grid)
+            m = float(dens.max()) if dens.size else 0.0
+            dens = dens / m if m > 0 else dens
+        y0 = float(idx[ax])
+        for x, d in zip(grid, dens, strict=True):
+            rows.append(
+                {
+                    "run_axis": ax,
+                    "strategy": strat,
+                    "sd_random": float(x),
+                    "density": float(d),
+                    "y_lo": y0 - 0.42 * float(d),
+                    "y_hi": y0 + 0.42 * float(d),
+                }
+            )
+    return pd.DataFrame(rows)
+
+
+def _annotation_quant(meta: pd.DataFrame, order_axis: list[str], height: int):
+    """Left table on the same quantitative y as KDE violins (0=top). No axes (shared chrome outside)."""
+    import altair as alt
+
+    idx = {a: float(i) for i, a in enumerate(order_axis)}
+    pieces = []
+    for field, col in (
+        ("strategy", "strategy"),
+        ("strategy_params", "strategy_params"),
+        ("run", "run_axis"),
+    ):
+        pieces.append(
+            meta.assign(
+                field=field,
+                label=meta[col].astype(str),
+                y=meta["run_axis"].map(idx),
+            )
+        )
+    long = pd.concat(pieces, ignore_index=True)
+    n = len(order_axis)
+    return (
+        alt.Chart(long)
+        .mark_text(align="left", dx=6, fontSize=11, baseline="middle")
+        .encode(
+            y=alt.Y(
+                "y:Q",
+                title=None,
+                axis=None,
+                scale=alt.Scale(domain=[-0.5, n - 0.5], reverse=True),
+            ),
+            x=alt.X(
+                "field:N",
+                sort=["strategy", "strategy_params", "run"],
+                title=None,
+                axis=None,
+                scale=alt.Scale(paddingInner=0.15, paddingOuter=0.05),
+            ),
+            text="label:N",
+            color=_color(),
+            tooltip=["run_axis", "strategy", "label"],
+        )
+        .properties(width=360, height=height)
+    )
+
+
+def _violin_col_header(width: int = 360):
+    import altair as alt
+
+    return (
+        alt.Chart(
+            pd.DataFrame(
+                {
+                    "field": ["strategy", "strategy_params", "run"],
+                    "label": ["strategy", "strategy_params", "run"],
+                }
+            )
+        )
+        .mark_text(align="left", dx=6, fontSize=11, fontWeight="bold", baseline="middle")
+        .encode(
+            x=alt.X(
+                "field:N",
+                sort=["strategy", "strategy_params", "run"],
+                axis=None,
+                scale=alt.Scale(paddingInner=0.15, paddingOuter=0.05),
+            ),
+            text="label:N",
+        )
+        .properties(width=width, height=HEADER_PX)
+    )
+
+
 def plot_violin(df: pd.DataFrame, model: str, table: str, outdir: Path) -> list[Path]:
     import altair as alt
     from src.train_viz.plotting import save_altair_chart
@@ -324,53 +431,71 @@ def plot_violin(df: pd.DataFrame, model: str, table: str, outdir: Path) -> list[
     height = ROW_PX * n
     x_max = float(sub["sd_random"].quantile(0.995))
     color = _color()
+    y_scale = alt.Scale(domain=[-0.5, n - 0.5], reverse=True)
 
-    # Violin: vconcat panels of fixed ROW_PX + matching left table (no band-scale mismatch)
-    panels = []
-    for axis_lab in order_axis:
-        part = sub[sub["run_axis"] == axis_lab]
-        panels.append(
-            alt.Chart(part)
-            .transform_density(
-                "sd_random",
-                as_=["sd_random", "density"],
-                groupby=["strategy"],
-                extent=[0, x_max],
-            )
-            .mark_area(orient="vertical", opacity=0.85)
-            .encode(
-                x=alt.X(
-                    "sd_random:Q",
-                    title=None,
-                    scale=alt.Scale(domain=[0, x_max]),
-                    axis=None,
-                ),
-                y=alt.Y("density:Q", stack="center", title=None, axis=None),
-                color=color,
-            )
-            .properties(width=400, height=ROW_PX)
+    dens_df = _kde_violin_frame(sub, order_axis, x_max)
+    # Row-wise vconcat(hconcat(...)) so axis chrome cannot vertically desync columns
+    violin_body = (
+        alt.Chart(dens_df)
+        .mark_area(opacity=0.85, interpolate="monotone")
+        .encode(
+            x=alt.X("sd_random:Q", title=None, scale=alt.Scale(domain=[0, x_max]), axis=None),
+            y=alt.Y("y_lo:Q", title=None, axis=None, scale=y_scale),
+            y2="y_hi:Q",
+            color=color,
+            detail="run_axis:N",
+            tooltip=["run_axis", "strategy", "sd_random"],
         )
-    spacer = (
+        .properties(width=400, height=height)
+    )
+    # Draw x labels inside the reserved AXIS_PX band (axis=None) to avoid external padding
+    xaxis = (
+        alt.Chart(pd.DataFrame({"sd_random": np.linspace(0.0, x_max, 6), "y": 0.0}))
+        .mark_text(fontSize=10, dy=0, baseline="middle")
+        .encode(
+            x=alt.X("sd_random:Q", title=None, scale=alt.Scale(domain=[0, x_max]), axis=None),
+            y=alt.Y("y:Q", title=None, axis=None, scale=alt.Scale(domain=[-1, 1])),
+            text=alt.Text("sd_random:Q", format=".0f"),
+        )
+        .properties(width=400, height=AXIS_PX)
+    )
+    x_title = (
+        alt.Chart(pd.DataFrame({"t": ["sd_random"], "x": [0.5], "y": [0.0]}))
+        .mark_text(fontSize=11, baseline="middle")
+        .encode(
+            x=alt.X("x:Q", scale=alt.Scale(domain=[0, 1]), axis=None),
+            y=alt.Y("y:Q", scale=alt.Scale(domain=[-1, 1]), axis=None),
+            text="t:N",
+        )
+        .properties(width=400, height=18)
+    )
+    hdr = _violin_col_header(360)
+    hdr_spacer = (
         alt.Chart(pd.DataFrame({"x": [0.0]}))
         .mark_point(opacity=0)
         .encode(x="x:Q")
         .properties(width=400, height=HEADER_PX)
     )
-    xaxis = (
-        alt.Chart(pd.DataFrame({"sd_random": [0.0, x_max]}))
-        .mark_tick(size=0, opacity=0)
-        .encode(
-            x=alt.X(
-                "sd_random:Q",
-                title="sd_random",
-                scale=alt.Scale(domain=[0, x_max]),
-                axis=alt.Axis(title="sd_random", grid=True),
-            )
-        )
-        .properties(width=400, height=AXIS_PX)
+    left_pad = (
+        alt.Chart(pd.DataFrame({"t": [""]}))
+        .mark_text(opacity=0)
+        .encode(text="t:N")
+        .properties(width=360, height=AXIS_PX)
     )
-    violin = alt.vconcat(spacer, *panels, xaxis, spacing=0)
-    ann = _annotation_vconcat(meta, order_axis)
+    left_pad2 = (
+        alt.Chart(pd.DataFrame({"t": [""]}))
+        .mark_text(opacity=0)
+        .encode(text="t:N")
+        .properties(width=360, height=18)
+    )
+    ann_body = _annotation_quant(meta, order_axis, height)
+    violin_block = alt.vconcat(
+        alt.hconcat(hdr, hdr_spacer, spacing=8),
+        alt.hconcat(ann_body, violin_body, spacing=8),
+        alt.hconcat(left_pad, xaxis, spacing=8),
+        alt.hconcat(left_pad2, x_title, spacing=8),
+        spacing=0,
+    )
 
     y = alt.Y(
         "run_axis:N",
@@ -403,7 +528,7 @@ def plot_violin(df: pd.DataFrame, model: str, table: str, outdir: Path) -> list[
     ann_band = _annotation_band(meta, order_axis, height)
 
     fig_v = _title_wrap(
-        alt.hconcat(ann, violin, spacing=8),
+        violin_block,
         f"{model} · {table} · sd_random violin (run ∼ sd)",
     )
     fig_b = _title_wrap(
@@ -674,7 +799,7 @@ def run(splits_root: Path, out_root: Path) -> dict:
         "out_root": str(out_root),
         "n_rows": int(len(df)),
         "excluded_legacy": [d.name for d in splits_root.iterdir() if d.is_dir() and _is_legacy_dir(d.name)],
-        "layout": "violin: vconcat-aligned left table; box/heatmap: band y; KS: 1-D global heatmaps",
+        "layout": "violin: shared quantitative y KDE; box/heatmap: band y; KS: 1-D global heatmaps",
         "written": written,
     }
     (out_root / "viz_summary.json").write_text(json.dumps(summary, indent=2) + "\n")
