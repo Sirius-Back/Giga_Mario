@@ -78,8 +78,36 @@ def _epoch_block_spearman(block: Any) -> float | None:
     return None
 
 
+def _finite_metric_block(block: Any) -> dict[str, float]:
+    """Keep finite numeric metrics from an epoch split block."""
+    out: dict[str, float] = {}
+    if not isinstance(block, dict):
+        return out
+    for key, val in block.items():
+        if str(key).lower() in {"n", "count"}:
+            fv = _finite(val)
+            if fv is not None:
+                out["n"] = fv
+            continue
+        fv = _finite(val)
+        if fv is not None:
+            out[str(key)] = fv
+    return out
+
+
+def _zsv_metric_block(train_dir: Path) -> dict[str, float]:
+    zsv_path = train_dir / "logs" / "zero_shot_metrics.json"
+    if not zsv_path.is_file():
+        zsv_path = train_dir / "zero_shot_metrics.json"
+    zsv_doc = _load_json(zsv_path)
+    if not isinstance(zsv_doc, dict) or zsv_doc.get("skipped"):
+        return {}
+    metrics = zsv_doc.get("metrics") if isinstance(zsv_doc.get("metrics"), dict) else zsv_doc
+    return _finite_metric_block(metrics)
+
+
 def caduceus_best_from_jsonl(train_dir: Path) -> dict[str, Any]:
-    """Pull train/val/test Spearman from the best-checkpoint epoch in jsonl."""
+    """Pull train/val/test metrics from the best-checkpoint epoch in jsonl."""
     meta = best_meta(train_dir) or {}
     best_ep = meta.get("epoch")
     if best_ep is None:
@@ -107,23 +135,13 @@ def caduceus_best_from_jsonl(train_dir: Path) -> dict[str, Any]:
     if hit is None:
         raise ValueError(f"no epoch={best_ep} metrics in {jsonl}")
 
-    splits = {
-        "train": _epoch_block_spearman(hit.get("train")),
-        "val": _epoch_block_spearman(hit.get("validation") or hit.get("val")),
-        "test": _epoch_block_spearman(hit.get("test")),
+    by_split = {
+        "train": _finite_metric_block(hit.get("train")),
+        "val": _finite_metric_block(hit.get("validation") or hit.get("val")),
+        "test": _finite_metric_block(hit.get("test")),
+        "zsv": _zsv_metric_block(train_dir),
     }
-    zsv = None
-    zsv_path = train_dir / "logs" / "zero_shot_metrics.json"
-    if not zsv_path.is_file():
-        zsv_path = train_dir / "zero_shot_metrics.json"
-    zsv_doc = _load_json(zsv_path)
-    if isinstance(zsv_doc, dict):
-        metrics = zsv_doc.get("metrics") if isinstance(zsv_doc.get("metrics"), dict) else zsv_doc
-        for key, val in metrics.items():
-            if "spearman" in str(key).lower():
-                zsv = _finite(val)
-                break
-    splits["zsv"] = zsv
+    splits = {k: v.get("spearman") for k, v in by_split.items()}
 
     return {
         "model": "caduceus",
@@ -132,6 +150,7 @@ def caduceus_best_from_jsonl(train_dir: Path) -> dict[str, Any]:
         "best_meta": meta,
         "checkpoint": str(train_dir / "best_model"),
         "spearman": splits,
+        "metrics_by_split": by_split,
         "epoch_record": {
             k: hit.get(k) for k in ("train", "validation", "test") if k in hit
         },
@@ -274,17 +293,15 @@ def legnet_eval_best(
         metrics[name] = m
         spearman[name] = _finite(m.get("spearman"))
 
-    # Keep existing ZSV spearman if present (mice TPM; may be task-mismatched for adv)
-    zsv = None
-    zsv_path = train_dir / "logs" / "zero_shot_metrics.json"
-    zsv_doc = _load_json(zsv_path)
-    if isinstance(zsv_doc, dict):
-        block = zsv_doc.get("metrics") if isinstance(zsv_doc.get("metrics"), dict) else zsv_doc
-        for key, val in block.items():
-            if "spearman" in str(key).lower():
-                zsv = _finite(val)
-                break
-    spearman["zsv"] = zsv
+    # Keep existing ZSV metrics if present (mice TPM; may be task-mismatched for adv)
+    zsv_block = _zsv_metric_block(train_dir)
+    spearman["zsv"] = zsv_block.get("spearman")
+    metrics_by_split = {
+        "train": {k: v for k, v in (metrics.get("train") or {}).items() if _finite(v) is not None},
+        "val": {k: v for k, v in (metrics.get("val") or {}).items() if _finite(v) is not None},
+        "test": {k: v for k, v in (metrics.get("test") or {}).items() if _finite(v) is not None},
+        "zsv": zsv_block,
+    }
 
     return {
         "model": "legnet",
@@ -298,6 +315,7 @@ def legnet_eval_best(
         "batch_size": bs,
         "spearman": spearman,
         "metrics": metrics,
+        "metrics_by_split": metrics_by_split,
         "generated_at": datetime.now(timezone.utc).isoformat(),
     }
 
