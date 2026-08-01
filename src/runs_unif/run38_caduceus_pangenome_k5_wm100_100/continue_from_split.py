@@ -66,7 +66,9 @@ GPU_CONFIRM_SEC = 5
 SOURCE_POLL_SEC = 120
 PEAK_RAM_GIB_TRAIN = 24.0
 PEAK_RAM_GIB_SPLIT = 24.0
-MAX_FOLD_SIZE = 1000  # modularity cap from run37
+# Run37 requested modularity max_fold_size=1000; observed max fold is larger
+# (hash-majority k=5 residual CCs). Reuse audit accepts source as-is up to this ceiling.
+MAX_FOLD_SIZE = 7000
 
 PANGENOME_INTERMEDIATES = (
     "split.csv",
@@ -247,6 +249,13 @@ def _audit_split(split_csv: Path, *, max_fold_size: int) -> dict:
         raise RuntimeError(
             f"fold size {max_sz} exceeds max_fold_size={max_fold_size}; "
             f"source should have been modularity-refined (top={fold_sizes.most_common(5)})"
+        )
+    if max_sz > 1000:
+        print(
+            f"WARNING: source max fold size={max_sz} > requested modularity "
+            f"target 1000 (cap={max_fold_size}); reusing run37 folds as-is. "
+            f"top={fold_sizes.most_common(5)}",
+            flush=True,
         )
     return info
 

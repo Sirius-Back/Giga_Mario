@@ -97,10 +97,18 @@ def wait_for_one_gpu(
     thresh: int = MEM_FREE_MIB,
     poll_sec: int = POLL_SEC,
     confirm_sec: int = GPU_CONFIRM_SEC,
+    peak_ram_gib: float = PEAK_RAM_GIB_TRAIN,
 ) -> int:
+    """Pick a GPU that is free in nvidia-smi **and** clear in queue.md politics.
+
+    Re-selects on every poll so a race (device free → another job claims it in
+    ``queue.md``) does not pin this waiter forever to a single busy index.
+    """
+    from src.pipeline.job_queue import CLASS_GPU_TRAIN, can_launch_parallel
+
     print(
-        f"Waiting for any GPU in {prefer} free (memory.used < {thresh} MiB); "
-        f"poll every {poll_sec}s; re-confirm {confirm_sec}s …",
+        f"Waiting for any GPU in {prefer} free (memory.used < {thresh} MiB) "
+        f"+ queue-clear; poll every {poll_sec}s; re-confirm {confirm_sec}s …",
         flush=True,
     )
     while True:
@@ -110,17 +118,41 @@ def wait_for_one_gpu(
         if not free:
             time.sleep(poll_sec)
             continue
-        gpu = free[0]
-        print(f"GPU {gpu} candidate — confirming idle for {confirm_sec}s …", flush=True)
-        time.sleep(confirm_sec)
-        used2 = _gpu_used_mib(gpu)
-        if used2 is not None and used2 < thresh:
+        for gpu in free:
+            ok, reason = can_launch_parallel(
+                peak_ram_gib=peak_ram_gib,
+                gpus=(gpu,),
+                job_class=CLASS_GPU_TRAIN,
+            )
+            if not ok:
+                print(f"GPU {gpu} smi-free but queue blocks: {reason}", flush=True)
+                continue
+            print(
+                f"GPU {gpu} candidate — confirming idle for {confirm_sec}s …",
+                flush=True,
+            )
+            time.sleep(confirm_sec)
+            used2 = _gpu_used_mib(gpu)
+            if used2 is None or used2 >= thresh:
+                print(
+                    f"GPU {gpu} no longer free (used={used2} MiB) — keep waiting",
+                    flush=True,
+                )
+                continue
+            ok2, reason2 = can_launch_parallel(
+                peak_ram_gib=peak_ram_gib,
+                gpus=(gpu,),
+                job_class=CLASS_GPU_TRAIN,
+            )
+            if not ok2:
+                print(
+                    f"GPU {gpu} lost queue clearance after confirm: {reason2}",
+                    flush=True,
+                )
+                continue
             print(f"GPU {gpu} free (used={used2} MiB) — starting train", flush=True)
             return gpu
-        print(
-            f"GPU {gpu} no longer free (used={used2} MiB) — keep waiting",
-            flush=True,
-        )
+        time.sleep(poll_sec)
 
 
 def wait_for_source_split(
@@ -416,11 +448,14 @@ def run_train_stages(
     os.environ["CUDA_VISIBLE_DEVICES"] = str(gpu)
     os.environ.setdefault("MASTER_ADDR", "127.0.0.1")
 
+    # GPU already cleared by wait_for_one_gpu (smi + queue). Short re-check only.
     wait_until_launchable(
         peak_ram_gib=PEAK_RAM_GIB_TRAIN,
         gpus=(gpu,),
         job_class=CLASS_GPU_TRAIN,
         label=f"{RUN_NAME}_train",
+        timeout_sec=120.0,
+        poll_sec=10.0,
     )
     append_queue_entry(
         f"{RUN_NAME}_train",
