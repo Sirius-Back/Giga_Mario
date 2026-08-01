@@ -13,6 +13,8 @@ from src.homology.align_consensus_meta_viz import (
     choose_k_and_cluster,
     filter_well_aligned,
     find_atg_rel_positions,
+    ortho_minus_para_minmax_profiles,
+    ortho_minus_para_profiles,
     per_cluster_bin_similarity,
     profile_matrix,
     scope_bin_significance,
@@ -125,3 +127,104 @@ def test_scope_bin_significance_has_winner_column() -> None:
     w1 = out.loc[out["pos_bin"] == 1, "winner"].iloc[0]
     assert w0 == "paralogs"
     assert w1 == "orthologs"
+
+
+def test_ortho_minus_para_profiles() -> None:
+    rows = []
+    for ci in range(6):
+        for b in (0, 1):
+            # meta0: ortho > para by ~0.2; meta1: para > ortho by ~0.1
+            mc = 0 if ci < 3 else 1
+            o = 0.7 if mc == 0 else 0.4
+            p = 0.5 if mc == 0 else 0.5
+            rows.extend(
+                [
+                    {
+                        "cluster": f"c{ci}",
+                        "pos_bin": b,
+                        "scope": "orthologs",
+                        "similarity": o + 0.01 * ci,
+                        "meta_cluster": mc,
+                    },
+                    {
+                        "cluster": f"c{ci}",
+                        "pos_bin": b,
+                        "scope": "paralogs",
+                        "similarity": p + 0.01 * ci,
+                        "meta_cluster": mc,
+                    },
+                    {
+                        "cluster": f"c{ci}",
+                        "pos_bin": b,
+                        "scope": "full",
+                        "similarity": 0.55,
+                        "meta_cluster": mc,
+                    },
+                ]
+            )
+    prof = ortho_minus_para_profiles(pd.DataFrame(rows))
+    assert set(prof.columns) >= {
+        "meta_cluster",
+        "pos_bin",
+        "delta_ortho_minus_para",
+        "n_opg",
+    }
+    d0 = float(prof.loc[prof["meta_cluster"] == 0, "delta_ortho_minus_para"].mean())
+    d1 = float(prof.loc[prof["meta_cluster"] == 1, "delta_ortho_minus_para"].mean())
+    assert d0 > 0.15
+    assert d1 < -0.05
+
+
+def test_ortho_minus_para_minmax_profiles() -> None:
+    rows = []
+    # One OPG: ortho rises 0.1→0.9 across bins; para flat 0.5 → after minmax ortho high at end
+    for b in range(5):
+        rows.extend(
+            [
+                {
+                    "cluster": "c0",
+                    "pos_bin": b,
+                    "scope": "orthologs",
+                    "similarity": 0.1 + 0.2 * b,
+                    "meta_cluster": 0,
+                },
+                {
+                    "cluster": "c0",
+                    "pos_bin": b,
+                    "scope": "paralogs",
+                    "similarity": 0.5,
+                    "meta_cluster": 0,
+                },
+            ]
+        )
+    # Second OPG: para rises, ortho flat
+    for b in range(5):
+        rows.extend(
+            [
+                {
+                    "cluster": "c1",
+                    "pos_bin": b,
+                    "scope": "orthologs",
+                    "similarity": 0.5,
+                    "meta_cluster": 1,
+                },
+                {
+                    "cluster": "c1",
+                    "pos_bin": b,
+                    "scope": "paralogs",
+                    "similarity": 0.1 + 0.2 * b,
+                    "meta_cluster": 1,
+                },
+            ]
+        )
+    prof = ortho_minus_para_minmax_profiles(pd.DataFrame(rows))
+    assert "delta_minmax_ortho_minus_para" in prof.columns
+    # meta0 last bin: ortho≈1, para≈0.5 → positive; meta1 last: ortho≈0.5, para≈1 → negative
+    d0_last = float(
+        prof.loc[(prof.meta_cluster == 0) & (prof.pos_bin == 4), "delta_minmax_ortho_minus_para"].iloc[0]
+    )
+    d1_last = float(
+        prof.loc[(prof.meta_cluster == 1) & (prof.pos_bin == 4), "delta_minmax_ortho_minus_para"].iloc[0]
+    )
+    assert d0_last > 0.4
+    assert d1_last < -0.4

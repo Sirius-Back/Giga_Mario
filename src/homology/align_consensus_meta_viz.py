@@ -380,6 +380,116 @@ def build_meta_tables(
     }
 
 
+def ortho_minus_para_profiles(bin_sim: pd.DataFrame) -> pd.DataFrame:
+    """Mean (orthologs − paralogs) similarity per meta_cluster × pos_bin.
+
+    For each OPG×bin with both scopes, take the paired difference, then average
+    within the meta-cluster (same pairing logic as ``scope_bin_significance``).
+    """
+    wide = bin_sim.pivot_table(
+        index=["cluster", "meta_cluster", "pos_bin"],
+        columns="scope",
+        values="similarity",
+        aggfunc="mean",
+    )
+    empty_cols = [
+        "meta_cluster",
+        "pos_bin",
+        "delta_ortho_minus_para",
+        "n_opg",
+        "delta_sd",
+    ]
+    if "orthologs" not in wide.columns or "paralogs" not in wide.columns:
+        return pd.DataFrame(columns=empty_cols)
+    paired = wide[["orthologs", "paralogs"]].dropna()
+    if paired.empty:
+        return pd.DataFrame(columns=empty_cols)
+    delta = (paired["orthologs"] - paired["paralogs"]).rename("delta_ortho_minus_para")
+    long = delta.reset_index()
+    return (
+        long.groupby(["meta_cluster", "pos_bin"], as_index=False)
+        .agg(
+            delta_ortho_minus_para=("delta_ortho_minus_para", "mean"),
+            n_opg=("delta_ortho_minus_para", "size"),
+            delta_sd=("delta_ortho_minus_para", "std"),
+        )
+        .sort_values(["meta_cluster", "pos_bin"])
+        .reset_index(drop=True)
+    )
+
+
+def _minmax_1d(values: np.ndarray) -> np.ndarray:
+    """Min–max scale to [0, 1]; flat profiles map to 0.5."""
+    arr = np.asarray(values, dtype=float)
+    out = np.full(arr.shape, np.nan, dtype=float)
+    mask = np.isfinite(arr)
+    if mask.sum() == 0:
+        return out
+    lo = float(np.min(arr[mask]))
+    hi = float(np.max(arr[mask]))
+    if hi <= lo:
+        out[mask] = 0.5
+        return out
+    out[mask] = (arr[mask] - lo) / (hi - lo)
+    return out
+
+
+def ortho_minus_para_minmax_profiles(bin_sim: pd.DataFrame) -> pd.DataFrame:
+    """Mean paired (minmax(orthologs) − minmax(paralogs)) per meta × bin.
+
+    For each OPG, min–max scale the ortholog similarity profile across bins and
+    (separately) the paralog profile, then take the per-bin difference on bins
+    where both scopes are present; average within meta-cluster.
+    """
+    empty_cols = [
+        "meta_cluster",
+        "pos_bin",
+        "delta_minmax_ortho_minus_para",
+        "n_opg",
+        "delta_sd",
+    ]
+    wide = bin_sim.pivot_table(
+        index=["cluster", "meta_cluster", "pos_bin"],
+        columns="scope",
+        values="similarity",
+        aggfunc="mean",
+    )
+    if "orthologs" not in wide.columns or "paralogs" not in wide.columns:
+        return pd.DataFrame(columns=empty_cols)
+    flat = wide.reset_index()
+    rows: list[dict[str, Any]] = []
+    for (cluster, mc), g in flat.groupby(["cluster", "meta_cluster"], sort=False):
+        g = g.sort_values("pos_bin")
+        o_scaled = _minmax_1d(g["orthologs"].to_numpy(dtype=float))
+        p_scaled = _minmax_1d(g["paralogs"].to_numpy(dtype=float))
+        both = np.isfinite(o_scaled) & np.isfinite(p_scaled)
+        if not np.any(both):
+            continue
+        bins = g["pos_bin"].to_numpy(dtype=int)
+        for pos_bin, d in zip(bins[both], (o_scaled - p_scaled)[both], strict=True):
+            rows.append(
+                {
+                    "cluster": cluster,
+                    "meta_cluster": int(mc),
+                    "pos_bin": int(pos_bin),
+                    "delta_minmax_ortho_minus_para": float(d),
+                }
+            )
+    if not rows:
+        return pd.DataFrame(columns=empty_cols)
+    long = pd.DataFrame(rows)
+    return (
+        long.groupby(["meta_cluster", "pos_bin"], as_index=False)
+        .agg(
+            delta_minmax_ortho_minus_para=("delta_minmax_ortho_minus_para", "mean"),
+            n_opg=("delta_minmax_ortho_minus_para", "size"),
+            delta_sd=("delta_minmax_ortho_minus_para", "std"),
+        )
+        .sort_values(["meta_cluster", "pos_bin"])
+        .reset_index(drop=True)
+    )
+
+
 def scope_bin_significance(
     bin_sim: pd.DataFrame,
     *,
@@ -485,6 +595,18 @@ def plot_meta_cnsplots(
                 ax.axvline(x, color="#D55E00", alpha=0.25, lw=0.6)
         cns.setup_ax(ax)
         written.extend(save_cns_figure(outdir / f"Figure_10_meta_profile_{scope}", dpi))
+
+    # Delta profile tables (figures drawn in Altair — see plot_meta_altair)
+    delta_prof = ortho_minus_para_profiles(bin_sim)
+    if not delta_prof.empty:
+        delta_path = outdir / "table_meta_profile_ortho_minus_para.tsv"
+        delta_prof.to_csv(delta_path, sep="\t", index=False)
+        written.append(delta_path)
+    delta_mm = ortho_minus_para_minmax_profiles(bin_sim)
+    if not delta_mm.empty:
+        mm_path = outdir / "table_meta_profile_ortho_minus_para_minmax.tsv"
+        delta_mm.to_csv(mm_path, sep="\t", index=False)
+        written.append(mm_path)
 
     # Violin by bin — sns treats x as strings; without order= sorts lexically ("10"<"2")
     metas = sorted(int(x) for x in bin_sim["meta_cluster"].dropna().unique())
@@ -661,6 +783,82 @@ def _annotate_figure13_borders_mpl(
     fig.savefig(out_png.with_suffix(".pdf"), bbox_inches="tight")
     plt.close(fig)
     return out_png
+
+
+def _altair_meta_delta_profile(
+    prof: pd.DataFrame,
+    *,
+    y_col: str,
+    title: str,
+    y_title: str,
+    n_bins: int,
+    atg_meta: pd.DataFrame,
+    stem: Path,
+) -> list[Path]:
+    """Line chart of meta-cluster delta profiles with legend outside the plot."""
+    import altair as alt
+
+    from src.train_viz.plotting import save_altair_chart
+
+    if prof.empty or y_col not in prof.columns:
+        return []
+    df = prof.copy()
+    df["meta_cluster"] = df["meta_cluster"].astype(int).astype(str)
+    df["pos_bin"] = df["pos_bin"].astype(int)
+    meta_order = sorted(df["meta_cluster"].unique(), key=int)
+
+    lines = (
+        alt.Chart(df)
+        .mark_line(strokeWidth=1.8)
+        .encode(
+            x=alt.X("pos_bin:Q", title="Relative-position bin"),
+            y=alt.Y(f"{y_col}:Q", title=y_title),
+            color=alt.Color(
+                "meta_cluster:N",
+                title="Meta-cluster",
+                sort=meta_order,
+                legend=alt.Legend(
+                    orient="right",
+                    titleOrient="top",
+                    symbolType="stroke",
+                    symbolStrokeWidth=3,
+                    columns=1,
+                ),
+            ),
+            tooltip=["meta_cluster", "pos_bin", y_col, "n_opg"],
+        )
+    )
+    zero = (
+        alt.Chart(pd.DataFrame({"y": [0.0]}))
+        .mark_rule(color="#444444", strokeWidth=1)
+        .encode(y="y:Q")
+    )
+    tss = (
+        alt.Chart(pd.DataFrame({"x": [TSS_REL_POS * n_bins - 0.5]}))
+        .mark_rule(color="#666666", strokeDash=[5, 4], strokeWidth=1.2)
+        .encode(x="x:Q")
+    )
+    layers: list[Any] = [zero, tss, lines]
+    if not atg_meta.empty:
+        atg_x = []
+        for _, r in atg_meta.iterrows():
+            x = float(r["atg_rel_mean"]) * n_bins - 0.5
+            if np.isfinite(x):
+                atg_x.append(x)
+        if atg_x:
+            layers.insert(
+                2,
+                alt.Chart(pd.DataFrame({"x": atg_x}))
+                .mark_rule(color="#D55E00", opacity=0.25, strokeWidth=1)
+                .encode(x="x:Q"),
+            )
+    chart = (
+        alt.layer(*layers)
+        .properties(width=560, height=340, title=title)
+        .configure_legend(labelLimit=120, padding=8)
+        .configure_view(strokeWidth=0)
+    )
+    return save_altair_chart(chart, stem)
 
 
 def plot_meta_altair(
@@ -866,6 +1064,43 @@ def plot_meta_altair(
             title="Point + mean similarity trajectories by meta-cluster"
         )
         written.extend(save_altair_chart(layered, outdir / "Figure_15_metacluster_points_means_altair"))
+
+    # Figure_16 / 17: orthologs − paralogs (raw and per-OPG minmax-scaled)
+    delta_prof = ortho_minus_para_profiles(bin_sim)
+    if not delta_prof.empty:
+        delta_path = outdir / "table_meta_profile_ortho_minus_para.tsv"
+        delta_prof.to_csv(delta_path, sep="\t", index=False)
+        written.append(delta_path)
+        written.extend(
+            _altair_meta_delta_profile(
+                delta_prof,
+                y_col="delta_ortho_minus_para",
+                title="Meta-cluster similarity profiles — orthologs − paralogs",
+                y_title="Mean (orthologs − paralogs) similarity",
+                n_bins=n_bins,
+                atg_meta=atg_meta,
+                stem=outdir / "Figure_16_meta_profile_orthologs_minus_paralogs",
+            )
+        )
+    delta_mm = ortho_minus_para_minmax_profiles(bin_sim)
+    if not delta_mm.empty:
+        mm_path = outdir / "table_meta_profile_ortho_minus_para_minmax.tsv"
+        delta_mm.to_csv(mm_path, sep="\t", index=False)
+        written.append(mm_path)
+        written.extend(
+            _altair_meta_delta_profile(
+                delta_mm,
+                y_col="delta_minmax_ortho_minus_para",
+                title=(
+                    "Meta-cluster similarity profiles — "
+                    "minmax(orthologs) − minmax(paralogs)"
+                ),
+                y_title="Mean paired (minmax ortho − minmax para)",
+                n_bins=n_bins,
+                atg_meta=atg_meta,
+                stem=outdir / "Figure_17_meta_profile_ortho_minus_para_minmax",
+            )
+        )
 
     return written
 
