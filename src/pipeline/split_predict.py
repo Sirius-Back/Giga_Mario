@@ -42,6 +42,7 @@ SUPPORTED_SPLIT_TYPES = (
     "blastp",
     "mmseqs",
     "paralogs_only",
+    "loco",
 )
 
 
@@ -556,6 +557,36 @@ def _run_paralogs_only_split_predict(
     return out
 
 
+def _run_loco_split_predict(
+    *,
+    outdir: Path,
+    seed: int,
+    id_csv: Path | None,
+    fold_csv: Path | None,
+    ratios: tuple[float, float, float] | None,
+    max_ids: int | None,
+    plot: bool,
+) -> Path:
+    """Chromosome-grain LOCO split (metadata-only from ID.csv)."""
+    from src.splits.loco import run_loco_split_assign
+
+    if id_csv is None:
+        raise ValueError("type=loco requires --id-csv")
+    summary = run_loco_split_assign(
+        outdir=outdir,
+        id_csv=Path(id_csv),
+        fold_csv=Path(fold_csv) if fold_csv else None,
+        seed=seed,
+        ratios=ratios,
+        max_ids=max_ids,
+        plot=plot,
+    )
+    out = Path(summary["split_csv"])
+    if not out.is_file():
+        raise FileNotFoundError(f"loco split did not write split.csv: {out}")
+    return out
+
+
 def run_split_predict(
     *,
     outdir: Path,
@@ -619,15 +650,18 @@ def run_split_predict(
     ``type=mmseqs`` — MMseqs2 easy-cluster folds (MARKED; default ratios 60:20:20).
     ``type=paralogs_only`` — orthogroup 1-rep train; remainder 50/50 test/val
       (Compara homology graph; unmapped IDs → test/val only).
+    ``type=loco`` — chromosome-grain split from ID.csv ``(genome, chr)``;
+      fold→train/val/test stratified by normalized chromosome number.
 
     When ``fold.csv`` is present:
       - folds labeled zsv / zeroshotvalidation → train_test=zsv (excluded from
-        random / SBS / hashfrag / pangenome / blastp / mmseqs / paralogs_only assignment; materialize moves them to
+        random / SBS / hashfrag / pangenome / blastp / mmseqs / paralogs_only /
+        loco assignment; materialize moves them to
         zero-shot-validation/)
       - other IDs get train/test/val; fold column keeps fold.csv value (random),
         SBS cluster id (gc/kmer), homologous-group id (hashfrag), contingency
-        component id (pangenome), BLASTP component id (blastp), or MMseqs
-        cluster id (mmseqs)
+        component id (pangenome), BLASTP component id (blastp), MMseqs
+        cluster id (mmseqs), or ``genome|chr`` (loco)
 
     When ``fold.csv`` is omitted, emits:
       ``Warning: folds are not included``
@@ -796,6 +830,19 @@ def run_split_predict(
             homology_edges=homology_edges,
             homology_nodes=homology_nodes,
             max_ids=max_ids,
+        )
+
+    if type == "loco":
+        if fold_csv is None:
+            warnings.warn("Warning: folds are not included", UserWarning, stacklevel=2)
+        return _run_loco_split_predict(
+            outdir=outdir,
+            seed=seed,
+            id_csv=id_csv,
+            fold_csv=fold_csv,
+            ratios=ratios,
+            max_ids=max_ids,
+            plot=plot,
         )
 
     fold_map = _load_optional_table(fold_csv, min_cols=["ID", "fold"], label="fold.csv")
