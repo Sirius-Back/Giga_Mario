@@ -117,3 +117,9 @@ python -m src.splits.pangenome_native.build
 **Graph persist:** `run_pangenome_split_assign` writes `{outdir}/graph/` (`contingency_graph.npz`, `ids.txt`, `nodes.tsv`, `edges.tsv`, meta). Clustering = union-find connected components on shared-k-mer contingency. Reload with `load_contingency_graph` / `plot_pangenome_contingency_from_artifacts`.
 
 Then assign + materialize with `/split` (runner under `src/run/run_id/`).
+
+## Pending captions (not yet code-generated)
+
+| Caption | Status | Notes |
+|---------|--------|-------|
+| [`splits/paralogs_only.md`](../splits/paralogs_only.md) | caption ready; `/split-generate` **not** run | C++ ortholog-CC → 1-rep train; remainder 50/50 test/val; graph: `mag/homology_graph/` |

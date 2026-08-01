@@ -16,6 +16,8 @@ Supported ``type`` values:
     → sparse BLASTP connected components)
   - ``mmseqs`` — MMseqs2 ``easy-cluster`` homology folds (MARKED; Locked
     ratios 60:20:20 train/val/test)
+  - ``paralogs_only`` — orthogroup 1-rep train; remainder 50/50 test/val
+    (Compara graph; unmapped → test/val only)
 """
 from __future__ import annotations
 
@@ -39,6 +41,7 @@ SUPPORTED_SPLIT_TYPES = (
     "pangenome",
     "blastp",
     "mmseqs",
+    "paralogs_only",
 )
 
 
@@ -518,6 +521,37 @@ def _run_mmseqs_split_predict(
     return out
 
 
+
+def _run_paralogs_only_split_predict(
+    *,
+    outdir: Path,
+    seed: int,
+    id_csv: Path | None,
+    fold_csv: Path | None,
+    homology_edges: Path | None,
+    homology_nodes: Path | None,
+    max_ids: int | None,
+) -> Path:
+    """Homology orthogroup-rep train / remainder test-val (C++ native)."""
+    from src.splits.paralogs_only import run_paralogs_only_split_assign
+
+    if id_csv is None:
+        raise ValueError("type=paralogs_only requires --id-csv")
+    summary = run_paralogs_only_split_assign(
+        outdir=outdir,
+        id_csv=Path(id_csv),
+        homology_edges=Path(homology_edges) if homology_edges else None,
+        homology_nodes=Path(homology_nodes) if homology_nodes else None,
+        fold_csv=Path(fold_csv) if fold_csv else None,
+        seed=seed,
+        max_ids=max_ids,
+    )
+    out = Path(summary["split_csv"])
+    if not out.is_file():
+        raise FileNotFoundError(f"paralogs_only split did not write split.csv: {out}")
+    return out
+
+
 def run_split_predict(
     *,
     outdir: Path,
@@ -564,6 +598,8 @@ def run_split_predict(
     min_seq_id: float | None = None,
     mmseqs_sensitivity: float | None = None,
     mmseqs_bin: Path | None = None,
+    homology_edges: Path | None = None,
+    homology_nodes: Path | None = None,
 ) -> Path:
     """
     Write `{outdir}/split.csv` with columns ID|train_test|fold.
@@ -575,10 +611,12 @@ def run_split_predict(
     ``type=pangenome`` — C++ k-mer contingency connected components (MARKED∩PARSED).
     ``type=blastp`` — CDS protein BLASTP connected components (adapt fna+gtf).
     ``type=mmseqs`` — MMseqs2 easy-cluster folds (MARKED; default ratios 60:20:20).
+    ``type=paralogs_only`` — orthogroup 1-rep train; remainder 50/50 test/val
+      (Compara homology graph; unmapped IDs → test/val only).
 
     When ``fold.csv`` is present:
       - folds labeled zsv / zeroshotvalidation → train_test=zsv (excluded from
-        random / SBS / hashfrag / pangenome / blastp / mmseqs assignment; materialize moves them to
+        random / SBS / hashfrag / pangenome / blastp / mmseqs / paralogs_only assignment; materialize moves them to
         zero-shot-validation/)
       - other IDs get train/test/val; fold column keeps fold.csv value (random),
         SBS cluster id (gc/kmer), homologous-group id (hashfrag), contingency
@@ -737,6 +775,19 @@ def run_split_predict(
             min_seq_id=min_seq_id,
             mmseqs_sensitivity=mmseqs_sensitivity,
             mmseqs_bin=mmseqs_bin,
+        )
+
+    if type == "paralogs_only":
+        if fold_csv is None:
+            warnings.warn("Warning: folds are not included", UserWarning, stacklevel=2)
+        return _run_paralogs_only_split_predict(
+            outdir=outdir,
+            seed=seed,
+            id_csv=id_csv,
+            fold_csv=fold_csv,
+            homology_edges=homology_edges,
+            homology_nodes=homology_nodes,
+            max_ids=max_ids,
         )
 
     fold_map = _load_optional_table(fold_csv, min_cols=["ID", "fold"], label="fold.csv")
@@ -1024,6 +1075,18 @@ def main(argv: list[str] | None = None) -> int:
         default=None,
         help="Explicit path to mmseqs binary (type=mmseqs)",
     )
+    p.add_argument(
+        "--homology-edges",
+        type=Path,
+        default=None,
+        help="Compara ortholog/paralog edge TSV[.gz] (type=paralogs_only)",
+    )
+    p.add_argument(
+        "--homology-nodes",
+        type=Path,
+        default=None,
+        help="Ensembl→marked_id node map TSV (type=paralogs_only)",
+    )
     args = p.parse_args(argv)
     n_clusters: int | Literal["auto"]
     if str(args.n_clusters).lower() == "auto":
@@ -1090,6 +1153,8 @@ def main(argv: list[str] | None = None) -> int:
         min_seq_id=args.min_seq_id,
         mmseqs_sensitivity=args.mmseqs_sensitivity,
         mmseqs_bin=args.mmseqs_bin,
+        homology_edges=args.homology_edges,
+        homology_nodes=args.homology_nodes,
     )
     print(path)
     return 0
