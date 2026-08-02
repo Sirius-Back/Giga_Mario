@@ -1,7 +1,7 @@
 """GCN/VGAE on run29 k=7 pangenome with homology_first loss.
 
 Stage1 — region contingency graph (k=7) + streamed projected 7-mers (2048-d).
-Stage2 — hash-node graph (4**7 nodes) with the same projected compositional wrap.
+Stage2 — hash-node graph (4**7 nodes) with full (non-projected) GC+7-mer spectrum.
 
 Waits for RAM headroom and a free GPU. Does not clobber k=5 VGAE runs.
 """
@@ -149,8 +149,8 @@ def main() -> int:
         k=K,
         force_retrain=True,
         loss_mode="homology_first",
-        project_dim=PROJECT_DIM,
-        peak_ram_gib=20.0,
+        project_dim=None,  # full 1+4**7 features on hash nodes
+        peak_ram_gib=40.0,
         wait_poll_sec=600.0,
         max_gpu_used_mib=2048.0,
         min_epochs=25,
