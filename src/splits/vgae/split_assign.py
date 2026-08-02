@@ -17,7 +17,10 @@ def run_vgae_split_assign(
     seed: int = 42,
     k: int | None = None,
     feature_k: int | None = None,
+    feature_ks: tuple[int, ...] | list[int] | None = None,
+    per_k_project_dim: int = 256,
     project_dim: int | None = None,
+    add_structural_features: bool = False,
     max_ids: int | None = None,
     ratios: tuple[float, float, float] = (3.0, 1.0, 1.0),
     device: str | None = None,
@@ -47,7 +50,10 @@ def run_vgae_split_assign(
             run_pack,
             k=k,
             feature_k=feature_k,
+            feature_ks=feature_ks,
+            per_k_project_dim=int(per_k_project_dim),
             project_dim=project_dim,
+            add_structural_features=bool(add_structural_features),
             max_ids=max_ids,
         )
 

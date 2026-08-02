@@ -18,6 +18,14 @@ def _family(run: str) -> str:
         return "VGAE-GCL-GAT"
     if "gcl" in run:
         return "VGAE-GCL"
+    if "appnp" in run:
+        return "VGAE-APPNP"
+    if "gcnii" in run:
+        return "VGAE-GCNII"
+    if "multik" in run:
+        return "VGAE-GCN-multik"
+    if "structfeat" in run:
+        return "VGAE-GCN-struct"
     if "gat" in run:
         return "VGAE-GAT"
     if "sage" in run:

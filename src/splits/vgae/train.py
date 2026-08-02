@@ -438,6 +438,9 @@ def run_vgae_train(
     hom_agg: str | None = None,
     architecture: str = ARCH_GCN,
     gat_heads: int = 4,
+    appnp_k: int = 10,
+    appnp_alpha: float = 0.1,
+    gcnii_layers: int = 8,
     lambda_gcl: float = 1.0,
     gcl_edge_drop: float = 0.2,
     gcl_feat_mask: float = 0.2,
@@ -584,6 +587,9 @@ def run_vgae_train(
             latent_dim=latent_dim,
             n_roles=3,
             gat_heads=int(gat_heads),
+            appnp_k=int(appnp_k),
+            appnp_alpha=float(appnp_alpha),
+            gcnii_layers=int(gcnii_layers),
         ).to(dev)
         print(f"[vgae] architecture={getattr(model, 'architecture', arch)}", flush=True)
         opt = torch.optim.Adam(model.parameters(), lr=float(lr))

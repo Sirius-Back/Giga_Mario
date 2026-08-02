@@ -87,8 +87,8 @@ def test_gat_and_sage_vgae_forward() -> None:
     v = u + 1
     edge_index = torch.stack([u, v], dim=0)
     edge_weight = torch.ones(n - 1)
-    for arch in ("gcn", "gat", "sage"):
-        model = build_vgae(arch, f, hidden_dim=16, latent_dim=8, gat_heads=2)
+    for arch in ("gcn", "gat", "sage", "appnp", "gcnii"):
+        model = build_vgae(arch, f, hidden_dim=16, latent_dim=8, gat_heads=2, gcnii_layers=3)
         out = model(x, edge_index, edge_weight)
         assert out["z"].shape == (n, 8)
         assert out["role_logits"].shape == (n, 3)
@@ -96,6 +96,36 @@ def test_gat_and_sage_vgae_forward() -> None:
         loss = loss + type(model).kl_loss(out["mu"], out["logstd"])
         loss.backward()
         assert torch.isfinite(loss)
+
+
+def test_structural_and_multik_features_no_homology() -> None:
+    from src.splits.vgae.graph_data import (
+        build_multik_projected_features,
+        build_structural_features,
+    )
+
+    ids = ["a", "b", "c", "d"]
+    seqs = {
+        "a": "ACGTACGTAC",
+        "b": "GGGGGGGGGG",
+        "c": "ATATATATAT",
+        "d": "CCCCCCCCCC",
+    }
+    x, names, meta = build_multik_projected_features(
+        ids, seqs, ks=(2, 3), per_k_project_dim=8, seed=1
+    )
+    assert x.shape[0] == 4
+    assert names[0] == "GC_pct"
+    assert meta["kind"] == "multik_projected"
+    assert_no_homology_features(names)
+
+    u = np.array([0, 1, 2], dtype=np.int64)
+    v = np.array([1, 2, 0], dtype=np.int64)
+    sx, snames, smeta = build_structural_features(4, u, v, n_cc_hash=4, seed=0)
+    assert sx.shape == (4, len(snames))
+    assert all(n.startswith("struct_") for n in snames)
+    assert smeta["homology_leakage"] is False
+    assert_no_homology_features(snames)
 
 
 def test_contrastive_info_nce_and_augment() -> None:

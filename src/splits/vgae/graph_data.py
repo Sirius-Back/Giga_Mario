@@ -310,6 +310,238 @@ def project_features_fixed(
     return x2, names, meta
 
 
+def build_multik_projected_features(
+    ids: Sequence[str],
+    sequences: dict[str, str],
+    *,
+    ks: Sequence[int] = (4, 5, 7),
+    per_k_project_dim: int = 256,
+    seed: int = 42,
+) -> tuple[np.ndarray, tuple[str, ...], dict[str, Any]]:
+    """GC once + projected k-mer spectra for each ``k`` in ``ks`` (concat).
+
+    No homology columns. Each spectrum is projected to ``per_k_project_dim``
+    (including a temporary GC that is dropped after the first block).
+    """
+    ks_t = tuple(int(k) for k in ks)
+    if not ks_t or any(k < 1 for k in ks_t):
+        raise ValueError(f"ks must be non-empty positive ints; got {ks!r}")
+    d = int(per_k_project_dim)
+    if d < 2:
+        raise ValueError(f"per_k_project_dim must be >= 2; got {d}")
+
+    blocks: list[np.ndarray] = []
+    names: list[str] = ["GC_pct"]
+    per_k_meta: list[dict[str, Any]] = []
+    gc_col: np.ndarray | None = None
+    for k in ks_t:
+        xk, _nk, meta_k = build_compositional_features_projected(
+            ids,
+            sequences,
+            k=k,
+            project_dim=d,
+            seed=int(seed) + int(k),
+        )
+        if gc_col is None:
+            gc_col = xk[:, :1].astype(np.float32, copy=True)
+        blocks.append(xk[:, 1:].astype(np.float32, copy=False))
+        names.extend(f"k{k}_proj_{j}" for j in range(xk.shape[1] - 1))
+        per_k_meta.append({"k": int(k), **meta_k})
+    assert gc_col is not None
+    x = np.concatenate([gc_col, *blocks], axis=1)
+    feature_names = tuple(names)
+    assert_no_homology_features(feature_names)
+    meta = {
+        "applied": True,
+        "kind": "multik_projected",
+        "ks": list(ks_t),
+        "per_k_project_dim": d,
+        "seed": int(seed),
+        "n_features": int(x.shape[1]),
+        "per_k": per_k_meta,
+    }
+    return x, feature_names, meta
+
+
+def _union_find_components(
+    n: int, edge_u: np.ndarray, edge_v: np.ndarray
+) -> tuple[np.ndarray, np.ndarray]:
+    """Return ``(root[i], cc_size[root])`` via union–find (path compression)."""
+    parent = np.arange(int(n), dtype=np.int64)
+    rank = np.zeros(int(n), dtype=np.int8)
+    size = np.ones(int(n), dtype=np.int64)
+
+    def find(i: int) -> int:
+        while parent[i] != i:
+            parent[i] = parent[parent[i]]
+            i = int(parent[i])
+        return i
+
+    for u, v in zip(edge_u.tolist(), edge_v.tolist()):
+        u_i, v_i = int(u), int(v)
+        if u_i < 0 or v_i < 0 or u_i >= n or v_i >= n or u_i == v_i:
+            continue
+        ru, rv = find(u_i), find(v_i)
+        if ru == rv:
+            continue
+        if rank[ru] < rank[rv]:
+            ru, rv = rv, ru
+        parent[rv] = ru
+        size[ru] += size[rv]
+        if rank[ru] == rank[rv]:
+            rank[ru] += 1
+    roots = np.empty(n, dtype=np.int64)
+    for i in range(n):
+        roots[i] = find(i)
+    return roots, size
+
+
+def build_structural_features(
+    n_nodes: int,
+    edge_u: np.ndarray,
+    edge_v: np.ndarray,
+    *,
+    n_cc_hash: int = 8,
+    seed: int = 42,
+    max_clust_degree: int = 512,
+) -> tuple[np.ndarray, tuple[str, ...], dict[str, Any]]:
+    """Topology-only node features: degree, CC hash, local clustering.
+
+    No sequence or homology labels — safe under the encoder firewall.
+    Nodes with degree ``> max_clust_degree`` get clustering=0 (cost guard).
+    """
+    n = int(n_nodes)
+    if n < 1:
+        raise ValueError(f"n_nodes must be >= 1; got {n}")
+    u = np.asarray(edge_u, dtype=np.int64)
+    v = np.asarray(edge_v, dtype=np.int64)
+    deg = np.bincount(np.concatenate([u, v]), minlength=n).astype(np.float64)
+    deg_max = float(deg.max()) if n else 0.0
+    deg_norm = (deg / deg_max).astype(np.float32) if deg_max > 0 else deg.astype(np.float32)
+    log_deg = np.log1p(deg).astype(np.float32)
+
+    roots, cc_size_by_root = _union_find_components(n, u, v)
+    cc_size = cc_size_by_root[roots].astype(np.float64)
+    log_cc = np.log1p(cc_size).astype(np.float32)
+
+    # Deterministic fractional hash of component root → sin/cos positional codes
+    rng = np.random.default_rng(int(seed))
+    # Map root id → U[0,1) via mixed multiplicative hash (seeded salt)
+    salt = int(rng.integers(1, 2**31 - 1))
+    frac = ((roots.astype(np.uint64) * np.uint64(salt)) % np.uint64(1_000_003)).astype(
+        np.float64
+    ) / 1_000_003.0
+    n_hash = max(2, int(n_cc_hash))
+    if n_hash % 2 == 1:
+        n_hash += 1
+    hash_feats = np.empty((n, n_hash), dtype=np.float32)
+    for j in range(n_hash // 2):
+        ang = 2.0 * np.pi * (j + 1) * frac
+        hash_feats[:, 2 * j] = np.sin(ang).astype(np.float32)
+        hash_feats[:, 2 * j + 1] = np.cos(ang).astype(np.float32)
+
+    # Adjacency sets for clustering (undirected)
+    nbrs: list[set[int]] = [set() for _ in range(n)]
+    for a, b in zip(u.tolist(), v.tolist()):
+        ai, bi = int(a), int(b)
+        if ai == bi or ai < 0 or bi < 0 or ai >= n or bi >= n:
+            continue
+        nbrs[ai].add(bi)
+        nbrs[bi].add(ai)
+
+    clustering = np.zeros(n, dtype=np.float32)
+    max_d = int(max_clust_degree)
+    for i in range(n):
+        d = len(nbrs[i])
+        if d < 2 or d > max_d:
+            continue
+        neigh = nbrs[i]
+        # Count triangles: edges among neighbors
+        tri = 0
+        for a in neigh:
+            # only count a < b via iterating partners > a in set intersection size
+            tri += sum(1 for b in nbrs[a] if b in neigh and b > a)
+        clustering[i] = (2.0 * tri) / (d * (d - 1))
+
+    parts = [deg_norm.reshape(-1, 1), log_deg.reshape(-1, 1), log_cc.reshape(-1, 1), hash_feats, clustering.reshape(-1, 1)]
+    x = np.concatenate(parts, axis=1).astype(np.float32)
+    names = (
+        ("struct_degree_norm", "struct_log_degree", "struct_cc_log_size")
+        + tuple(f"struct_cc_hash_{j}" for j in range(n_hash))
+        + ("struct_clustering",)
+    )
+    assert_no_homology_features(names)
+    meta = {
+        "kind": "structural_topology",
+        "n_cc_hash": n_hash,
+        "seed": int(seed),
+        "max_clust_degree": max_d,
+        "n_features": int(x.shape[1]),
+        "homology_leakage": False,
+    }
+    return x, names, meta
+
+
+def append_structural_features_to_pack(
+    pack_dir: Path,
+    out_pack_dir: Path | None = None,
+    *,
+    n_cc_hash: int = 8,
+    seed: int = 42,
+) -> PackedGraph:
+    """Copy / rewrite a pack with topology features concatenated (no re-MARKED)."""
+    pack = load_packed_graph(Path(pack_dir))
+    out = Path(out_pack_dir) if out_pack_dir is not None else Path(pack_dir)
+    out.mkdir(parents=True, exist_ok=True)
+    sx, snames, smeta = build_structural_features(
+        pack.n_nodes,
+        pack.edge_u,
+        pack.edge_v,
+        n_cc_hash=int(n_cc_hash),
+        seed=int(seed),
+    )
+    # Drop any prior struct_* columns if re-appending
+    keep_idx = [i for i, n in enumerate(pack.feature_names) if not str(n).startswith("struct_")]
+    x0 = pack.x[:, keep_idx]
+    names0 = tuple(pack.feature_names[i] for i in keep_idx)
+    x = np.concatenate([x0, sx], axis=1)
+    feature_names = names0 + snames
+    assert_no_homology_features(feature_names)
+
+    np.savez_compressed(
+        out / "node_features.npz",
+        x=x,
+        feature_names=np.asarray(feature_names, dtype=object),
+    )
+    if out.resolve() != Path(pack_dir).resolve():
+        import shutil
+
+        for name in ("edges_weighted.npz", "ids.txt"):
+            src = Path(pack_dir) / name
+            if src.is_file():
+                shutil.copy2(src, out / name)
+    meta = dict(pack.meta)
+    meta["n_features"] = int(x.shape[1])
+    meta["feature_names"] = list(feature_names)
+    meta["structural_features"] = smeta
+    meta["homology_in_encoder"] = False
+    (out / "feature_meta.json").write_text(
+        json.dumps(meta, indent=2, default=str) + "\n", encoding="utf-8"
+    )
+    return PackedGraph(
+        ids=pack.ids,
+        x=x,
+        feature_names=feature_names,
+        edge_u=pack.edge_u,
+        edge_v=pack.edge_v,
+        edge_w=pack.edge_w,
+        edge_w_raw=pack.edge_w_raw,
+        k=pack.k,
+        meta=meta,
+        pack_dir=out,
+    )
+
+
 def _features_chunk(seqs: list[str], k: int) -> np.ndarray:
     out = np.zeros((len(seqs), 1 + 4**int(k)), dtype=np.float32)
     for i, seq in enumerate(seqs):
@@ -332,16 +564,22 @@ def pack_region_graph(
     *,
     k: int | None = None,
     feature_k: int | None = None,
+    feature_ks: Sequence[int] | None = None,
+    per_k_project_dim: int = 256,
     project_dim: int | None = None,
     project_seed: int = 42,
+    add_structural_features: bool = False,
+    n_cc_hash: int = 8,
     max_ids: int | None = None,
     intersect_allow: bool = False,
 ) -> PackedGraph:
     """Load contingency graph, attach GC/k-mer features, persist under ``pack_dir``.
 
     ``k`` — graph k (from meta when omitted). ``feature_k`` — compositional
-    spectrum k (defaults to ``k``). ``project_dim`` — optional seeded projection
-    of the k-mer block so full-panel dense ``4**feature_k`` fits GPU RAM (k≥7).
+    spectrum k (defaults to ``k``). ``feature_ks`` — optional multi-k concat
+    with light per-k projection (``per_k_project_dim``). ``project_dim`` —
+    optional seeded projection of a single-k block. ``add_structural_features``
+    appends topology-only (degree / CC hash / clustering) columns.
     """
     graph_dir = Path(graph_dir)
     marked_dir = Path(marked_dir)
@@ -357,6 +595,9 @@ def pack_region_graph(
     feat_k = int(feature_k) if feature_k is not None else k_use
     if feat_k < 1:
         raise ValueError(f"invalid feature_k={feat_k}")
+    ks_use = tuple(int(x) for x in feature_ks) if feature_ks is not None else None
+    if ks_use is not None and (not ks_use or any(x < 1 for x in ks_use)):
+        raise ValueError(f"invalid feature_ks={feature_ks!r}")
 
     if max_ids is not None:
         max_ids = int(max_ids)
@@ -381,7 +622,8 @@ def pack_region_graph(
 
     print(
         f"[vgae-pack] loading MARKED sequences n_ids={len(ids)} "
-        f"from {marked_dir} (feature_k={feat_k}, project_dim={project_dim})",
+        f"from {marked_dir} (feature_k={feat_k}, feature_ks={ks_use}, "
+        f"project_dim={project_dim})",
         flush=True,
     )
     try:
@@ -426,7 +668,15 @@ def pack_region_graph(
     x: np.ndarray
     feature_names: tuple[str, ...]
     proj_meta: dict[str, Any]
-    if project_dim is not None and (1 + 4**feat_k) > int(project_dim):
+    if ks_use is not None:
+        x, feature_names, proj_meta = build_multik_projected_features(
+            ids,
+            sequences,
+            ks=ks_use,
+            per_k_project_dim=int(per_k_project_dim),
+            seed=int(project_seed),
+        )
+    elif project_dim is not None and (1 + 4**feat_k) > int(project_dim):
         x, feature_names, proj_meta = build_compositional_features_projected(
             ids,
             sequences,
@@ -441,11 +691,20 @@ def pack_region_graph(
             x, feature_names, proj_meta = project_features_fixed(
                 x, feature_names, project_dim=int(project_dim), seed=int(project_seed)
             )
+
+    struct_meta: dict[str, Any] | None = None
+    if add_structural_features:
+        sx, snames, struct_meta = build_structural_features(
+            len(ids), edge_u, edge_v, n_cc_hash=int(n_cc_hash), seed=int(project_seed)
+        )
+        x = np.concatenate([x, sx], axis=1)
+        feature_names = tuple(feature_names) + snames
+
     assert_no_homology_features(feature_names)
     edge_w = _normalize_edge_weights(edge_w_raw)
     print(
         f"[vgae-pack] features ready X={x.shape} edges={len(edge_u)} "
-        f"projection={proj_meta.get('applied')}",
+        f"projection={proj_meta.get('applied')} structural={bool(struct_meta)}",
         flush=True,
     )
 
@@ -469,7 +728,8 @@ def pack_region_graph(
         "format": "gigamario_vgae_pack_v1",
         "grain": "region",
         "k": k_use,
-        "feature_k": feat_k,
+        "feature_k": feat_k if ks_use is None else None,
+        "feature_ks": list(ks_use) if ks_use is not None else None,
         "n_nodes": len(ids),
         "n_edges": int(len(edge_u)),
         "n_features": int(x.shape[1]),
@@ -481,6 +741,7 @@ def pack_region_graph(
         "max_ids": max_ids,
         "edge_weight_transform": "log1p_then_maxnorm",
         "feature_projection": proj_meta,
+        "structural_features": struct_meta,
     }
     (pack_dir / "feature_meta.json").write_text(
         json.dumps(meta, indent=2, default=str) + "\n", encoding="utf-8"

@@ -54,10 +54,13 @@ def main(argv: list[str] | None = None) -> int:
         "--architecture",
         type=str,
         default="gcn",
-        choices=("gcn", "gat", "sage", "gcl", "gcl_gat"),
-        help="Encoder: gcn | gat | sage | gcl (GCN+InfoNCE) | gcl_gat (GAT+InfoNCE)",
+        choices=("gcn", "gat", "sage", "gcl", "gcl_gat", "appnp", "gcnii"),
+        help="Encoder: gcn | gat | sage | gcl | gcl_gat | appnp | gcnii",
     )
     p.add_argument("--gat-heads", type=int, default=4)
+    p.add_argument("--appnp-k", type=int, default=10)
+    p.add_argument("--appnp-alpha", type=float, default=0.1)
+    p.add_argument("--gcnii-layers", type=int, default=8)
     p.add_argument(
         "--lambda-gcl",
         type=float,
@@ -71,6 +74,9 @@ def main(argv: list[str] | None = None) -> int:
         "loss_mode": args.loss_mode,
         "architecture": args.architecture,
         "gat_heads": int(args.gat_heads),
+        "appnp_k": int(args.appnp_k),
+        "appnp_alpha": float(args.appnp_alpha),
+        "gcnii_layers": int(args.gcnii_layers),
         "lambda_gcl": float(args.lambda_gcl),
     }
     if args.project_dim is not None:
