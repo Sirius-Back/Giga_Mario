@@ -44,6 +44,7 @@ SUPPORTED_SPLIT_TYPES = (
     "paralogs_only",
     "loco",
     "vgae",
+    "gcn",
 )
 
 
@@ -633,6 +634,51 @@ def _run_vgae_split_predict(
     return out
 
 
+def _run_gcn_split_predict(
+    *,
+    outdir: Path,
+    seed: int,
+    marked_fasta: Path | None,
+    fna: Path | None,
+    ratios: tuple[float, float, float] | None,
+    max_ids: int | None,
+    kmer_size: Sequence[int] | int,
+    gcn_model: str | None,
+    gcn_vgae_root: Path | None,
+    gcn_force_retrain: bool,
+    vgae_graph_dir: Path | None,
+    vgae_device: str | None,
+) -> Path:
+    """GCN/VGAE cascade: reuse labeling → infer → train (``splits/GCN.md``)."""
+    from src.splits.gcn import run_gcn_split_assign
+
+    if not gcn_model or not str(gcn_model).strip():
+        raise ValueError(
+            "type=gcn requires gcn_model=… (VGAE run name or description, "
+            "e.g. stage1_region_k5)"
+        )
+    marked = marked_fasta or fna
+    k = _normalize_pangenome_k(kmer_size)
+    ratio_t = ratios if ratios is not None else (3.0, 1.0, 1.0)
+    summary = run_gcn_split_assign(
+        outdir=Path(outdir),
+        model=str(gcn_model).strip(),
+        vgae_root=Path(gcn_vgae_root) if gcn_vgae_root is not None else None,
+        seed=seed,
+        ratios=ratio_t,
+        graph_dir=Path(vgae_graph_dir) if vgae_graph_dir is not None else None,
+        marked_dir=Path(marked) if marked is not None else None,
+        device=vgae_device,
+        max_ids=max_ids,
+        k=k,
+        force_retrain=bool(gcn_force_retrain),
+    )
+    out = Path(summary["split_csv"])
+    if not out.is_file():
+        raise FileNotFoundError(f"gcn split did not write split.csv: {out}")
+    return out
+
+
 def run_split_predict(
     *,
     outdir: Path,
@@ -686,6 +732,9 @@ def run_split_predict(
     vgae_graph_dir: Path | None = None,
     vgae_device: str | None = None,
     vgae_skip_train: bool = False,
+    gcn_model: str | None = None,
+    gcn_vgae_root: Path | None = None,
+    gcn_force_retrain: bool = False,
 ) -> Path:
     """
     Write `{outdir}/split.csv` with columns ID|train_test|fold.
@@ -701,6 +750,8 @@ def run_split_predict(
       (Compara homology graph; unmapped IDs → test/val only).
     ``type=loco`` — chromosome-grain split from ID.csv ``(genome, chr)``;
       fold→train/val/test stratified by normalized chromosome number.
+    ``type=gcn`` — resolve named VGAE/VGCN model → reuse / infer / train
+      cascade (``splits/GCN.md``); requires ``gcn_model=``.
 
     When ``fold.csv`` is present:
       - folds labeled zsv / zeroshotvalidation → train_test=zsv (excluded from
@@ -801,6 +852,24 @@ def run_split_predict(
             vgae_graph_dir=vgae_graph_dir,
             vgae_device=vgae_device,
             vgae_skip_train=vgae_skip_train,
+        )
+
+    if type == "gcn":
+        if fold_csv is None:
+            warnings.warn("Warning: folds are not included", UserWarning, stacklevel=2)
+        return _run_gcn_split_predict(
+            outdir=outdir,
+            seed=seed,
+            marked_fasta=marked_fasta,
+            fna=fna,
+            ratios=ratios,
+            max_ids=max_ids,
+            kmer_size=kmer_size,
+            gcn_model=gcn_model,
+            gcn_vgae_root=gcn_vgae_root,
+            gcn_force_retrain=gcn_force_retrain,
+            vgae_graph_dir=vgae_graph_dir,
+            vgae_device=vgae_device,
         )
 
     if type == "pangenome":
@@ -1221,6 +1290,38 @@ def main(argv: list[str] | None = None) -> int:
         default=None,
         help="Ensembl→marked_id node map TSV (type=paralogs_only)",
     )
+    p.add_argument(
+        "--vgae-graph-dir",
+        type=Path,
+        default=None,
+        help="Pangenome graph/ dir for type=vgae / type=gcn (train path)",
+    )
+    p.add_argument(
+        "--vgae-device",
+        default=None,
+        help="Torch device for type=vgae / type=gcn (default: cuda:0 if available)",
+    )
+    p.add_argument(
+        "--vgae-skip-train",
+        action="store_true",
+        help="Skip VGAE training for type=vgae (deterministic GC fallback)",
+    )
+    p.add_argument(
+        "--gcn-model",
+        default=None,
+        help="VGAE/VGCN run name or description for type=gcn (required)",
+    )
+    p.add_argument(
+        "--gcn-vgae-root",
+        type=Path,
+        default=None,
+        help="Root directory of VGAE runs (default: VGAE/)",
+    )
+    p.add_argument(
+        "--gcn-force-retrain",
+        action="store_true",
+        help="Force train path for type=gcn even if labeling/checkpoint exists",
+    )
     args = p.parse_args(argv)
     n_clusters: int | Literal["auto"]
     if str(args.n_clusters).lower() == "auto":
@@ -1291,6 +1392,12 @@ def main(argv: list[str] | None = None) -> int:
         mmseqs_bin=args.mmseqs_bin,
         homology_edges=args.homology_edges,
         homology_nodes=args.homology_nodes,
+        vgae_graph_dir=args.vgae_graph_dir,
+        vgae_device=args.vgae_device,
+        vgae_skip_train=bool(args.vgae_skip_train),
+        gcn_model=args.gcn_model,
+        gcn_vgae_root=args.gcn_vgae_root,
+        gcn_force_retrain=bool(args.gcn_force_retrain),
     )
     print(path)
     return 0
