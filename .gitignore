@@ -366,3 +366,7 @@ tpm
 .venv/
 venv/
 **/venv/
+
+# Accidental duplicate filenames from GUI copy
+**/end_emb copy.py
+**/* copy.py

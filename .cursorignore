@@ -254,3 +254,5 @@ blastdb/
 /runs_unif/
 /VGAE/
 /VAE/
+
+**/* copy.py
