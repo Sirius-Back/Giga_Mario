@@ -14,12 +14,24 @@ from src.splits.vgae.graph_data import (
     pack_region_graph,
 )
 from src.splits.vgae.homology_loss import compute_l_hom, load_homology_groups
-from src.splits.vgae.model import ClassicVGAE
+from src.splits.vgae.model import (
+    ARCH_CHOICES,
+    ClassicVGAE,
+    GATConv,
+    GATVGAE,
+    SAGEVGAE,
+    build_vgae,
+)
 from src.splits.vgae.train import run_vgae_train
 from src.splits.vgae.split_assign import run_vgae_split_assign
 
 __all__ = [
+    "ARCH_CHOICES",
     "ClassicVGAE",
+    "GATConv",
+    "GATVGAE",
+    "SAGEVGAE",
+    "build_vgae",
     "FORBIDDEN_FEATURE_PATTERN",
     "PackedGraph",
     "assert_no_homology_features",

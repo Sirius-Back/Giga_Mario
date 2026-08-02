@@ -35,12 +35,16 @@ from src.splits.vgae.homology_loss import (
     load_homology_groups,
     write_homology_sidecar,
 )
+from src.splits.vgae.contrastive import augment_graph_view, info_nce_pairwise
 from src.splits.vgae.model import (
+    ARCH_GCN,
     ClassicVGAE,
+    build_vgae,
     gumbel_softmax_roles,
     gumbel_tau_schedule,
     kl_beta_schedule,
     soft_role_probs,
+    uses_contrastive,
 )
 from src.splits.sbs.assign import assignment_rows_to_split_csv
 from src.tb_logging import close_dual, log_scalar_pair, open_summary_writer, open_tensorboard_logger
@@ -432,6 +436,14 @@ def run_vgae_train(
     hom_max_groups: int | None = None,
     max_gpu_used_mib: float = 512.0,
     hom_agg: str | None = None,
+    architecture: str = ARCH_GCN,
+    gat_heads: int = 4,
+    lambda_gcl: float = 1.0,
+    gcl_edge_drop: float = 0.2,
+    gcl_feat_mask: float = 0.2,
+    gcl_temperature: float = 0.5,
+    gcl_max_nodes: int = 8192,
+    early_stop_on_legacy: bool | None = None,
 ) -> dict[str, Any]:
     """Train classic VGAE and write ``split.csv`` + logs under ``out_dir``."""
     out_dir = Path(out_dir)
@@ -451,6 +463,11 @@ def run_vgae_train(
         if hom_agg is not None
         else (_hom_agg_for_mode(mode) or "mean")
     )
+    # Best empirical Stage1 selection: homology_first + early-stop on legacy mean L_hom
+    if early_stop_on_legacy is None:
+        early_stop_on_legacy = bool(_is_homology_train_mode(mode))
+    early_stop_on_legacy = bool(early_stop_on_legacy)
+    use_gcl = uses_contrastive(architecture)
     hf = HOMOLOGY_FIRST_DEFAULTS
     if _is_homology_train_mode(mode):
         if alpha_recon is None:
@@ -559,17 +576,21 @@ def run_vgae_train(
         )
         edge_weight = torch.as_tensor(pack.edge_w, dtype=torch.float32, device=dev)
 
-        model = ClassicVGAE(
+        arch = str(architecture).lower().strip() or ARCH_GCN
+        model = build_vgae(
+            arch,
             x.size(1),
             hidden_dim=hidden_dim,
             latent_dim=latent_dim,
             n_roles=3,
+            gat_heads=int(gat_heads),
         ).to(dev)
+        print(f"[vgae] architecture={getattr(model, 'architecture', arch)}", flush=True)
         opt = torch.optim.Adam(model.parameters(), lr=float(lr))
         target_frac = torch.as_tensor(
             role_target_fractions(ratios), dtype=torch.float32, device=dev
         )
-        ema = EmaTermNorm(decay=float(ema_decay)) if mode == "homology_first" else None
+        ema = EmaTermNorm(decay=float(ema_decay)) if _is_homology_train_mode(mode) else None
 
         writer = open_summary_writer(out_dir)
         tb_logger = open_tensorboard_logger(out_dir)
@@ -580,6 +601,7 @@ def run_vgae_train(
         )
 
         best_l_hom = float("inf")
+        best_legacy_l_hom = float("inf")
         best_state: dict[str, Any] | None = None
         best_epoch = -1
         stale = 0
@@ -597,14 +619,14 @@ def run_vgae_train(
                 tau_end=float(gumbel_tau_end),
                 t_anneal=int(gumbel_anneal_epochs),
             )
-            if mode == "homology_first":
+            if _is_homology_train_mode(mode):
                 soft_train = gumbel_softmax_roles(out["role_logits"], tau=tau, hard=False)
                 soft_log = soft_role_probs(out["role_logits"])
                 hom = compute_l_hom(
                     soft_train,
                     groups,
                     soft=True,
-                    weighted=True,
+                    agg=train_agg,
                     max_groups=int(hom_max_groups),
                     subset_seed=int(seed) + int(epoch),
                     lambda_para=float(lambda_para),
@@ -620,16 +642,17 @@ def run_vgae_train(
                 l_hom_soft = hom["l_hom"]
                 sz = size_loss(soft_train, target_frac)
 
-            recon = ClassicVGAE.recon_loss_neg_sample(
+            recon = type(model).recon_loss_neg_sample(
                 out["z"], edge_index, edge_weight
             )
-            kl = ClassicVGAE.kl_loss(out["mu"], out["logstd"])
+            kl = type(model).kl_loss(out["mu"], out["logstd"])
+            compose_mode = "homology_first" if _is_homology_train_mode(mode) else mode
             composed = compose_objective(
                 recon=recon,
                 kl=kl,
                 l_hom=l_hom_soft,
                 size=sz,
-                loss_mode=mode,
+                loss_mode=compose_mode,
                 epoch=epoch,
                 beta_kl=float(beta_kl),
                 lambda_hom=float(lambda_hom),
@@ -640,6 +663,36 @@ def run_vgae_train(
                 ema=ema,
             )
             loss = composed["loss"]
+            gcl_term = None
+            if use_gcl:
+                g = torch.Generator()
+                g.manual_seed(int(seed) + 17 * int(epoch))
+                x1, ei1, ew1 = augment_graph_view(
+                    x,
+                    edge_index,
+                    edge_weight,
+                    edge_drop=float(gcl_edge_drop),
+                    feat_mask=float(gcl_feat_mask),
+                    generator=g,
+                )
+                x2, ei2, ew2 = augment_graph_view(
+                    x,
+                    edge_index,
+                    edge_weight,
+                    edge_drop=float(gcl_edge_drop),
+                    feat_mask=float(gcl_feat_mask),
+                    generator=g,
+                )
+                out1 = model(x1, ei1, ew1)
+                out2 = model(x2, ei2, ew2)
+                gcl_term = info_nce_pairwise(
+                    out1["z"],
+                    out2["z"],
+                    temperature=float(gcl_temperature),
+                    max_nodes=int(gcl_max_nodes),
+                    generator=g,
+                )
+                loss = loss + float(lambda_gcl) * gcl_term
             opt.zero_grad(set_to_none=True)
             loss.backward()
             opt.step()
@@ -649,8 +702,26 @@ def run_vgae_train(
                 out_e = model(x, edge_index, edge_weight)
                 scores = soft_role_probs(out_e["role_logits"]).cpu().numpy()
             labels = size_constrained_assign(scores, ratios=ratios, seed=seed + epoch)
-            hard = compute_l_hom(labels, groups, soft=False)
+            from src.splits.vgae.homology_loss import (
+                evaluate_split_all_aggs,
+                sd_group_balance_report,
+            )
+            hard = compute_l_hom(
+                labels,
+                groups,
+                soft=False,
+                agg=train_agg if _is_homology_train_mode(mode) else "mean",
+                max_groups=8192,
+                subset_seed=int(seed) + int(epoch),
+            )
+            hard_legacy = compute_l_hom(
+                labels, groups, soft=False, agg="mean", max_groups=8192
+            )
+            balance = sd_group_balance_report(
+                labels, groups, max_groups=8192, seed=int(seed) + int(epoch)
+            )
             l_hom_hard = float(hard["l_hom"])
+            l_hom_legacy = float(hard_legacy["l_hom"])
 
             mag_r = abs(float(composed["term_recon"]))
             mag_k = abs(float(composed["term_kl"]))
@@ -667,12 +738,19 @@ def run_vgae_train(
                 "l_hom_soft": float(l_hom_soft.detach().cpu()),
                 "size": float(sz.detach().cpu()),
                 "l_hom_hard": l_hom_hard,
+                "l_hom_legacy": l_hom_legacy,
+                "gcl": float(gcl_term.detach().cpu()) if gcl_term is not None else None,
+                "hom_agg": train_agg,
+                "early_stop_on_legacy": early_stop_on_legacy,
                 "mean_sd_ortho": float(hard["mean_sd_ortho"]),
                 "mean_sd_para": float(hard["mean_sd_para"]),
+                "legacy_mean_sd_ortho": float(hard_legacy["mean_sd_ortho"]),
+                "legacy_mean_sd_para": float(hard_legacy["mean_sd_para"]),
+                "sd_balance": balance,
                 "recon_norm": composed["recon_norm"],
                 "kl_norm": composed["kl_norm"],
                 "beta_kl": composed["beta_used"],
-                "gumbel_tau": float(tau) if mode == "homology_first" else None,
+                "gumbel_tau": float(tau) if _is_homology_train_mode(mode) else None,
                 "hom_grad_share": float(hom_share),
                 "ema_recon": composed["ema_recon"],
                 "ema_kl": composed["ema_kl"],
@@ -698,21 +776,33 @@ def run_vgae_train(
                 )
             log_scalar_pair(writer, tb_logger, "validation/l_hom", l_hom_hard, epoch)
             log_scalar_pair(
+                writer, tb_logger, "validation/l_hom_legacy", l_hom_legacy, epoch
+            )
+            log_scalar_pair(
                 writer, tb_logger, "validation/mean_sd_ortho", row["mean_sd_ortho"], epoch
             )
             log_scalar_pair(
                 writer, tb_logger, "validation/mean_sd_para", row["mean_sd_para"], epoch
             )
 
-            improved = l_hom_hard < best_l_hom - 1e-6
+            # Selection metric: legacy mean under homology_first (empirically best)
+            select_metric = l_hom_legacy if early_stop_on_legacy else l_hom_hard
+            improved = select_metric < best_l_hom - 1e-6
             if improved:
-                best_l_hom = l_hom_hard
+                best_l_hom = float(select_metric)
+                best_legacy_l_hom = l_hom_legacy
                 best_epoch = epoch
                 best_state = {
                     k: v.detach().cpu().clone() for k, v in model.state_dict().items()
                 }
                 torch.save(
-                    {"epoch": epoch, "model": best_state, "l_hom": best_l_hom},
+                    {
+                        "epoch": epoch,
+                        "model": best_state,
+                        "l_hom": best_l_hom,
+                        "l_hom_legacy": best_legacy_l_hom,
+                        "hom_agg": train_agg,
+                    },
                     ckpt_dir / "best.pt",
                 )
                 stale = 0
@@ -721,15 +811,23 @@ def run_vgae_train(
                     stale += 1
 
             torch.save(
-                {"epoch": epoch, "model": model.state_dict(), "l_hom": l_hom_hard},
+                {
+                    "epoch": epoch,
+                    "model": model.state_dict(),
+                    "l_hom": l_hom_hard,
+                    "l_hom_legacy": l_hom_legacy,
+                },
                 ckpt_dir / "last.pt",
             )
 
             print(
                 f"[vgae] epoch={epoch} loss={row['loss']:.5g} "
-                f"l_hom_hard={l_hom_hard:.5g} "
+                f"l_hom_hard={l_hom_hard:.5g} legacy={l_hom_legacy:.5g} "
                 f"sd_o={row['mean_sd_ortho']:.5g} sd_p={row['mean_sd_para']:.5g} "
-                f"best={best_l_hom:.5g}@{best_epoch} stale={stale} mode={mode}",
+                f"best={best_l_hom:.5g}@{best_epoch} stale={stale} "
+                f"mode={mode} agg={train_agg} "
+                f"sel={'legacy' if early_stop_on_legacy else 'train'}"
+                + (f" gcl={float(gcl_term.detach().cpu()):.4g}" if gcl_term is not None else ""),
                 flush=True,
             )
 
@@ -749,7 +847,19 @@ def run_vgae_train(
             scores = soft_role_probs(out_f["role_logits"]).cpu().numpy()
             z = out_f["z"].cpu().numpy()
         labels = size_constrained_assign(scores, ratios=ratios, seed=seed)
-        hard = compute_l_hom(labels, groups, soft=False)
+        from src.splits.vgae.homology_loss import (
+            evaluate_split_all_aggs,
+            sd_group_balance_report,
+        )
+
+        hard = compute_l_hom(
+            labels,
+            groups,
+            soft=False,
+            agg=train_agg if _is_homology_train_mode(mode) else "mean",
+        )
+        all_aggs = evaluate_split_all_aggs(labels, groups)
+        balance_final = sd_group_balance_report(labels, groups, max_groups=None, seed=seed)
         rows = assignment_rows(pack.ids, labels, fold_prefix="vgae")
         split_csv = assignment_rows_to_split_csv(rows, out_dir)
         np.savez_compressed(out_dir / "latents.npz", z=z, scores=scores)
@@ -759,12 +869,20 @@ def run_vgae_train(
             "seed": seed,
             "ratios": list(ratios),
             "loss_mode": mode,
+            "architecture": getattr(model, "architecture", arch),
+            "hom_agg": train_agg,
+            "early_stop_on_legacy": early_stop_on_legacy,
+            "lambda_gcl": float(lambda_gcl) if use_gcl else None,
             "best_epoch": best_epoch,
             "best_l_hom": best_l_hom,
+            "best_l_hom_legacy": best_legacy_l_hom,
             "final_l_hom": float(hard["l_hom"]),
+            "final_l_hom_legacy": float(all_aggs["mean"]["l_hom"]),
             "final_mean_sd_ortho": float(hard["mean_sd_ortho"]),
             "final_mean_sd_para": float(hard["mean_sd_para"]),
             "random_baseline_l_hom": baseline["l_hom"],
+            "all_aggs": all_aggs,
+            "sd_balance": balance_final,
             "counts": counts,
             "n_nodes": pack.n_nodes,
             "n_edges": pack.n_edges,
@@ -779,12 +897,45 @@ def run_vgae_train(
             "homology_in_encoder": False,
             "split_csv": str(split_csv),
         }
+        if _is_homology_train_mode(mode):
+            meta["lambda_para"] = float(lambda_para)
+            meta["lambda_ortho"] = float(lambda_ortho)
         (out_dir / "train_meta.json").write_text(
-            json.dumps(meta, indent=2) + "\n", encoding="utf-8"
+            json.dumps(meta, indent=2, default=str) + "\n", encoding="utf-8"
+        )
+        (out_dir / "legacy_eval.json").write_text(
+            json.dumps(
+                {
+                    "best_epoch": best_epoch,
+                    "train_agg": train_agg,
+                    "loss_mode": mode,
+                    "best_train_l_hom": best_l_hom,
+                    "best_legacy_l_hom": best_legacy_l_hom,
+                    "final_all_aggs": all_aggs,
+                    "sd_balance": balance_final,
+                    "note": (
+                        "Compare best_legacy_l_hom / final_all_aggs['mean'] to "
+                        "homology_first / legacy Stage1 baselines; sd_balance "
+                        "shows whether mean SD is outlier-driven "
+                        "(p90_over_median, top5pct_mass_frac)."
+                    ),
+                },
+                indent=2,
+                default=str,
+            )
+            + "\n",
+            encoding="utf-8",
         )
         close_dual(writer, tb_logger)
         if register_queue:
-            _append_status(queue_name, "COMPLETED", note=f"best_l_hom={best_l_hom:.6g}")
+            _append_status(
+                queue_name,
+                "COMPLETED",
+                note=(
+                    f"best_l_hom={best_l_hom:.6g} "
+                    f"legacy={best_legacy_l_hom:.6g} agg={train_agg}"
+                ),
+            )
         return meta
     except Exception as exc:
         if register_queue:

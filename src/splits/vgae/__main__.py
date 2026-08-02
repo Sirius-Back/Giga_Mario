@@ -28,8 +28,14 @@ def main(argv: list[str] | None = None) -> int:
         "--loss-mode",
         type=str,
         default="legacy",
-        choices=("legacy", "homology_first"),
-        help="legacy = unnormalized recon+KL+L_hom; homology_first = EMA/anneal/Gumbel",
+        choices=(
+            "legacy",
+            "homology_first",
+            "homology_robust",
+            "homology_log_balance",
+        ),
+        help="legacy | homology_first (√n-weighted) | homology_robust "
+        "(sd/√n winsorized) | homology_log_balance (E log10 sd ortho−para)",
     )
     p.add_argument("--lambda-hom", type=float, default=None)
     p.add_argument("--lambda-size", type=float, default=None)
@@ -44,10 +50,29 @@ def main(argv: list[str] | None = None) -> int:
         help="Optional seeded projection dim for compositional features "
         "(omit for full 1+4**k spectrum; required for Stage1 k≥7 on GPU)",
     )
+    p.add_argument(
+        "--architecture",
+        type=str,
+        default="gcn",
+        choices=("gcn", "gat", "sage", "gcl", "gcl_gat"),
+        help="Encoder: gcn | gat | sage | gcl (GCN+InfoNCE) | gcl_gat (GAT+InfoNCE)",
+    )
+    p.add_argument("--gat-heads", type=int, default=4)
+    p.add_argument(
+        "--lambda-gcl",
+        type=float,
+        default=1.0,
+        help="Weight for GRACE InfoNCE when architecture is gcl/gcl_gat",
+    )
     p.add_argument("--skip-train-viz", action="store_true")
     args = p.parse_args(argv)
 
-    train_extra: dict = {"loss_mode": args.loss_mode}
+    train_extra: dict = {
+        "loss_mode": args.loss_mode,
+        "architecture": args.architecture,
+        "gat_heads": int(args.gat_heads),
+        "lambda_gcl": float(args.lambda_gcl),
+    }
     if args.project_dim is not None:
         train_extra["project_dim"] = int(args.project_dim)
     if args.lambda_hom is not None:

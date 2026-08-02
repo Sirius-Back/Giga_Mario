@@ -7,7 +7,7 @@ from __future__ import annotations
 import csv
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Sequence
+from typing import Any, Sequence
 
 import numpy as np
 import torch
@@ -636,6 +636,107 @@ def _hard_sd_random_weighted(
         seed=seed,
     )
     return _aggregate_sd_np(sd, n, agg=HOM_AGG_WEIGHTED, weight_power=weight_power)
+
+
+def _sd_side_balance(
+    sd: np.ndarray,
+    n: np.ndarray,
+) -> dict[str, float]:
+    """Skew / outlier-mass diagnostics for one homology side (ortho or para)."""
+    if sd.size == 0:
+        return {
+            "n_groups": 0.0,
+            "mean": 0.0,
+            "median": 0.0,
+            "p90": 0.0,
+            "p99": 0.0,
+            "max": 0.0,
+            "p90_over_median": 0.0,
+            "mean_over_median": 0.0,
+            "top5pct_mass_frac": 0.0,
+            "top5pct_size_frac": 0.0,
+            "mean_z": 0.0,
+            "median_z": 0.0,
+        }
+    order = np.argsort(sd)
+    sd_s = sd[order]
+    n_s = n[order]
+    med = float(np.median(sd_s))
+    mean = float(sd_s.mean())
+    p90 = float(np.quantile(sd_s, 0.90))
+    p99 = float(np.quantile(sd_s, 0.99))
+    top_k = max(1, int(np.ceil(0.05 * sd_s.size)))
+    top = sd_s[-top_k:]
+    top_n = n_s[-top_k:]
+    z = sd / np.maximum(np.sqrt(n), 1.0)
+    return {
+        "n_groups": float(sd_s.size),
+        "mean": mean,
+        "median": med,
+        "p90": p90,
+        "p99": p99,
+        "max": float(sd_s[-1]),
+        "p90_over_median": float(p90 / med) if med > 1e-12 else float("inf"),
+        "mean_over_median": float(mean / med) if med > 1e-12 else float("inf"),
+        "top5pct_mass_frac": float(top.sum() / max(sd_s.sum(), 1e-12)),
+        "top5pct_size_frac": float(top_n.sum() / max(n_s.sum(), 1e-12)),
+        "mean_z": float(z.mean()),
+        "median_z": float(np.median(z)),
+    }
+
+
+def sd_group_balance_report(
+    labels: Sequence[str],
+    groups: HomologyGroups,
+    *,
+    max_groups: int | None = None,
+    seed: int = 42,
+) -> dict[str, Any]:
+    """Dataset-wide SD balance: mean/median skew and top-5% outlier mass."""
+    sd_o, n_o = _hard_sd_values(
+        labels, groups.ortho_groups, max_groups=max_groups, seed=int(seed)
+    )
+    sd_p, n_p = _hard_sd_values(
+        labels,
+        groups.para_groups,
+        max_groups=max_groups,
+        seed=int(seed) + 1_000_003,
+    )
+    return {
+        "ortho": _sd_side_balance(sd_o, n_o),
+        "para": _sd_side_balance(sd_p, n_p),
+        "legacy_l_hom": float(
+            _aggregate_sd_np(sd_p, n_p, agg=HOM_AGG_MEAN)
+            - _aggregate_sd_np(sd_o, n_o, agg=HOM_AGG_MEAN)
+        ),
+    }
+
+
+def evaluate_split_all_aggs(
+    labels: Sequence[str],
+    groups: HomologyGroups,
+    *,
+    max_groups: int | None = None,
+    seed: int = 42,
+) -> dict[str, dict[str, float | str]]:
+    """Hard ``L_hom`` under every aggregation (legacy compare on any split)."""
+    out: dict[str, dict[str, float | str]] = {}
+    for agg in HOM_AGG_MODES:
+        h = compute_l_hom(
+            labels,
+            groups,
+            soft=False,
+            agg=agg,
+            max_groups=max_groups,
+            subset_seed=int(seed),
+        )
+        out[agg] = {
+            "l_hom": float(h["l_hom"]),
+            "mean_sd_ortho": float(h["mean_sd_ortho"]),
+            "mean_sd_para": float(h["mean_sd_para"]),
+            "hom_agg": str(h.get("hom_agg", agg)),
+        }
+    return out
 
 
 class EmaTermNorm:

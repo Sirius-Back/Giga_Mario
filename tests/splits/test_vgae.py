@@ -78,6 +78,49 @@ def test_classic_vgae_forward_and_losses() -> None:
     assert torch.allclose(soft.sum(dim=-1), torch.ones(n), atol=1e-5)
 
 
+def test_gat_and_sage_vgae_forward() -> None:
+    from src.splits.vgae.model import build_vgae
+
+    n, f = 24, 6
+    x = torch.randn(n, f)
+    u = torch.arange(0, n - 1, dtype=torch.long)
+    v = u + 1
+    edge_index = torch.stack([u, v], dim=0)
+    edge_weight = torch.ones(n - 1)
+    for arch in ("gcn", "gat", "sage"):
+        model = build_vgae(arch, f, hidden_dim=16, latent_dim=8, gat_heads=2)
+        out = model(x, edge_index, edge_weight)
+        assert out["z"].shape == (n, 8)
+        assert out["role_logits"].shape == (n, 3)
+        loss = type(model).recon_loss_neg_sample(out["z"], edge_index, edge_weight)
+        loss = loss + type(model).kl_loss(out["mu"], out["logstd"])
+        loss.backward()
+        assert torch.isfinite(loss)
+
+
+def test_contrastive_info_nce_and_augment() -> None:
+    from src.splits.vgae.contrastive import augment_graph_view, info_nce_pairwise
+    from src.splits.vgae.model import build_vgae, uses_contrastive
+
+    n, f = 32, 8
+    x = torch.randn(n, f, requires_grad=True)
+    u = torch.arange(0, n - 1, dtype=torch.long)
+    v = u + 1
+    ei = torch.stack([u, v], dim=0)
+    ew = torch.ones(n - 1)
+    x1, ei1, ew1 = augment_graph_view(x, ei, ew, edge_drop=0.3, feat_mask=0.2)
+    x2, ei2, ew2 = augment_graph_view(x, ei, ew, edge_drop=0.3, feat_mask=0.2)
+    assert x1.shape == x.shape
+    model = build_vgae("gcl", f, hidden_dim=16, latent_dim=8)
+    assert uses_contrastive("gcl") and uses_contrastive("gcl_gat")
+    assert model.architecture == "gcl"
+    o1 = model(x1, ei1, ew1)
+    o2 = model(x2, ei2, ew2)
+    loss = info_nce_pairwise(o1["z"], o2["z"], temperature=0.5, max_nodes=16)
+    loss.backward()
+    assert torch.isfinite(loss)
+
+
 def test_sd_random_formula() -> None:
     # One group all in train, global 60/20/20 → high sd
     labels = ["train"] * 6 + ["test"] * 2 + ["val"] * 2
@@ -161,6 +204,37 @@ def test_soft_sd_random_weighted_and_stable_subset() -> None:
     # Legacy unweighted still works
     legacy = compute_l_hom(soft, hg, soft=True)
     assert torch.isfinite(legacy["l_hom"])
+
+
+def test_robust_and_log_balance_aggs() -> None:
+    n = 40
+    soft = torch.softmax(torch.randn(n, 3), dim=-1).detach().requires_grad_(True)
+    groups = [np.arange(i, i + 4) for i in range(0, 36, 4)]
+    from src.splits.vgae.homology_loss import (
+        HomologyGroups,
+        evaluate_split_all_aggs,
+        soft_sd_random_agg,
+        sd_group_balance_report,
+    )
+
+    hg = HomologyGroups(
+        orthogroup=np.full(n, -1, dtype=np.int64),
+        paragroup=np.full(n, -1, dtype=np.int64),
+        ortho_groups=tuple(groups[:4]),
+        para_groups=tuple(groups[4:]),
+    )
+    for agg in ("robust", "log_balance", "weighted", "mean"):
+        out = compute_l_hom(soft, hg, soft=True, agg=agg, max_groups=8, subset_seed=1)
+        assert torch.isfinite(out["l_hom"])
+        out["l_hom"].backward(retain_graph=True)
+    labels = ["train"] * 24 + ["test"] * 8 + ["val"] * 8
+    hard = evaluate_split_all_aggs(labels, hg)
+    assert set(hard) >= {"mean", "weighted", "robust", "log_balance"}
+    bal = sd_group_balance_report(labels, hg)
+    assert bal["ortho"]["n_groups"] >= 1
+    z = soft_sd_random_agg(soft, groups, agg="robust", max_groups=None, subset_seed=0)
+    assert torch.isfinite(z)
+
 
 
 def test_ema_term_norm_and_homology_first_compose() -> None:
