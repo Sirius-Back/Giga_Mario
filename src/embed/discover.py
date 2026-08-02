@@ -8,6 +8,7 @@ from pathlib import Path
 
 _BAD_RE = re.compile(r"_BAD_", re.IGNORECASE)
 _FOLD_RE = re.compile(r"^fold(\d+)$")
+_KEY_FOLD_RE = re.compile(r"/fold(\d+)$")
 
 
 @dataclass(frozen=True)
@@ -77,14 +78,38 @@ def _try_unit(
     )
 
 
-def discover_legnet_runs(runs_root: Path) -> list[LegNetRun]:
-    """Scan ``runs_unif/legnet`` for extractable units; skip ``*_BAD_*``."""
+def filter_loo_runs(
+    runs: list[LegNetRun], loo_fold: int | None
+) -> list[LegNetRun]:
+    """Keep only ``fold==loo_fold`` for LOO units; pass through non-LOO.
+
+    ``loo_fold=None`` keeps every fold (debug / full LOO tables).
+    Default publication figures use ``loo_fold=0`` (first CV fold).
+    """
+    if loo_fold is None:
+        return list(runs)
+    out: list[LegNetRun] = []
+    for r in runs:
+        if r.fold is None or r.fold == loo_fold:
+            out.append(r)
+    return out
+
+
+def discover_legnet_runs(
+    runs_root: Path, *, loo_fold: int | None = None
+) -> list[LegNetRun]:
+    """Scan ``runs_unif/legnet`` for extractable units; skip ``*_BAD_*``.
+
+    Symlinks are followed (e.g. ``run5_legnet_hashfrag`` → ``runs/run5``).
+    When ``loo_fold`` is set, only that LOO fold index is kept.
+    """
     runs_root = Path(runs_root)
     if not runs_root.is_dir():
         raise FileNotFoundError(f"LegNet runs root missing: {runs_root}")
 
     found: list[LegNetRun] = []
     for child in sorted(runs_root.iterdir()):
+        # Allow symlink dirs (legacy hashFrag run5 → runs_unif/legnet)
         if not child.is_dir():
             continue
         if _BAD_RE.search(child.name):
@@ -109,4 +134,4 @@ def discover_legnet_runs(runs_root: Path) -> list[LegNetRun]:
         if unit is not None:
             found.append(unit)
 
-    return found
+    return filter_loo_runs(found, loo_fold)
