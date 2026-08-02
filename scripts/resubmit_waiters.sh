@@ -41,7 +41,7 @@ PY
 then
   GPU=$(wait_gpu 1500)
   echo "LegNet best_split on GPU $GPU $(date -Iseconds)" | tee -a "$LOG"
-  conda run -n caduceus_env --no-capture-output python -m src.pipeline.best_split_metrics \
+  conda run -n legnet --no-capture-output python -m src.pipeline.best_split_metrics \
     --legnet-only --force --device "$GPU" 2>&1 | tee -a "$LOG" || true
   conda run -n caduceus_env --no-capture-output python -m src.pipeline.best_split_metrics --caduceus-only --force 2>&1 | tee -a "$LOG" || true
   conda run -n caduceus_env --no-capture-output python -m src.pipeline.compare_best_models 2>&1 | tee -a "$LOG" || true
