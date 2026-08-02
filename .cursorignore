@@ -252,3 +252,4 @@ blastdb/
 !runs/**
 /runs_aligned/
 /runs_unif/
+/VGAE/

@@ -321,6 +321,11 @@ mag/orthoparagroups_aligned_smoke/
 /runs_unif/**
 !/runs_unif/README.md
 
+# VGAE local pack/train scratch (keep launch scripts only)
+/VGAE/**
+!/VGAE/*.sh
+!/VGAE/README.md
+
 .sudo_as_admin_successful
 
 # --- Exceptions: track tiny pipeline pytest fixtures ---
