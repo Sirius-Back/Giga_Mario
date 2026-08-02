@@ -70,16 +70,18 @@ def test_halfviolin_similar_lengths(tmp_path: Path) -> None:
     metrics = _toy_metrics(tmp_path)
     frames = [pd.read_csv(p, sep="\t") for p in sorted(metrics.glob("*.pos.tsv.gz"))]
     df = pd.concat(frames, ignore_index=True)
-    lengths = similar_length_table(df, thresholds=(0.5, 0.9))
+    lengths = similar_length_table(df, thresholds=(0.5, 0.8))
     outdir = tmp_path / "figures"
     written = plot_halfviolin_similar_lengths(
         lengths,
         outdir,
         metric="similar_length_total",
-        thr_up=0.9,
+        thr_up=0.8,
         thr_down=0.5,
         dpi=100,
         stem="halfviolin_test",
+        trim=False,
+        y_gap=0.0,
     )
     stems = {p.suffix for p in written}
     assert {".pdf", ".svg", ".png"} <= stems

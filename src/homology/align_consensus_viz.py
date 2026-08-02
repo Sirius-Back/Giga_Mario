@@ -623,7 +623,7 @@ SCOPE_COLORS = {
     "paralogs": "#D55E00",  # Okabe–Ito vermillion
 }
 HALFVIOLIN_SCOPES = ("orthologs", "paralogs")
-HALFVIOLIN_THR_UP = 0.9
+HALFVIOLIN_THR_UP = 0.8
 HALFVIOLIN_THR_DOWN = 0.5
 
 
@@ -646,53 +646,72 @@ def _kde_density(values: np.ndarray, grid: np.ndarray) -> np.ndarray:
     return dens
 
 
+def _violin_support(
+    values: np.ndarray,
+    *,
+    n_grid: int = 256,
+    cut: float = 2.0,
+    trim: bool = False,
+) -> np.ndarray:
+    """Evaluation grid for a violin KDE.
+
+    ``trim=False`` (default): extend past data extremes by ``cut`` bandwidths
+    (seaborn-style). ``trim=True``: clip exactly to [min, max].
+    """
+    vals = np.asarray(values, dtype=float)
+    vals = vals[np.isfinite(vals)]
+    if vals.size == 0:
+        return np.linspace(0.0, 1.0, n_grid)
+    lo = float(vals.min())
+    hi = float(vals.max())
+    if trim or vals.size == 1 or float(np.std(vals)) < 1e-12:
+        if lo == hi:
+            pad = max(abs(lo) * 0.05, 1.0)
+            return np.linspace(lo - pad, hi + pad, n_grid)
+        return np.linspace(lo, hi, n_grid)
+    from scipy.stats import gaussian_kde
+
+    kde = gaussian_kde(vals)
+    bw = float(np.sqrt(kde.covariance.flat[0]))
+    return np.linspace(lo - cut * bw, hi + cut * bw, n_grid)
+
+
 def _draw_half_violin(
     ax,
     values: np.ndarray,
     *,
-    center_x: float,
+    x_offset: float,
     side: str,
     color: str,
-    width: float = 0.38,
+    height: float = 0.42,
     n_grid: int = 256,
     alpha: float = 0.85,
+    cut: float = 2.0,
+    trim: bool = False,
+    y_gap: float = 0.0,
 ) -> None:
-    """Fill a half-violin: ``side='up'`` uses +y, ``side='down'`` mirrors to −y."""
+    """Fill a half-violin: metric on x; ``side='up'`` dens +y, ``side='down'`` dens −y.
+
+    ``y_gap=0`` (nudge 0): upper and lower halves meet at y=0.
+    """
     vals = np.asarray(values, dtype=float)
     vals = vals[np.isfinite(vals)]
     if vals.size == 0:
         return
-    y_lo = float(vals.min())
-    y_hi = float(vals.max())
-    pad = max((y_hi - y_lo) * 0.05, 1.0)
-    grid = np.linspace(max(0.0, y_lo - pad), y_hi + pad, n_grid)
+    grid = _violin_support(vals, n_grid=n_grid, cut=cut, trim=trim)
     dens = _kde_density(vals, grid)
     peak = float(dens.max()) if dens.size else 0.0
     if peak <= 0.0:
         return
-    dens = dens / peak * width
-    y_plot = grid if side == "up" else -grid
-    ax.fill_betweenx(
-        y_plot,
-        center_x,
-        center_x + dens,
-        color=color,
-        alpha=alpha,
-        linewidth=0,
-        zorder=2,
-    )
-    ax.plot(center_x + dens, y_plot, color=color, lw=0.9, alpha=min(1.0, alpha + 0.1), zorder=3)
-    # Median tick (no text).
-    med = float(np.median(vals))
-    med_y = med if side == "up" else -med
-    ax.plot(
-        [center_x, center_x + width * 0.55],
-        [med_y, med_y],
-        color=color,
-        lw=1.4,
-        solid_capstyle="butt",
-        zorder=4,
-    )
+    dens = dens / peak * height
+    x = grid + float(x_offset)
+    gap = float(y_gap)
+    if side == "up":
+        y0, y1 = gap, dens + gap
+    else:
+        y0, y1 = -gap, -(dens + gap)
+    ax.fill_between(x, y0, y1, color=color, alpha=alpha, linewidth=0, zorder=2)
+    ax.plot(x, y1, color=color, lw=0.9, alpha=min(1.0, alpha + 0.1), zorder=3)
 
 
 def plot_halfviolin_similar_lengths(
@@ -705,11 +724,15 @@ def plot_halfviolin_similar_lengths(
     scopes: tuple[str, ...] = HALFVIOLIN_SCOPES,
     aspect: tuple[float, float] = (9.0, 5.0),
     dpi: int = 300,
-    stem: str = "Figure_11_halfviolin_ortho_para_thr0p9_up_0p5_down",
+    stem: str = "Figure_11_halfviolin_ortho_para_thr0p8_up_0p5_down",
+    trim: bool = False,
+    cut: float = 2.0,
+    y_gap: float = 0.0,
 ) -> list[Path]:
     """Orthologs (left) / paralogs (right); thr_up half-violin up, thr_down down.
 
-    Presentation figure: no titles, axis labels, tick labels, or legend.
+    Metric runs horizontally; density opens vertically (up=thr_up, down=thr_down).
+    Presentation figure: no titles, axis labels, tick labels, legend, midline, or median.
     Aspect ratio defaults to 9:5. Uses the same similar-length table as Figure_03/04.
     """
     import matplotlib.pyplot as plt
@@ -745,15 +768,15 @@ def plot_halfviolin_similar_lengths(
     ax.set_facecolor("white")
     fig.subplots_adjust(left=0.03, right=0.99, bottom=0.04, top=0.98)
 
-    # Tighter x spacing: orthologs left, paralogs right.
-    centers = {scope: 0.55 * float(i) for i, scope in enumerate(scopes)}
-    ymax = 0.0
+    # Shared metric scale; scopes side-by-side with a gap.
+    panel: dict[str, dict[str, np.ndarray]] = {}
+    global_max = 0.0
+    global_min = 0.0
     for scope in scopes:
         if scope not in SCOPE_COLORS:
             raise KeyError(f"No color for scope {scope!r}; known={sorted(SCOPE_COLORS)}")
-        color = SCOPE_COLORS[scope]
-        cx = centers[scope]
-        for thr, side in ((thr_up, "up"), (thr_down, "down")):
+        panel[scope] = {}
+        for thr in (thr_up, thr_down):
             sub = length_df[
                 (length_df["scope"] == scope)
                 & (np.isclose(length_df["threshold"].astype(float), thr))
@@ -761,19 +784,46 @@ def plot_halfviolin_similar_lengths(
             vals = sub[metric].to_numpy(dtype=float)
             if vals.size == 0:
                 raise ValueError(f"No rows for scope={scope!r} threshold={thr}")
+            panel[scope][str(thr)] = vals
             finite = vals[np.isfinite(vals)]
             if finite.size:
-                ymax = max(ymax, float(finite.max()))
-            _draw_half_violin(ax, vals, center_x=cx, side=side, color=color, width=0.42)
+                global_max = max(global_max, float(finite.max()))
+                global_min = min(global_min, float(finite.min()))
 
-    # Baseline between up / down halves.
-    ax.axhline(0.0, color="#333333", lw=0.9, zorder=1)
-    pad_y = max(ymax * 0.06, 1.0)
-    ax.set_ylim(-(ymax + pad_y), ymax + pad_y)
-    x_right = centers[scopes[-1]] + 0.55
-    ax.set_xlim(-0.15, x_right)
+    # Layout span: data range plus untrimmed KDE tails (approx cut·bw ≤ span).
+    span = max(global_max - global_min, 1.0)
+    layout_span = span * (1.0 + 0.15 if not trim else 1.0)
+    gap = max(layout_span * 0.18, 20.0)
+    x_offsets = {scope: float(i) * (layout_span + gap) for i, scope in enumerate(scopes)}
+    for scope in scopes:
+        color = SCOPE_COLORS[scope]
+        x0 = x_offsets[scope]
+        _draw_half_violin(
+            ax,
+            panel[scope][str(thr_up)],
+            x_offset=x0,
+            side="up",
+            color=color,
+            cut=cut,
+            trim=trim,
+            y_gap=y_gap,
+        )
+        _draw_half_violin(
+            ax,
+            panel[scope][str(thr_down)],
+            x_offset=x0,
+            side="down",
+            color=color,
+            cut=cut,
+            trim=trim,
+            y_gap=y_gap,
+        )
 
-    # Strip all chrome for slide overlays.
+    x_right = x_offsets[scopes[-1]] + layout_span + gap * 0.15
+    ax.set_xlim(global_min - gap * 0.1, x_right)
+    ax.set_ylim(-0.55, 0.55)
+
+    # Strip all chrome for slide overlays (no midline, no median marks).
     ax.set_xticks([])
     ax.set_yticks([])
     ax.set_xlabel("")
