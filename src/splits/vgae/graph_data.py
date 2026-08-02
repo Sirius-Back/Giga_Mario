@@ -379,6 +379,11 @@ def pack_region_graph(
     if not marked_dir.is_dir():
         raise FileNotFoundError(f"MARKED directory missing: {marked_dir}")
 
+    print(
+        f"[vgae-pack] loading MARKED sequences n_ids={len(ids)} "
+        f"from {marked_dir} (feature_k={feat_k}, project_dim={project_dim})",
+        flush=True,
+    )
     try:
         sequences = load_fna_directory(marked_dir, ids=ids)
     except FileNotFoundError:
@@ -414,6 +419,10 @@ def pack_region_graph(
         sequences = load_fna_directory(marked_dir, ids=ids)
         _ = old_index  # kept for clarity / future diagnostics
 
+    print(
+        f"[vgae-pack] loaded {len(sequences)} sequences; building features…",
+        flush=True,
+    )
     x: np.ndarray
     feature_names: tuple[str, ...]
     proj_meta: dict[str, Any]
@@ -434,6 +443,11 @@ def pack_region_graph(
             )
     assert_no_homology_features(feature_names)
     edge_w = _normalize_edge_weights(edge_w_raw)
+    print(
+        f"[vgae-pack] features ready X={x.shape} edges={len(edge_u)} "
+        f"projection={proj_meta.get('applied')}",
+        flush=True,
+    )
 
     # Persist pack artifacts
     np.savez_compressed(
