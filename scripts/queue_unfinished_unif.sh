@@ -46,6 +46,9 @@ is_running() {
     END {exit found?0:1}'
 }
 
+
+# run39 force_adv removed — adversarial skipped by user (2026-08-02)
+
 # --- run12: archive partial direct then retrain ---
 if [ -f runs_unif/caduceus/run12_caduceus_kmer_k4/pipeline_done.json ]; then
   echo "run12 done — skip" | tee -a "$LOG"
