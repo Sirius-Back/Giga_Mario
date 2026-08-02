@@ -1,4 +1,4 @@
-"""CLI: presentation half-violin of similar lengths (ortho|para × thr 0.9↑ / 0.5↓).
+"""CLI: presentation half-violin of similar lengths (ortho|para × thr 0.8↑ / 0.5↓).
 
 Reads the existing ``table_similar_lengths.tsv`` from consensus viz (same metric
 as Figure_03/04). Labels stripped for slide overlays; aspect 9:5.
@@ -48,7 +48,12 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument(
         "--stem",
         type=str,
-        default="Figure_11_halfviolin_ortho_para_thr0p9_up_0p5_down",
+        default="Figure_11_halfviolin_ortho_para_thr0p8_up_0p5_down",
+    )
+    p.add_argument(
+        "--trim",
+        action="store_true",
+        help="Trim violin KDE to data min/max (default: no trim, cut=2 bandwidths)",
     )
     args = p.parse_args(argv)
     if not args.length_table.is_file():
@@ -64,6 +69,8 @@ def main(argv: list[str] | None = None) -> int:
         thr_down=args.thr_down,
         dpi=args.dpi,
         stem=args.stem,
+        trim=bool(args.trim),
+        y_gap=0.0,
     )
     print(f"[halfviolin] wrote {len(written)} paths", flush=True)
     for path in written:
