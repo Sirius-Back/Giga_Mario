@@ -177,6 +177,139 @@ def build_compositional_features(
     return x, feature_names
 
 
+def build_compositional_features_projected(
+    ids: Sequence[str],
+    sequences: dict[str, str],
+    *,
+    k: int,
+    project_dim: int,
+    seed: int = 42,
+) -> tuple[np.ndarray, tuple[str, ...], dict[str, Any]]:
+    """Build GC + projected k-mer features **without** a full ``(n, 4**k)`` matrix.
+
+    Uses sparse observed k-mers (``count_kmers``) and accumulates
+    ``R[idx]`` rows — O(#observed kmers · project_dim) per sequence, not
+    O(4**k · project_dim).
+    """
+    d = int(project_dim)
+    if d < 2:
+        raise ValueError(f"project_dim must be >= 2; got {d}")
+    k = int(k)
+    f_full = 1 + 4**k
+    if f_full <= d:
+        x, names = build_compositional_features(ids, sequences, k=k)
+        return x, names, {"applied": False, "reason": "already_small"}
+
+    rng = np.random.default_rng(int(seed))
+    out_rest = d - 1
+    raw = rng.standard_normal((4**k, out_rest), dtype=np.float64)
+    q, _ = np.linalg.qr(raw, mode="reduced")
+    rmat = q[:, :out_rest].astype(np.float32)  # (4**k, out_rest)
+
+    # Prefer shared counter (dict of observed kmers only)
+    try:
+        from src.splits.sbs.backends.kmer import count_kmers
+
+        def _obs(seq: str) -> dict[str, float]:
+            return count_kmers(seq, k, engine="auto")
+
+    except Exception:
+
+        def _obs(seq: str) -> dict[str, float]:
+            counts: dict[str, float] = {}
+            s = "".join(ch for ch in seq.upper() if not ch.isspace())
+            if len(s) < k:
+                return counts
+            for i in range(len(s) - k + 1):
+                mer = s[i : i + k]
+                if all(c in _BASE_INDEX for c in mer):
+                    counts[mer] = counts.get(mer, 0.0) + 1.0
+            return counts
+
+    n = len(ids)
+    x = np.zeros((n, d), dtype=np.float32)
+    missing: list[str] = []
+    report_every = max(1, n // 20)
+    for i, rid in enumerate(ids):
+        seq = sequences.get(str(rid))
+        if seq is None:
+            missing.append(str(rid))
+            continue
+        x[i, 0] = float(gc_percent(seq))
+        obs = _obs(seq)
+        total = float(sum(obs.values()))
+        if total > 0.0:
+            acc = np.zeros(out_rest, dtype=np.float64)
+            for mer, c in obs.items():
+                idx = _kmer_index(mer)
+                if idx is None:
+                    continue
+                acc += (float(c) / total) * rmat[idx]
+            x[i, 1:] = acc.astype(np.float32)
+        if (i + 1) % report_every == 0 or (i + 1) == n:
+            print(
+                f"[vgae-pack] projected features {i + 1}/{n} "
+                f"({100.0 * (i + 1) / n:.0f}%)",
+                flush=True,
+            )
+    if missing:
+        raise FileNotFoundError(
+            f"missing MARKED sequences for {len(missing)} graph ID(s); "
+            f"example={missing[0]!r}"
+        )
+    names = ("GC_pct",) + tuple(f"kmer_proj_{j}" for j in range(out_rest))
+    meta = {
+        "applied": True,
+        "from_dim": f_full,
+        "to_dim": d,
+        "seed": int(seed),
+        "kept_gc": True,
+        "streamed": True,
+        "sparse_project": True,
+    }
+    return x, names, meta
+
+
+def project_features_fixed(
+    x: np.ndarray,
+    feature_names: Sequence[str],
+    *,
+    project_dim: int,
+    seed: int = 42,
+) -> tuple[np.ndarray, tuple[str, ...], dict[str, Any]]:
+    """Seeded Gaussian projection ``X @ R`` (additive; leaves dense pack optional).
+
+    Keeps column 0 (``GC_pct``) unprojected and projects the remaining k-mer
+    block into ``project_dim - 1`` dims when ``project_dim >= 2``.
+    """
+    d = int(project_dim)
+    if d < 2:
+        raise ValueError(f"project_dim must be >= 2; got {d}")
+    if x.ndim != 2:
+        raise ValueError(f"x must be 2D; got {x.shape}")
+    if x.shape[1] <= d:
+        return x, tuple(feature_names), {"applied": False, "reason": "already_small"}
+    rng = np.random.default_rng(int(seed))
+    # Preserve GC; project k-mer block
+    gc = x[:, :1]
+    rest = x[:, 1:]
+    out_rest_dim = d - 1
+    # Orthogonal-ish via QR on tall random matrix
+    raw = rng.standard_normal((rest.shape[1], out_rest_dim), dtype=np.float64)
+    q, _ = np.linalg.qr(raw, mode="reduced")
+    proj = (rest.astype(np.float64) @ q[:, :out_rest_dim]).astype(np.float32)
+    x2 = np.concatenate([gc, proj], axis=1)
+    names = ("GC_pct",) + tuple(f"kmer_proj_{i}" for i in range(out_rest_dim))
+    meta = {
+        "applied": True,
+        "from_dim": int(x.shape[1]),
+        "to_dim": int(d),
+        "seed": int(seed),
+        "kept_gc": True,
+    }
+    return x2, names, meta
+
+
 def _features_chunk(seqs: list[str], k: int) -> np.ndarray:
     out = np.zeros((len(seqs), 1 + 4**int(k)), dtype=np.float32)
     for i, seq in enumerate(seqs):
@@ -198,10 +331,18 @@ def pack_region_graph(
     pack_dir: Path,
     *,
     k: int | None = None,
+    feature_k: int | None = None,
+    project_dim: int | None = None,
+    project_seed: int = 42,
     max_ids: int | None = None,
     intersect_allow: bool = False,
 ) -> PackedGraph:
-    """Load contingency graph, attach GC/k-mer features, persist under ``pack_dir``."""
+    """Load contingency graph, attach GC/k-mer features, persist under ``pack_dir``.
+
+    ``k`` — graph k (from meta when omitted). ``feature_k`` — compositional
+    spectrum k (defaults to ``k``). ``project_dim`` — optional seeded projection
+    of the k-mer block so full-panel dense ``4**feature_k`` fits GPU RAM (k≥7).
+    """
     graph_dir = Path(graph_dir)
     marked_dir = Path(marked_dir)
     pack_dir = Path(pack_dir)
@@ -213,6 +354,9 @@ def pack_region_graph(
     k_use = int(k if k is not None else meta_src.get("k") or 5)
     if k_use < 1:
         raise ValueError(f"invalid k={k_use}")
+    feat_k = int(feature_k) if feature_k is not None else k_use
+    if feat_k < 1:
+        raise ValueError(f"invalid feature_k={feat_k}")
 
     if max_ids is not None:
         max_ids = int(max_ids)
@@ -270,7 +414,24 @@ def pack_region_graph(
         sequences = load_fna_directory(marked_dir, ids=ids)
         _ = old_index  # kept for clarity / future diagnostics
 
-    x, feature_names = build_compositional_features(ids, sequences, k=k_use)
+    x: np.ndarray
+    feature_names: tuple[str, ...]
+    proj_meta: dict[str, Any]
+    if project_dim is not None and (1 + 4**feat_k) > int(project_dim):
+        x, feature_names, proj_meta = build_compositional_features_projected(
+            ids,
+            sequences,
+            k=feat_k,
+            project_dim=int(project_dim),
+            seed=int(project_seed),
+        )
+    else:
+        x, feature_names = build_compositional_features(ids, sequences, k=feat_k)
+        proj_meta = {"applied": False}
+        if project_dim is not None:
+            x, feature_names, proj_meta = project_features_fixed(
+                x, feature_names, project_dim=int(project_dim), seed=int(project_seed)
+            )
     assert_no_homology_features(feature_names)
     edge_w = _normalize_edge_weights(edge_w_raw)
 
@@ -294,6 +455,7 @@ def pack_region_graph(
         "format": "gigamario_vgae_pack_v1",
         "grain": "region",
         "k": k_use,
+        "feature_k": feat_k,
         "n_nodes": len(ids),
         "n_edges": int(len(edge_u)),
         "n_features": int(x.shape[1]),
@@ -304,6 +466,7 @@ def pack_region_graph(
         "source_meta": meta_src,
         "max_ids": max_ids,
         "edge_weight_transform": "log1p_then_maxnorm",
+        "feature_projection": proj_meta,
     }
     (pack_dir / "feature_meta.json").write_text(
         json.dumps(meta, indent=2, default=str) + "\n", encoding="utf-8"

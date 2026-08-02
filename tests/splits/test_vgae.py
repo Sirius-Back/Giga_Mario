@@ -22,6 +22,7 @@ from src.splits.vgae.homology_loss import (
     soft_sd_random,
     soft_sd_random_weighted,
 )
+from src.splits.vgae.graph_data import project_features_fixed
 from src.splits.vgae.model import (
     ClassicVGAE,
     gumbel_softmax_roles,
@@ -206,6 +207,17 @@ def test_ema_term_norm_and_homology_first_compose() -> None:
         ema=None,
     )
     assert torch.isfinite(legacy["loss"])
+
+
+def test_project_features_fixed_preserves_gc() -> None:
+    rng = np.random.default_rng(0)
+    x = rng.random((20, 1 + 16), dtype=np.float32)
+    names = ("GC_pct",) + tuple(f"kmer_{i}" for i in range(16))
+    x2, names2, meta = project_features_fixed(x, names, project_dim=8, seed=1)
+    assert meta["applied"] is True
+    assert x2.shape == (20, 8)
+    assert names2[0] == "GC_pct"
+    assert np.allclose(x2[:, 0], x[:, 0])
 
 
 def test_pack_region_graph_tiny(tmp_path: Path) -> None:

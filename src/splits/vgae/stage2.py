@@ -95,8 +95,27 @@ def run_stage2_hash_vgae(
             k=k,
             max_edges=max_edges,
             max_ids=max_ids,
+            project_dim=train_kw.get("project_dim"),
+            project_seed=int(train_kw.get("project_seed", seed)),
         )
     assert_no_homology_features(pack.feature_names)
+    # Make real-data scale obvious: GCN is on 4**k hash nodes; L_hom/split on all regions
+    _n_r = len(incidence["region_ids"])
+    _nnz = int(np.asarray(incidence["indices"]).shape[0])
+    _expected_vocab = 4 ** int(k)
+    print(
+        f"[vgae-s2] real panel: n_regions={_n_r} marked={marked_dir} "
+        f"n_hash_nodes={pack.n_nodes} (k={k}, 4**k={_expected_vocab}) "
+        f"n_edges={pack.n_edges} incidence_nnz={_nnz} "
+        f"max_ids={max_ids!r} homology_in_encoder=False",
+        flush=True,
+    )
+    if max_ids is not None:
+        print(
+            f"[vgae-s2] WARNING: max_ids={max_ids} truncates the region panel "
+            "(not a full-panel run)",
+            flush=True,
+        )
 
     torch.manual_seed(int(seed))
     np.random.seed(int(seed))

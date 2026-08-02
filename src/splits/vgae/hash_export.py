@@ -14,6 +14,7 @@ from src.splits.vgae.graph_data import (
     PackedGraph,
     assert_no_homology_features,
     build_compositional_features,
+    build_compositional_features_projected,
     dense_kmer_relative,
 )
 
@@ -162,6 +163,8 @@ def pack_hash_graph(
     min_cooccur: int = 2,
     max_edges: int = 500_000,
     max_ids: int | None = None,
+    project_dim: int | None = None,
+    project_seed: int = 42,
 ) -> tuple[PackedGraph, dict[str, Any]]:
     """Build hash-node PackedGraph + incidence for pooling back to regions."""
     marked_dir = Path(marked_dir)
@@ -187,7 +190,17 @@ def pack_hash_graph(
         raise RuntimeError(f"hash graph too small: n_hashes={n_h}")
 
     # Region compositional features for incidence pooling
-    region_x, feat_names = build_compositional_features(ids, sequences_map, k=k)
+    proj_meta: dict[str, Any] = {"applied": False}
+    if project_dim is not None and (1 + 4 ** int(k)) > int(project_dim):
+        region_x, feat_names, proj_meta = build_compositional_features_projected(
+            ids,
+            sequences_map,
+            k=k,
+            project_dim=int(project_dim),
+            seed=int(project_seed),
+        )
+    else:
+        region_x, feat_names = build_compositional_features(ids, sequences_map, k=k)
     assert_no_homology_features(feat_names)
 
     # Hash node features: GC of decoded k-mer + incidence-pooled region X mean
@@ -208,7 +221,12 @@ def pack_hash_graph(
             # Fallback: features of the k-mer string itself
             kmer = _decode_hash(int(hash_values[h]), k)
             x[h, 0] = float(gc_percent(kmer))
-            x[h, 1:] = dense_kmer_relative(kmer, k)
+            km = dense_kmer_relative(kmer, k)
+            if km.shape[0] == x.shape[1] - 1:
+                x[h, 1:] = km
+            else:
+                # Projected feature space: leave zeros aside from GC
+                pass
 
     # Override GC column with decoded-hash GC (compositional signal of the node)
     for h in range(n_h):
@@ -261,6 +279,7 @@ def pack_hash_graph(
         "min_cooccur": int(min_cooccur),
         "n_edges_uncapped": int(exported["n_edges_uncapped"]),
         "max_ids": max_ids,
+        "feature_projection": proj_meta,
     }
     (pack_dir / "feature_meta.json").write_text(
         json.dumps(meta, indent=2, default=str) + "\n", encoding="utf-8"

@@ -16,6 +16,8 @@ def run_vgae_split_assign(
     marked_dir: Path | None = None,
     seed: int = 42,
     k: int | None = None,
+    feature_k: int | None = None,
+    project_dim: int | None = None,
     max_ids: int | None = None,
     ratios: tuple[float, float, float] = (3.0, 1.0, 1.0),
     device: str | None = None,
@@ -44,6 +46,8 @@ def run_vgae_split_assign(
             Path(marked_dir),
             run_pack,
             k=k,
+            feature_k=feature_k,
+            project_dim=project_dim,
             max_ids=max_ids,
         )
 
