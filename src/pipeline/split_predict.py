@@ -43,6 +43,7 @@ SUPPORTED_SPLIT_TYPES = (
     "mmseqs",
     "paralogs_only",
     "loco",
+    "vgae",
 )
 
 
@@ -587,6 +588,51 @@ def _run_loco_split_predict(
     return out
 
 
+def _run_vgae_split_predict(
+    *,
+    outdir: Path,
+    seed: int,
+    id_csv: Path | None,
+    marked_fasta: Path | None,
+    fna: Path | None,
+    ratios: tuple[float, float, float] | None,
+    max_ids: int | None,
+    kmer_size: Sequence[int] | int,
+    vgae_graph_dir: Path | None,
+    vgae_device: str | None,
+    vgae_skip_train: bool,
+) -> Path:
+    """VGAE Stage-1 region-graph split (packed GC/k-mer features; no OG/PG in GCN)."""
+    from src.splits.vgae.split_assign import run_vgae_split_assign
+
+    _ = id_csv  # IDs come from the contingency graph ids.txt
+    marked = marked_fasta or fna
+    if marked is None:
+        raise ValueError("type=vgae requires --marked / --fna (MARKED sequences)")
+    if vgae_graph_dir is None:
+        raise ValueError(
+            "type=vgae requires vgae_graph_dir=… pointing at a pangenome "
+            "{outdir}/graph/ (e.g. runs_unif/.../graph)"
+        )
+    k = _normalize_pangenome_k(kmer_size)
+    ratio_t = ratios if ratios is not None else (3.0, 1.0, 1.0)
+    summary = run_vgae_split_assign(
+        outdir=Path(outdir),
+        graph_dir=Path(vgae_graph_dir),
+        marked_dir=Path(marked),
+        seed=seed,
+        k=k,
+        max_ids=max_ids,
+        ratios=ratio_t,
+        device=vgae_device,
+        skip_train=bool(vgae_skip_train),
+    )
+    out = Path(summary["split_csv"])
+    if not out.is_file():
+        raise FileNotFoundError(f"vgae split did not write split.csv: {out}")
+    return out
+
+
 def run_split_predict(
     *,
     outdir: Path,
@@ -637,6 +683,9 @@ def run_split_predict(
     mmseqs_bin: Path | None = None,
     homology_edges: Path | None = None,
     homology_nodes: Path | None = None,
+    vgae_graph_dir: Path | None = None,
+    vgae_device: str | None = None,
+    vgae_skip_train: bool = False,
 ) -> Path:
     """
     Write `{outdir}/split.csv` with columns ID|train_test|fold.
@@ -735,6 +784,23 @@ def run_split_predict(
             p_test=p_test,
             threads=threads,
             force=force,
+        )
+
+    if type == "vgae":
+        if fold_csv is None:
+            warnings.warn("Warning: folds are not included", UserWarning, stacklevel=2)
+        return _run_vgae_split_predict(
+            outdir=outdir,
+            seed=seed,
+            id_csv=id_csv,
+            marked_fasta=marked_fasta,
+            fna=fna,
+            ratios=ratios,
+            max_ids=max_ids,
+            kmer_size=kmer_size,
+            vgae_graph_dir=vgae_graph_dir,
+            vgae_device=vgae_device,
+            vgae_skip_train=vgae_skip_train,
         )
 
     if type == "pangenome":

@@ -71,6 +71,40 @@ int pangenome_hash_majority_clusters(
     int32_t *n_edges_out
 );
 
+/*
+ * Export the *hash-node* graph for VGAE Stage 2.
+ *
+ * Nodes = repeat hashes (df >= min_df). Edges = hash pairs that co-occur in
+ * >= min_cooccur sequences (default 2); weight = co-occurrence count.
+ * Incidence CSR maps each region → its repeat-hash node indices.
+ *
+ * Output buffers may be nullptr to query sizes only (then only *_out counts
+ * are written). When non-null, capacities are max_hashes / max_edges /
+ * max_incidence.
+ *
+ * Returns 0 on success, 1 invalid args, 2 allocation failure, 3 buffer too small.
+ */
+int pangenome_export_hash_graph(
+    const char *seq_blob,
+    const int64_t *offsets,
+    int32_t n_regions,
+    int k,
+    int32_t min_df,
+    int32_t min_cooccur,
+    uint64_t *hash_values_out,
+    int32_t max_hashes,
+    int32_t *n_hashes_out,
+    int32_t *edge_u_out,
+    int32_t *edge_v_out,
+    int32_t *edge_w_out,
+    int32_t max_edges,
+    int32_t *n_edges_out,
+    int32_t *inc_indptr_out,
+    int32_t *inc_indices_out,
+    int32_t max_incidence,
+    int32_t *n_incidence_out
+);
+
 #ifdef __cplusplus
 }
 #endif

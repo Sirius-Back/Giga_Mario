@@ -421,3 +421,152 @@ extern "C" int pangenome_hash_majority_clusters(
     *n_edges_out = n_edges;
     return 0;
 }
+
+extern "C" int pangenome_export_hash_graph(
+    const char *seq_blob,
+    const int64_t *offsets,
+    int32_t n_regions,
+    int k,
+    int32_t min_df,
+    int32_t min_cooccur,
+    uint64_t *hash_values_out,
+    int32_t max_hashes,
+    int32_t *n_hashes_out,
+    int32_t *edge_u_out,
+    int32_t *edge_v_out,
+    int32_t *edge_w_out,
+    int32_t max_edges,
+    int32_t *n_edges_out,
+    int32_t *inc_indptr_out,
+    int32_t *inc_indices_out,
+    int32_t max_incidence,
+    int32_t *n_incidence_out
+) {
+    if (seq_blob == nullptr || offsets == nullptr || n_regions <= 0 ||
+        k < 1 || k > PANGENOME_MAX_K || min_df < 1 || min_cooccur < 1 ||
+        n_hashes_out == nullptr || n_edges_out == nullptr ||
+        n_incidence_out == nullptr) {
+        return 1;
+    }
+
+    const uint64_t mask =
+        (k == 32) ? ~uint64_t{0} : ((uint64_t{1} << (2 * k)) - uint64_t{1});
+
+    std::unordered_map<uint64_t, int32_t> df;
+    df.reserve(static_cast<size_t>(n_regions) * 64u);
+    std::unordered_set<uint64_t> local;
+    local.reserve(256u);
+
+    for (int32_t r = 0; r < n_regions; ++r) {
+        extract_unique_kmers(seq_blob, offsets[r], offsets[r + 1], k, mask, &local);
+        for (uint64_t h : local) {
+            ++df[h];
+        }
+    }
+
+    std::vector<uint64_t> hash_values;
+    hash_values.reserve(df.size() / 2u + 1u);
+    std::unordered_map<uint64_t, int32_t> hash_to_idx;
+    hash_to_idx.reserve(df.size() / 2u + 1u);
+    for (const auto &kv : df) {
+        if (kv.second >= min_df) {
+            hash_to_idx.emplace(kv.first, static_cast<int32_t>(hash_values.size()));
+            hash_values.push_back(kv.first);
+        }
+    }
+    const int32_t n_hashes = static_cast<int32_t>(hash_values.size());
+    *n_hashes_out = n_hashes;
+
+    std::vector<std::vector<int32_t>> seq_hash_ids(static_cast<size_t>(n_regions));
+    std::unordered_map<uint64_t, int32_t> hash_pair_count;
+    hash_pair_count.reserve(static_cast<size_t>(std::max(n_hashes, 1)) * 4u);
+    int64_t incidence_total = 0;
+
+    for (int32_t r = 0; r < n_regions; ++r) {
+        extract_unique_kmers(seq_blob, offsets[r], offsets[r + 1], k, mask, &local);
+        auto &ids = seq_hash_ids[static_cast<size_t>(r)];
+        ids.clear();
+        ids.reserve(local.size());
+        for (uint64_t h : local) {
+            const auto it = hash_to_idx.find(h);
+            if (it == hash_to_idx.end()) {
+                continue;
+            }
+            ids.push_back(it->second);
+        }
+        std::sort(ids.begin(), ids.end());
+        ids.erase(std::unique(ids.begin(), ids.end()), ids.end());
+        incidence_total += static_cast<int64_t>(ids.size());
+        if (ids.size() >= 2) {
+            for (size_t i = 0; i < ids.size(); ++i) {
+                for (size_t j = i + 1; j < ids.size(); ++j) {
+                    const uint64_t pk = pack_edge_key(ids[i], ids[j]);
+                    ++hash_pair_count[pk];
+                }
+            }
+        }
+    }
+
+    int32_t n_edges_all = 0;
+    for (const auto &kv : hash_pair_count) {
+        if (kv.second >= min_cooccur) {
+            ++n_edges_all;
+        }
+    }
+    *n_edges_out = n_edges_all;
+    *n_incidence_out = static_cast<int32_t>(
+        std::min<int64_t>(incidence_total, static_cast<int64_t>(2147483647))
+    );
+
+    const bool write_hashes = hash_values_out != nullptr;
+    const bool write_edges =
+        edge_u_out != nullptr && edge_v_out != nullptr && edge_w_out != nullptr;
+    const bool write_inc = inc_indptr_out != nullptr && inc_indices_out != nullptr;
+    if (!write_hashes && !write_edges && !write_inc) {
+        return 0;
+    }
+
+    if (write_hashes) {
+        if (max_hashes < n_hashes) {
+            return 3;
+        }
+        for (int32_t i = 0; i < n_hashes; ++i) {
+            hash_values_out[i] = hash_values[static_cast<size_t>(i)];
+        }
+    }
+
+    if (write_edges) {
+        int32_t n_edges = 0;
+        for (const auto &kv : hash_pair_count) {
+            if (kv.second < min_cooccur) {
+                continue;
+            }
+            if (n_edges >= max_edges) {
+                break;
+            }
+            edge_u_out[n_edges] = static_cast<int32_t>(kv.first >> 32);
+            edge_v_out[n_edges] = static_cast<int32_t>(kv.first & 0xffffffffu);
+            edge_w_out[n_edges] = kv.second;
+            ++n_edges;
+        }
+        *n_edges_out = n_edges;
+    }
+
+    if (write_inc) {
+        if (incidence_total > static_cast<int64_t>(max_incidence)) {
+            return 3;
+        }
+        int32_t cursor = 0;
+        for (int32_t r = 0; r < n_regions; ++r) {
+            inc_indptr_out[r] = cursor;
+            const auto &ids = seq_hash_ids[static_cast<size_t>(r)];
+            for (int32_t hid : ids) {
+                inc_indices_out[cursor] = hid;
+                ++cursor;
+            }
+        }
+        inc_indptr_out[n_regions] = cursor;
+        *n_incidence_out = cursor;
+    }
+    return 0;
+}
