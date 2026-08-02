@@ -34,16 +34,36 @@ def import_legnet_vendor(vendor: Path | None = None) -> Path:
 
 def encode_agct(seq: str, *, seq_len: int = SEQ_LEN) -> torch.Tensor:
     """One-hot ``[4, L]`` float32; N → 0.25 on all channels (vendor Seq2Tensor)."""
-    if len(seq) != seq_len:
-        raise ValueError(f"seq len {len(seq)} != {seq_len}")
-    x = torch.zeros(4, seq_len, dtype=torch.float32)
-    for i, ch in enumerate(seq.upper()):
-        idx = _BASE_TO_IDX.get(ch, -1)
-        if idx < 0:
-            x[:, i] = 0.25
-        else:
-            x[idx, i] = 1.0
-    return x
+    return encode_agct_batch([seq], seq_len=seq_len)[0]
+
+
+def encode_agct_batch(
+    sequences: list[str], *, seq_len: int = SEQ_LEN
+) -> torch.Tensor:
+    """One-hot ``[B, 4, L]`` float32; N/other → 0.25 on all channels."""
+    b = len(sequences)
+    if b == 0:
+        return torch.zeros(0, 4, seq_len, dtype=torch.float32)
+    # Map ASCII → index: A=0,G=1,C=2,T=3, else -1
+    table = np.full(128, -1, dtype=np.int8)
+    table[ord("A")] = table[ord("a")] = 0
+    table[ord("G")] = table[ord("g")] = 1
+    table[ord("C")] = table[ord("c")] = 2
+    table[ord("T")] = table[ord("t")] = 3
+    idx = np.empty((b, seq_len), dtype=np.int8)
+    for i, seq in enumerate(sequences):
+        if len(seq) != seq_len:
+            raise ValueError(f"seq len {len(seq)} != {seq_len}")
+        arr = np.frombuffer(seq.encode("ascii"), dtype=np.uint8)
+        idx[i] = table[arr]
+    x = np.zeros((b, 4, seq_len), dtype=np.float32)
+    for c in range(4):
+        x[:, c, :] = (idx == c).astype(np.float32)
+    nmask = idx < 0
+    if nmask.any():
+        for c in range(4):
+            x[:, c, :][nmask] = 0.25
+    return torch.from_numpy(x)
 
 
 def reverse_complement_onehot(x: torch.Tensor) -> torch.Tensor:
@@ -196,7 +216,7 @@ class LegNetLayerExtractor:
             raise ValueError("layers must match extractor construction; rebuild to change")
         if not sequences:
             return {k: np.zeros((0, LAYER_DIMS[k]), dtype=np.float32) for k in self.layers}
-        x = torch.stack([encode_agct(s) for s in sequences], dim=0)
+        x = encode_agct_batch(sequences)
         tensors = self.extract_tensor(x, rc_average=True)
         return {k: tensors[k].float().cpu().numpy().astype(np.float32) for k in self.layers}
 

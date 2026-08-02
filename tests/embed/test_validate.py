@@ -64,10 +64,10 @@ def _write_minimal_unit(tmp: Path, *, good: bool = True) -> LegNetRun:
         tsv = tsv_dir / "all.tsv"
         tsv.write_text(
             "seq_id\tseq\tmean_value\tfold\trev\n"
-            f"1\t{seq}\t1.0\t3\t0\n"
-            f"2\t{seq}\t2.0\t3\t0\n"
-            f"3\t{seq}\t3.0\t1\t0\n"
-            f"4\t{seq}\t4.0\t2\t0\n",
+            f"GENOME__1\t{seq}\t1.0\t3\t0\n"
+            f"GENOME__2\t{seq}\t2.0\t3\t0\n"
+            f"GENOME__3\t{seq}\t3.0\t1\t0\n"
+            f"GENOME__4\t{seq}\t4.0\t2\t0\n",
             encoding="utf-8",
         )
     else:
@@ -78,7 +78,7 @@ def _write_minimal_unit(tmp: Path, *, good: bool = True) -> LegNetRun:
         # missing ID 2; bad length for ID 1
         (tsv_dir / "all.tsv").write_text(
             "seq_id\tseq\tmean_value\tfold\trev\n"
-            "1\tAAAA\t1.0\t3\t0\n",
+            "GENOME__1\tAAAA\t1.0\t3\t0\n",
             encoding="utf-8",
         )
 

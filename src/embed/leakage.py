@@ -69,25 +69,28 @@ def compute_max_train_sim(
     layer: str,
     metric: str,
     *,
-    chunk: int = 2048,
+    chunk: int = 8192,
     ridge: float = 1e-3,
     include_val: bool = False,
+    device: str | None = None,
 ) -> tuple[np.ndarray, TrainStats, dict[str, Any]]:
     """Return (test_scores, train_stats, meta). Optionally also score val."""
     x = np.asarray(store.layers[layer])
     train_m = mask_role(store.roles, ROLE_TRAIN)
     test_m = mask_role(store.roles, ROLE_TEST)
-    train_x = np.asarray(x[train_m], dtype=np.float64)
-    test_x = np.asarray(x[test_m], dtype=np.float64)
+    train_x = np.asarray(x[train_m], dtype=np.float32)
+    test_x = np.asarray(x[test_m], dtype=np.float32)
 
     # Peak: two transformed matrices
     need = (train_x.nbytes + test_x.nbytes) * 2
     ensure_allocation_fits(need, label=f"leakage_{layer}_{metric}")
 
     stats = fit_train_stats(train_x, ridge=ridge)
-    g = prepare_metric_matrix(train_x, stats, metric)
-    q = prepare_metric_matrix(test_x, stats, metric)
-    scores = pairwise_max_similarity(q, g, metric=metric, chunk=chunk)
+    g = prepare_metric_matrix(train_x, stats, metric).astype(np.float32)
+    q = prepare_metric_matrix(test_x, stats, metric).astype(np.float32)
+    scores = pairwise_max_similarity(
+        q, g, metric=metric, chunk=chunk, device=device
+    )
 
     meta: dict[str, Any] = {
         "layer": layer,
@@ -100,8 +103,12 @@ def compute_max_train_sim(
     if include_val:
         val_m = mask_role(store.roles, ROLE_VAL)
         if int(val_m.sum()) > 0:
-            v = prepare_metric_matrix(np.asarray(x[val_m], dtype=np.float64), stats, metric)
-            meta["val_scores"] = pairwise_max_similarity(v, g, metric=metric, chunk=chunk)
+            v = prepare_metric_matrix(
+                np.asarray(x[val_m], dtype=np.float32), stats, metric
+            ).astype(np.float32)
+            meta["val_scores"] = pairwise_max_similarity(
+                v, g, metric=metric, chunk=chunk, device=device
+            )
             meta["n_val"] = int(val_m.sum())
     return scores, stats, meta
 
@@ -113,7 +120,9 @@ def run_leakage_for_store(
     metrics: Iterable[str] = METRICS,
     out_dir: Path | None = None,
     tau0: float = DEFAULT_TAU0,
-    chunk: int = 2048,
+    chunk: int = 8192,
+    device: str | None = None,
+    skip_existing: bool = True,
 ) -> list[dict[str, Any]]:
     """Compute L(τ) for all layer×metric; write artifacts under store or out_dir."""
     store_dir = Path(store_dir)
@@ -129,8 +138,12 @@ def run_leakage_for_store(
         else:
             use_metrics = list(metrics)
         for metric in use_metrics:
+            summary_path = out / f"summary_{layer}_{metric}.json"
+            if skip_existing and summary_path.is_file():
+                rows.append(json.loads(summary_path.read_text(encoding="utf-8")))
+                continue
             scores, stats, meta = compute_max_train_sim(
-                store, layer, metric, chunk=chunk
+                store, layer, metric, chunk=chunk, device=device
             )
             stats.to_npz(out / f"train_stats_{layer}_{metric}.npz")
             np.save(out / f"max_sim_test_{layer}_{metric}.npy", scores.astype(np.float32))

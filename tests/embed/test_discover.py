@@ -46,8 +46,8 @@ def _unit(root: Path) -> None:
     seq = "A" * 230
     (leg / "all.tsv").write_text(
         "seq_id\tseq\tmean_value\tfold\trev\n"
-        f"1\t{seq}\t0\t3\t0\n"
-        f"2\t{seq}\t1\t1\t0\n",
+        f"GENOME__1\t{seq}\t0\t3\t0\n"
+        f"GENOME__2\t{seq}\t1\t1\t0\n",
         encoding="utf-8",
     )
 

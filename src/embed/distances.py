@@ -132,42 +132,63 @@ def pairwise_max_similarity(
     gallery: np.ndarray,
     *,
     metric: str,
-    chunk: int = 2048,
+    chunk: int = 4096,
+    device: str | None = None,
 ) -> np.ndarray:
-    """For each query row, max similarity vs gallery.
+    """For each query row, max cosine similarity vs gallery (float32).
 
-    Similarities:
-    - centered_cosine / whitened_cosine / corr_distance: cosine sim in [-1,1]
-      (after respective transforms); we return cosine similarity.
-    - l2_euclidean: ``sim = -||q-g||_2`` then we convert via
-      ``sim = 1 - 0.5 * ||q-g||^2`` which equals cosine for unit vectors
-      (monotone equivalent). We return cosine for uniformity.
+    Prepared matrices are L2-normalized → cosine = q @ g.T.
+    For ``l2_euclidean`` on unit vectors this ranking is monotone-equivalent
+    to Euclidean; we still return cosine values for a shared [−1,1] scale.
+    Uses CUDA via torch when available (or ``device`` is set).
     """
-    q = np.asarray(query, dtype=np.float64)
-    g = np.asarray(gallery, dtype=np.float64)
+    q = np.asarray(query, dtype=np.float32)
+    g = np.asarray(gallery, dtype=np.float32)
     if q.ndim != 2 or g.ndim != 2:
         raise ValueError("query/gallery must be 2D")
     if q.shape[1] != g.shape[1]:
         raise ValueError(f"dim mismatch {q.shape} vs {g.shape}")
     n_q = q.shape[0]
-    out = np.empty(n_q, dtype=np.float64)
+    out = np.empty(n_q, dtype=np.float32)
     if n_q == 0:
-        return out
+        return out.astype(np.float64)
     if g.shape[0] == 0:
         out[:] = -np.inf
-        return out
+        return out.astype(np.float64)
 
-    # All prepared matrices are L2-normalized → cosine = q @ g.T
-    # For l2_euclidean on unit vectors: ||q-g||^2 = 2-2 cos → same ranking.
-    g_t = g.T
-    for start in range(0, n_q, chunk):
-        sl = q[start : start + chunk]
-        sims = sl @ g_t  # [b, Ng]
-        out[start : start + chunk] = sims.max(axis=1)
-    if metric == "l2_euclidean":
-        # already cosine; document monotone equivalence — keep cosine values
-        pass
-    return out
+    use_torch = False
+    torch_dev = "cpu"
+    try:
+        import torch
+
+        if device is not None:
+            torch_dev = device
+            use_torch = True
+        elif torch.cuda.is_available():
+            torch_dev = "cuda"
+            use_torch = True
+    except ImportError:
+        use_torch = False
+
+    if use_torch:
+        import torch
+
+        g_t = torch.from_numpy(g).to(torch_dev).T.contiguous()
+        for start in range(0, n_q, chunk):
+            sl = torch.from_numpy(q[start : start + chunk]).to(torch_dev)
+            sims = sl @ g_t
+            out[start : start + len(sl)] = sims.max(dim=1).values.detach().cpu().numpy()
+        del g_t
+        if torch_dev.startswith("cuda"):
+            torch.cuda.empty_cache()
+    else:
+        g_t = g.T
+        for start in range(0, n_q, chunk):
+            sl = q[start : start + chunk]
+            sims = sl @ g_t
+            out[start : start + chunk] = sims.max(axis=1)
+    _ = metric  # ranking-equivalent families share cosine values
+    return out.astype(np.float64)
 
 
 def cosine_self_similarity(x: np.ndarray, stats: TrainStats, metric: str) -> float:

@@ -37,12 +37,7 @@ from src.embed.store import (
     write_ids_roles,
     write_manifest,
 )
-from src.embed.validate import (
-    load_split_roles,
-    load_tsv_index,
-    validate_all,
-    write_validation_report,
-)
+from src.embed.validate import validate_all, write_validation_report
 from src.pipeline.job_queue import (
     CLASS_CPU_RAM_HEAVY,
     CLASS_GPU_TRAIN,
@@ -81,23 +76,33 @@ def _update_queue(name: str, status: str, *, note: str = "") -> None:
 def build_ordered_panel(
     run: LegNetRun,
 ) -> tuple[list[str], list[int], list[str]]:
-    """Return (ids, roles, sequences) in train→test→val order."""
-    roles_map = load_split_roles(run.split_csv)
-    tsv_index, issues = load_tsv_index(run.legnet_tsv)
-    if issues:
-        bad = [i for i in issues if "len=" in i or "duplicate" in i]
-        if bad:
-            raise ValueError(f"{run.key}: TSV issues: {bad[:5]}")
+    """Return (seq_ids, roles, sequences) in train→test→val order.
+
+    Roles come from TSV CV fold (3=train, 1=test, 2=val), matching
+    ``src.pipeline.legnet_input.FOLD_TO_CV``.
+    """
+    from src.embed.validate import load_tsv_panel
+
+    panel, issues = load_tsv_panel(run.legnet_tsv)
+    hard = [
+        i
+        for i in issues
+        if "len=" in i or "duplicate" in i or "unexpected fold" in i
+    ]
+    if hard:
+        raise ValueError(f"{run.key}: TSV issues: {hard[:5]}")
     ids: list[str] = []
     roles: list[int] = []
     seqs: list[str] = []
     for role_name in ROLE_NAMES:
-        for sid in sorted(roles_map[role_name], key=lambda x: (len(x), x)):
-            if sid not in tsv_index:
-                raise KeyError(f"{run.key}: ID {sid} missing from TSV")
+        sids = sorted(
+            (sid for sid, r in panel.role_by_id.items() if r == role_name),
+            key=lambda x: (len(x), x),
+        )
+        for sid in sids:
             ids.append(sid)
             roles.append(role_code(role_name))
-            seqs.append(tsv_index[sid])
+            seqs.append(panel.seq_by_id[sid])
     return ids, roles, seqs
 
 
@@ -240,17 +245,19 @@ def stage_leakage(
     layers: tuple[str, ...],
     metrics: tuple[str, ...],
     tau0: float,
+    device: str = "cuda",
 ) -> Path:
     job = f"embed_legnet_leakage_{int(time.time())}"
+    gpus = (0,) if str(device).startswith("cuda") else ()
     _append_queue(
         name=job,
         status="RUNNING",
         job="python -m src.embed.run_legnet leakage",
         pid=os.getpid(),
         estimated_time="6h",
-        job_class=CLASS_CPU_RAM_HEAVY,
+        job_class=CLASS_GPU_TRAIN if gpus else CLASS_CPU_RAM_HEAVY,
         peak_ram_gib=48.0,
-        gpus=(),
+        gpus=gpus,
         log=str(out / "leakage.log"),
     )
     all_rows: list[dict[str, Any]] = []
@@ -263,7 +270,11 @@ def stage_leakage(
         for sd in store_dirs:
             print(f"[leakage] {sd.relative_to(out)}", flush=True)
             rows = run_leakage_for_store(
-                sd, layers=layers, metrics=metrics, tau0=tau0
+                sd,
+                layers=layers,
+                metrics=metrics,
+                tau0=tau0,
+                device=device if str(device) != "cpu" else None,
             )
             all_rows.extend(rows)
         ranking = write_ranking_table(all_rows, out / "leakage_ranking.tsv")
@@ -355,7 +366,8 @@ def main(argv: list[str] | None = None) -> int:
     val_results: list[Any] = []
     if "validate" in stages:
         val_results = stage_validate(runs, out)
-    else:
+    elif "extract" in stages:
+        # Extract needs READY keys; re-validate without rewriting report unless asked
         val_results = validate_all(runs, load_ckpt=False)
 
     if "extract" in stages:
@@ -370,7 +382,13 @@ def main(argv: list[str] | None = None) -> int:
         )
 
     if "leakage" in stages:
-        stage_leakage(out, layers=layers, metrics=metrics, tau0=float(args.tau0))
+        stage_leakage(
+            out,
+            layers=layers,
+            metrics=metrics,
+            tau0=float(args.tau0),
+            device=str(args.device),
+        )
 
     (out / "run_complete.json").write_text(
         json.dumps(
