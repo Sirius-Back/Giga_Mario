@@ -13,8 +13,23 @@ from src.splits.vgae.graph_data import (
     build_compositional_features,
     pack_region_graph,
 )
-from src.splits.vgae.homology_loss import compute_l_hom, load_homology_groups, sd_random_from_labels
-from src.splits.vgae.model import ClassicVGAE, soft_role_probs
+from src.splits.vgae.homology_loss import (
+    EmaTermNorm,
+    compute_l_hom,
+    load_homology_groups,
+    sd_random_from_labels,
+    select_groups_epoch_stable,
+    soft_sd_random,
+    soft_sd_random_weighted,
+)
+from src.splits.vgae.model import (
+    ClassicVGAE,
+    gumbel_softmax_roles,
+    gumbel_tau_schedule,
+    kl_beta_schedule,
+    soft_role_probs,
+)
+from src.splits.vgae.train import compose_objective
 
 
 def test_assert_no_homology_features_blocks_leakage() -> None:
@@ -89,6 +104,108 @@ def test_early_stop_policy_min_epochs() -> None:
             stopped_at = epoch
             break
     assert stopped_at == 34  # first eligible epoch 25 → patience 10 hits at 34
+
+
+def test_gumbel_softmax_roles_shape_and_sum() -> None:
+    logits = torch.randn(16, 3)
+    soft = gumbel_softmax_roles(logits, tau=0.7, hard=False)
+    assert soft.shape == (16, 3)
+    assert torch.allclose(soft.sum(dim=-1), torch.ones(16), atol=1e-5)
+    # Legacy soft_role_probs still works unchanged
+    plain = soft_role_probs(logits)
+    assert plain.shape == (16, 3)
+
+
+def test_kl_and_gumbel_schedules() -> None:
+    assert kl_beta_schedule(1, beta_max=0.05, t_anneal=15) == pytest.approx(
+        0.05 / 15
+    )
+    assert kl_beta_schedule(15, beta_max=0.05, t_anneal=15) == pytest.approx(0.05)
+    assert kl_beta_schedule(100, beta_max=0.05, t_anneal=15) == pytest.approx(0.05)
+    assert gumbel_tau_schedule(1, tau_start=1.0, tau_end=0.3, t_anneal=20) == pytest.approx(
+        1.0
+    )
+    assert gumbel_tau_schedule(21, tau_start=1.0, tau_end=0.3, t_anneal=20) == pytest.approx(
+        0.3
+    )
+
+
+def test_soft_sd_random_weighted_and_stable_subset() -> None:
+    n = 40
+    soft = torch.softmax(torch.randn(n, 3), dim=-1)
+    groups = [np.arange(i, i + 4) for i in range(0, 36, 4)]  # 9 groups size 4
+    a = soft_sd_random(soft, groups, max_groups=None)
+    b = soft_sd_random_weighted(
+        soft, groups, max_groups=None, subset_seed=0, weight_power=0.5
+    )
+    assert torch.isfinite(a) and torch.isfinite(b)
+    # Epoch-stable subset: same seed → same groups
+    s0 = select_groups_epoch_stable(groups, max_groups=3, seed=7)
+    s1 = select_groups_epoch_stable(groups, max_groups=3, seed=7)
+    assert len(s0) == 3
+    assert all(np.array_equal(x, y) for x, y in zip(s0, s1))
+    # Weighted L_hom path
+    from src.splits.vgae.homology_loss import HomologyGroups
+
+    hg = HomologyGroups(
+        orthogroup=np.full(n, -1, dtype=np.int64),
+        paragroup=np.full(n, -1, dtype=np.int64),
+        ortho_groups=tuple(groups[:4]),
+        para_groups=tuple(groups[4:]),
+    )
+    out = compute_l_hom(
+        soft, hg, soft=True, weighted=True, max_groups=8, subset_seed=3
+    )
+    assert torch.isfinite(out["l_hom"])
+    # Legacy unweighted still works
+    legacy = compute_l_hom(soft, hg, soft=True)
+    assert torch.isfinite(legacy["l_hom"])
+
+
+def test_ema_term_norm_and_homology_first_compose() -> None:
+    ema = EmaTermNorm(decay=0.9)
+    recon = torch.tensor(80.0, requires_grad=True)
+    kl = torch.tensor(20.0, requires_grad=True)
+    l_hom = torch.tensor(-0.2, requires_grad=True)
+    size = torch.tensor(0.01, requires_grad=True)
+    composed = compose_objective(
+        recon=recon,
+        kl=kl,
+        l_hom=l_hom,
+        size=size,
+        loss_mode="homology_first",
+        epoch=1,
+        beta_kl=1.0,
+        lambda_hom=25.0,
+        lambda_size=1.0,
+        alpha_recon=0.3,
+        beta_kl_max=0.05,
+        kl_anneal_epochs=15,
+        ema=ema,
+    )
+    loss = composed["loss"]
+    assert torch.isfinite(loss)
+    # After first update, ema ≈ |term|; recon_norm ≈ 1
+    assert composed["recon_norm"] == pytest.approx(1.0, abs=1e-5)
+    # Homology term magnitude should dominate early (β tiny, α_r=0.3)
+    assert abs(composed["term_hom"]) > abs(composed["term_recon"])
+    # Legacy path still available
+    legacy = compose_objective(
+        recon=recon.detach(),
+        kl=kl.detach(),
+        l_hom=l_hom.detach(),
+        size=size.detach(),
+        loss_mode="legacy",
+        epoch=1,
+        beta_kl=1.0,
+        lambda_hom=1.0,
+        lambda_size=1.0,
+        alpha_recon=1.0,
+        beta_kl_max=1.0,
+        kl_anneal_epochs=0,
+        ema=None,
+    )
+    assert torch.isfinite(legacy["loss"])
 
 
 def test_pack_region_graph_tiny(tmp_path: Path) -> None:

@@ -24,8 +24,35 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--patience", type=int, default=10)
     p.add_argument("--max-epochs", type=int, default=200)
     p.add_argument("--wait-poll-sec", type=float, default=600.0)
+    p.add_argument(
+        "--loss-mode",
+        type=str,
+        default="legacy",
+        choices=("legacy", "homology_first"),
+        help="legacy = unnormalized recon+KL+L_hom; homology_first = EMA/anneal/Gumbel",
+    )
+    p.add_argument("--lambda-hom", type=float, default=None)
+    p.add_argument("--lambda-size", type=float, default=None)
+    p.add_argument("--lambda-para", type=float, default=None)
+    p.add_argument("--lambda-ortho", type=float, default=None)
+    p.add_argument("--alpha-recon", type=float, default=None)
+    p.add_argument("--beta-kl-max", type=float, default=None)
     p.add_argument("--skip-train-viz", action="store_true")
     args = p.parse_args(argv)
+
+    train_extra: dict = {"loss_mode": args.loss_mode}
+    if args.lambda_hom is not None:
+        train_extra["lambda_hom"] = float(args.lambda_hom)
+    if args.lambda_size is not None:
+        train_extra["lambda_size"] = float(args.lambda_size)
+    if args.lambda_para is not None:
+        train_extra["lambda_para"] = float(args.lambda_para)
+    if args.lambda_ortho is not None:
+        train_extra["lambda_ortho"] = float(args.lambda_ortho)
+    if args.alpha_recon is not None:
+        train_extra["alpha_recon"] = float(args.alpha_recon)
+    if args.beta_kl_max is not None:
+        train_extra["beta_kl_max"] = float(args.beta_kl_max)
 
     out = Path(args.out)
     out.mkdir(parents=True, exist_ok=True)
@@ -52,6 +79,7 @@ def main(argv: list[str] | None = None) -> int:
             patience=args.patience,
             max_epochs=args.max_epochs,
             wait_poll_sec=args.wait_poll_sec,
+            **train_extra,
         )
     else:
         from src.splits.vgae.stage2 import run_stage2_hash_vgae
@@ -79,6 +107,7 @@ def main(argv: list[str] | None = None) -> int:
             patience=args.patience,
             max_epochs=args.max_epochs,
             wait_poll_sec=args.wait_poll_sec,
+            **train_extra,
         )
 
     print(json_dumps(meta), flush=True)

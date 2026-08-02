@@ -163,3 +163,48 @@ class ClassicVGAE(nn.Module):
 def soft_role_probs(logits: torch.Tensor, *, temperature: float = 1.0) -> torch.Tensor:
     t = max(float(temperature), 1e-6)
     return F.softmax(logits / t, dim=-1)
+
+
+def gumbel_softmax_roles(
+    logits: torch.Tensor,
+    *,
+    tau: float = 1.0,
+    hard: bool = False,
+    dim: int = -1,
+) -> torch.Tensor:
+    """Gumbel-Softmax role probs (additive; does not replace :func:`soft_role_probs`).
+
+    Train with ``hard=False`` (or True for ST-Gumbel); eval hard-assign remains
+    via :func:`~src.splits.vgae.assign.size_constrained_assign` on softmax scores.
+    """
+    t = max(float(tau), 1e-6)
+    return F.gumbel_softmax(logits, tau=t, hard=bool(hard), dim=dim)
+
+
+def gumbel_tau_schedule(
+    epoch: int,
+    *,
+    tau_start: float = 1.0,
+    tau_end: float = 0.3,
+    t_anneal: int = 20,
+) -> float:
+    """Linear ``τ: tau_start → tau_end`` over the first ``t_anneal`` epochs.
+
+    Epoch 1 starts at ``tau_start``; reaches ``tau_end`` at epoch ``t_anneal+1``.
+    """
+    if int(t_anneal) <= 0:
+        return float(tau_end)
+    t = min(1.0, max(0.0, float(epoch - 1) / float(t_anneal)))
+    return float(tau_start) + t * (float(tau_end) - float(tau_start))
+
+
+def kl_beta_schedule(
+    epoch: int,
+    *,
+    beta_max: float = 0.05,
+    t_anneal: int = 15,
+) -> float:
+    """``β(t) = β_max · min(1, t / T_anneal)`` with ``t`` = epoch (1-indexed)."""
+    if int(t_anneal) <= 0:
+        return float(beta_max)
+    return float(beta_max) * min(1.0, float(epoch) / float(t_anneal))

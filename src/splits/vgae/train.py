@@ -1,4 +1,8 @@
-"""VGAE training loop: recon + KL + size + L_hom; early stop after ≥25 epochs."""
+"""VGAE training loop: recon + KL + size + L_hom; early stop after ≥25 epochs.
+
+Supports legacy objective (default) and additive ``loss_mode=homology_first``
+(EMA term norm, KL anneal, Gumbel-Softmax weighted L_hom).
+"""
 from __future__ import annotations
 
 import json
@@ -12,7 +16,9 @@ import torch
 
 from src.pipeline.job_queue import (
     CLASS_GPU_TRAIN,
+    CLASS_WAITER,
     append_queue_entry,
+    can_launch_parallel,
     wait_until_launchable,
 )
 from src.splits.vgae.assign import (
@@ -24,31 +30,148 @@ from src.splits.vgae.assign import (
 )
 from src.splits.vgae.graph_data import PackedGraph, assert_no_homology_features, load_packed_graph
 from src.splits.vgae.homology_loss import (
+    EmaTermNorm,
     compute_l_hom,
     load_homology_groups,
     write_homology_sidecar,
 )
-from src.splits.vgae.model import ClassicVGAE, soft_role_probs
+from src.splits.vgae.model import (
+    ClassicVGAE,
+    gumbel_softmax_roles,
+    gumbel_tau_schedule,
+    kl_beta_schedule,
+    soft_role_probs,
+)
 from src.splits.sbs.assign import assignment_rows_to_split_csv
 from src.tb_logging import close_dual, log_scalar_pair, open_summary_writer, open_tensorboard_logger
 
 
-def _pick_free_gpu() -> int:
-    """Return a GPU index with lowest memory used (does not kill processes)."""
+# Homology-first defaults (legacy path keeps beta_kl=lambda_hom=lambda_size=1)
+HOMOLOGY_FIRST_DEFAULTS: dict[str, Any] = {
+    "alpha_recon": 0.3,
+    "lambda_hom": 25.0,
+    "lambda_size": 1.0,
+    "beta_kl_max": 0.05,
+    "kl_anneal_epochs": 15,
+    "gumbel_tau_start": 1.0,
+    "gumbel_tau_end": 0.3,
+    "gumbel_anneal_epochs": 20,
+    "lambda_para": 1.0,
+    "lambda_ortho": 1.0,
+    "ema_decay": 0.9,
+    "hom_max_groups": 4096,
+}
+
+
+def _gpu_used_bytes(gpu_idx: int) -> int:
+    free, total = torch.cuda.mem_get_info(int(gpu_idx))
+    return int(total - free)
+
+
+def _gpu_is_free(gpu_idx: int, *, max_used_mib: float = 512.0) -> bool:
+    """True when device has near-empty VRAM (occupied GPUs are refused)."""
+    used_mib = _gpu_used_bytes(gpu_idx) / (1024.0 * 1024.0)
+    return used_mib <= float(max_used_mib)
+
+
+def _pick_free_gpu(*, max_used_mib: float = 512.0) -> int | None:
+    """Return a free GPU index, or None if every device is occupied.
+
+    Does not kill processes. Prefers lowest used among free + queue-launchable.
+    """
     if not torch.cuda.is_available():
         raise RuntimeError("CUDA required for VGAE train (plan: 1×GPU)")
-    best_i = 0
-    best_used = None
+    cands: list[tuple[int, int]] = []
     for i in range(torch.cuda.device_count()):
-        try:
-            free, total = torch.cuda.mem_get_info(i)
-            used = total - free
-        except Exception:
-            used = 0
-        if best_used is None or used < best_used:
-            best_used = used
-            best_i = i
-    return int(best_i)
+        if not _gpu_is_free(i, max_used_mib=max_used_mib):
+            continue
+        ok, _reason = can_launch_parallel(
+            peak_ram_gib=0.0,
+            gpus=(i,),
+            job_class=CLASS_GPU_TRAIN,
+        )
+        if not ok:
+            continue
+        cands.append((_gpu_used_bytes(i), i))
+    if not cands:
+        return None
+    cands.sort()
+    return int(cands[0][1])
+
+
+def wait_for_free_gpu(
+    *,
+    peak_ram_gib: float = 12.0,
+    max_used_mib: float = 512.0,
+    timeout_sec: float = 6 * 3600,
+    poll_sec: float = 600.0,
+    label: str = "vgae_gpu_wait",
+    register_waiter: bool = True,
+) -> int:
+    """Block until a free (near-empty VRAM) GPU is launchable. Never kill PIDs."""
+    waiter_name = f"waiter_{label}"
+    if register_waiter:
+        append_queue_entry(
+            waiter_name,
+            job=f"wait_for_free_gpu:{label}",
+            pid=os.getpid(),
+            estimated_time=f"poll {poll_sec:.0f}s",
+            status="RUNNING",
+            job_class=CLASS_WAITER,
+            peak_ram_gib=0.0,
+            gpus=(),
+            resources=f"max_used_mib={max_used_mib}",
+        )
+    t0 = time.monotonic()
+    try:
+        while True:
+            gpu_idx = _pick_free_gpu(max_used_mib=max_used_mib)
+            if gpu_idx is not None:
+                wait_until_launchable(
+                    peak_ram_gib=float(peak_ram_gib),
+                    gpus=(gpu_idx,),
+                    job_class=CLASS_GPU_TRAIN,
+                    timeout_sec=max(60.0, float(timeout_sec) - (time.monotonic() - t0)),
+                    poll_sec=min(float(poll_sec), 60.0),
+                    label=f"{label}:confirm_gpu{gpu_idx}",
+                )
+                # Re-check VRAM after queue wait (another job may have started)
+                if _gpu_is_free(gpu_idx, max_used_mib=max_used_mib):
+                    ok, reason = can_launch_parallel(
+                        peak_ram_gib=float(peak_ram_gib),
+                        gpus=(gpu_idx,),
+                        job_class=CLASS_GPU_TRAIN,
+                    )
+                    if ok:
+                        print(
+                            f"[vgae] {label}: free GPU cuda:{gpu_idx} — {reason}",
+                            flush=True,
+                        )
+                        if register_waiter:
+                            _append_status(
+                                waiter_name,
+                                "COMPLETED",
+                                note=f"acquired cuda:{gpu_idx}",
+                            )
+                        return int(gpu_idx)
+            elapsed = time.monotonic() - t0
+            print(
+                f"[vgae] {label}: no free GPU yet "
+                f"(elapsed={elapsed:.0f}s); sleeping {poll_sec:.0f}s",
+                flush=True,
+            )
+            if elapsed >= float(timeout_sec):
+                if register_waiter:
+                    _append_status(waiter_name, "FAILED", note="timeout waiting free GPU")
+                raise TimeoutError(
+                    f"[vgae] {label}: timed out waiting for a free GPU "
+                    f"(max_used_mib={max_used_mib})"
+                )
+            time.sleep(float(poll_sec))
+    except Exception:
+        if register_waiter:
+            _append_status(waiter_name, "FAILED", note="exception during GPU wait")
+        raise
 
 
 def _append_status(queue_name: str, status: str, *, note: str = "") -> None:
@@ -77,15 +200,27 @@ def _write_epoch_logs(
     lines_l: list[str] = []
     for rec in epoch_rows:
         ep = int(rec["epoch"])
+        train_block = {
+            "loss": float(rec["loss"]),
+            "recon": float(rec["recon"]),
+            "kl": float(rec["kl"]),
+            "l_hom_soft": float(rec["l_hom_soft"]),
+            "size": float(rec["size"]),
+        }
+        for key in (
+            "recon_norm",
+            "kl_norm",
+            "beta_kl",
+            "gumbel_tau",
+            "hom_grad_share",
+            "ema_recon",
+            "ema_kl",
+        ):
+            if key in rec and rec[key] is not None:
+                train_block[key] = float(rec[key])
         obj = {
             "epoch": ep,
-            "train": {
-                "loss": float(rec["loss"]),
-                "recon": float(rec["recon"]),
-                "kl": float(rec["kl"]),
-                "l_hom_soft": float(rec["l_hom_soft"]),
-                "size": float(rec["size"]),
-            },
+            "train": train_block,
             "validation": {
                 "loss": float(rec["l_hom_hard"]),
                 "l_hom": float(rec["l_hom_hard"]),
@@ -113,6 +248,138 @@ def _write_epoch_logs(
     mlog.write_text("\n".join(lines_l) + ("\n" if lines_l else ""), encoding="utf-8")
 
 
+def resolve_device(
+    device: str | None,
+    *,
+    peak_ram_gib: float,
+    wait_poll_sec: float,
+    label: str,
+    max_used_mib: float = 512.0,
+    register_waiter: bool = True,
+) -> tuple[str, int | None]:
+    """Resolve CUDA device: wait for a free GPU when ``device`` is None."""
+    if device is None:
+        gpu_idx = wait_for_free_gpu(
+            peak_ram_gib=float(peak_ram_gib),
+            max_used_mib=float(max_used_mib),
+            poll_sec=float(wait_poll_sec),
+            label=label,
+            register_waiter=register_waiter,
+        )
+        return f"cuda:{gpu_idx}", gpu_idx
+    if device.startswith("cuda"):
+        parts = device.split(":")
+        gpu_idx = int(parts[1]) if len(parts) > 1 else 0
+        if not _gpu_is_free(gpu_idx, max_used_mib=max_used_mib):
+            print(
+                f"[vgae] requested {device} is occupied "
+                f"(used>{max_used_mib:.0f} MiB); waiting for a free GPU…",
+                flush=True,
+            )
+            gpu_idx = wait_for_free_gpu(
+                peak_ram_gib=float(peak_ram_gib),
+                max_used_mib=float(max_used_mib),
+                poll_sec=float(wait_poll_sec),
+                label=f"{label}_rewait",
+                register_waiter=register_waiter,
+            )
+            return f"cuda:{gpu_idx}", gpu_idx
+        wait_until_launchable(
+            peak_ram_gib=float(peak_ram_gib),
+            gpus=(gpu_idx,),
+            job_class=CLASS_GPU_TRAIN,
+            timeout_sec=6 * 3600,
+            poll_sec=float(wait_poll_sec),
+            label=label,
+        )
+        return f"cuda:{gpu_idx}", gpu_idx
+    return device, None
+
+
+def random_split_l_hom_baseline(
+    n_nodes: int,
+    groups,
+    *,
+    ratios: tuple[float, float, float] = (3.0, 1.0, 1.0),
+    seed: int = 42,
+) -> dict[str, float]:
+    """Hard ``L_hom`` of a size-constrained random split (seeded baseline)."""
+    rng = np.random.default_rng(int(seed))
+    scores = rng.normal(size=(int(n_nodes), 3))
+    labels = size_constrained_assign(scores, ratios=ratios, seed=seed)
+    hard = compute_l_hom(labels, groups, soft=False)
+    return {
+        "l_hom": float(hard["l_hom"]),
+        "mean_sd_ortho": float(hard["mean_sd_ortho"]),
+        "mean_sd_para": float(hard["mean_sd_para"]),
+    }
+
+
+def compose_objective(
+    *,
+    recon: torch.Tensor,
+    kl: torch.Tensor,
+    l_hom: torch.Tensor,
+    size: torch.Tensor,
+    loss_mode: str,
+    epoch: int,
+    beta_kl: float,
+    lambda_hom: float,
+    lambda_size: float,
+    alpha_recon: float,
+    beta_kl_max: float,
+    kl_anneal_epochs: int,
+    ema: EmaTermNorm | None,
+) -> dict[str, Any]:
+    """Compose train loss for legacy or homology_first modes (additive API)."""
+    mode = str(loss_mode).lower().strip()
+    if mode == "legacy":
+        loss = (
+            recon
+            + float(beta_kl) * kl
+            + float(lambda_hom) * l_hom
+            + float(lambda_size) * size
+        )
+        return {
+            "loss": loss,
+            "recon_norm": None,
+            "kl_norm": None,
+            "beta_used": float(beta_kl),
+            "ema_recon": None,
+            "ema_kl": None,
+            "term_recon": float(recon.detach().cpu()),
+            "term_kl": float(beta_kl) * float(kl.detach().cpu()),
+            "term_hom": float(lambda_hom) * float(l_hom.detach().cpu()),
+            "term_size": float(lambda_size) * float(size.detach().cpu()),
+        }
+
+    if mode != "homology_first":
+        raise ValueError(f"unknown loss_mode={loss_mode!r}; use legacy|homology_first")
+    if ema is None:
+        raise ValueError("homology_first requires an EmaTermNorm instance")
+    recon_n, kl_n, er, ek = ema.normalize(recon, kl)
+    beta_t = kl_beta_schedule(
+        int(epoch), beta_max=float(beta_kl_max), t_anneal=int(kl_anneal_epochs)
+    )
+    term_r = float(alpha_recon) * recon_n
+    term_k = float(beta_t) * kl_n
+    term_h = float(lambda_hom) * l_hom
+    term_s = float(lambda_size) * size
+    loss = term_r + term_k + term_h + term_s
+    return {
+        "loss": loss,
+        "recon_norm": float(recon_n.detach().cpu()),
+        "kl_norm": float(kl_n.detach().cpu()),
+        "beta_used": float(beta_t),
+        "ema_recon": float(er),
+        "ema_kl": float(ek),
+        "term_recon": float((term_r).detach().cpu()),
+        "term_kl": float((term_k).detach().cpu()),
+        "term_hom": float(term_h.detach().cpu()),
+        "term_size": float(term_s.detach().cpu()),
+    }
+
+
 def run_vgae_train(
     pack: PackedGraph | Path,
     out_dir: Path,
@@ -133,6 +400,18 @@ def run_vgae_train(
     peak_ram_gib: float = 12.0,
     wait_poll_sec: float = 600.0,
     register_queue: bool = True,
+    loss_mode: str = "legacy",
+    alpha_recon: float | None = None,
+    beta_kl_max: float | None = None,
+    kl_anneal_epochs: int | None = None,
+    gumbel_tau_start: float | None = None,
+    gumbel_tau_end: float | None = None,
+    gumbel_anneal_epochs: int | None = None,
+    lambda_para: float | None = None,
+    lambda_ortho: float | None = None,
+    ema_decay: float | None = None,
+    hom_max_groups: int | None = None,
+    max_gpu_used_mib: float = 512.0,
 ) -> dict[str, Any]:
     """Train classic VGAE and write ``split.csv`` + logs under ``out_dir``."""
     out_dir = Path(out_dir)
@@ -146,41 +425,58 @@ def run_vgae_train(
     torch.manual_seed(int(seed))
     np.random.seed(int(seed))
 
-    gpu_idx = None
-    if device is None:
-        gpu_idx = _pick_free_gpu()
-        # Wait until this GPU is launchable under queue politics
-        wait_until_launchable(
-            peak_ram_gib=float(peak_ram_gib),
-            gpus=(gpu_idx,),
-            job_class=CLASS_GPU_TRAIN,
-            timeout_sec=6 * 3600,
-            poll_sec=float(wait_poll_sec),
-            label=f"vgae_train:{out_dir.name}",
-        )
-        # Re-pick after wait (another job may have freed a better GPU)
-        gpu_idx = _pick_free_gpu()
-        wait_until_launchable(
-            peak_ram_gib=float(peak_ram_gib),
-            gpus=(gpu_idx,),
-            job_class=CLASS_GPU_TRAIN,
-            timeout_sec=6 * 3600,
-            poll_sec=float(wait_poll_sec),
-            label=f"vgae_train_confirm:{out_dir.name}",
-        )
-        device = f"cuda:{gpu_idx}"
+    mode = str(loss_mode).lower().strip()
+    hf = HOMOLOGY_FIRST_DEFAULTS
+    if mode == "homology_first":
+        if alpha_recon is None:
+            alpha_recon = float(hf["alpha_recon"])
+        if beta_kl_max is None:
+            beta_kl_max = float(hf["beta_kl_max"])
+        if kl_anneal_epochs is None:
+            kl_anneal_epochs = int(hf["kl_anneal_epochs"])
+        if gumbel_tau_start is None:
+            gumbel_tau_start = float(hf["gumbel_tau_start"])
+        if gumbel_tau_end is None:
+            gumbel_tau_end = float(hf["gumbel_tau_end"])
+        if gumbel_anneal_epochs is None:
+            gumbel_anneal_epochs = int(hf["gumbel_anneal_epochs"])
+        if lambda_para is None:
+            lambda_para = float(hf["lambda_para"])
+        if lambda_ortho is None:
+            lambda_ortho = float(hf["lambda_ortho"])
+        if ema_decay is None:
+            ema_decay = float(hf["ema_decay"])
+        if hom_max_groups is None:
+            hom_max_groups = int(hf["hom_max_groups"])
+        # Homology-first default λ_hom / λ_size when caller left legacy 1.0
+        if float(lambda_hom) == 1.0:
+            lambda_hom = float(hf["lambda_hom"])
+        if float(lambda_size) == 1.0:
+            lambda_size = float(hf["lambda_size"])
     else:
-        if device.startswith("cuda"):
-            parts = device.split(":")
-            gpu_idx = int(parts[1]) if len(parts) > 1 else 0
-            wait_until_launchable(
-                peak_ram_gib=float(peak_ram_gib),
-                gpus=(gpu_idx,),
-                job_class=CLASS_GPU_TRAIN,
-                timeout_sec=6 * 3600,
-                poll_sec=float(wait_poll_sec),
-                label=f"vgae_train:{out_dir.name}",
-            )
+        alpha_recon = float(alpha_recon if alpha_recon is not None else 1.0)
+        beta_kl_max = float(beta_kl_max if beta_kl_max is not None else beta_kl)
+        kl_anneal_epochs = int(kl_anneal_epochs if kl_anneal_epochs is not None else 0)
+        gumbel_tau_start = float(
+            gumbel_tau_start if gumbel_tau_start is not None else 1.0
+        )
+        gumbel_tau_end = float(gumbel_tau_end if gumbel_tau_end is not None else 1.0)
+        gumbel_anneal_epochs = int(
+            gumbel_anneal_epochs if gumbel_anneal_epochs is not None else 0
+        )
+        lambda_para = float(lambda_para if lambda_para is not None else 1.0)
+        lambda_ortho = float(lambda_ortho if lambda_ortho is not None else 1.0)
+        ema_decay = float(ema_decay if ema_decay is not None else 0.9)
+        hom_max_groups = int(hom_max_groups if hom_max_groups is not None else 4096)
+
+    device, gpu_idx = resolve_device(
+        device,
+        peak_ram_gib=float(peak_ram_gib),
+        wait_poll_sec=float(wait_poll_sec),
+        label=f"vgae_train:{out_dir.name}",
+        max_used_mib=float(max_gpu_used_mib),
+        register_waiter=register_queue,
+    )
 
     queue_name = f"vgae_{out_dir.name}"
     if register_queue:
@@ -193,17 +489,15 @@ def run_vgae_train(
             peak_ram_gib=float(peak_ram_gib),
             gpus=(gpu_idx,) if gpu_idx is not None else (),
             log=str(out_dir / "logs" / "metrics.log"),
-            resources=f"device={device} n={pack.n_nodes} e={pack.n_edges}",
+            resources=f"device={device} n={pack.n_nodes} e={pack.n_edges} loss_mode={mode}",
         )
 
     try:
         groups = load_homology_groups(pack.ids, homology_table)
         write_homology_sidecar(out_dir / "pack" / "node_homology.tsv", pack.ids, groups)
-        # Ensure pack dir also has a copy of feature meta flag
         pack_out = out_dir / "pack"
         pack_out.mkdir(parents=True, exist_ok=True)
         if pack.pack_dir.resolve() != pack_out.resolve():
-            # Copy essential pack files into run tree
             import shutil
 
             for name in (
@@ -216,9 +510,20 @@ def run_vgae_train(
                 if src.is_file():
                     shutil.copy2(src, pack_out / name)
 
+        baseline = random_split_l_hom_baseline(
+            pack.n_nodes, groups, ratios=ratios, seed=int(seed)
+        )
+        (out_dir / "random_split_baseline.json").write_text(
+            json.dumps(baseline, indent=2) + "\n", encoding="utf-8"
+        )
+        print(
+            f"[vgae] random-split baseline L_hom={baseline['l_hom']:.6g} "
+            f"(seed={seed})",
+            flush=True,
+        )
+
         dev = torch.device(device)
         x = torch.as_tensor(pack.x, dtype=torch.float32, device=dev)
-        # Firewall: feature dim must match compositional names only
         assert_no_homology_features(pack.feature_names)
         edge_index = torch.stack(
             [
@@ -239,11 +544,15 @@ def run_vgae_train(
         target_frac = torch.as_tensor(
             role_target_fractions(ratios), dtype=torch.float32, device=dev
         )
+        ema = EmaTermNorm(decay=float(ema_decay)) if mode == "homology_first" else None
 
         writer = open_summary_writer(out_dir)
         tb_logger = open_tensorboard_logger(out_dir)
         ckpt_dir = out_dir / "checkpoints"
         ckpt_dir.mkdir(parents=True, exist_ok=True)
+        log_scalar_pair(
+            writer, tb_logger, "baseline/random_l_hom", baseline["l_hom"], 0
+        )
 
         best_l_hom = float("inf")
         best_state: dict[str, Any] | None = None
@@ -254,28 +563,62 @@ def run_vgae_train(
         for epoch in range(1, int(max_epochs) + 1):
             model.train()
             out = model(x, edge_index, edge_weight)
-            # Re-assert no homology dim creep
             if out["z"].size(0) != x.size(0):
                 raise RuntimeError("latent/node count mismatch")
-            soft = soft_role_probs(out["role_logits"])
+
+            tau = gumbel_tau_schedule(
+                epoch,
+                tau_start=float(gumbel_tau_start),
+                tau_end=float(gumbel_tau_end),
+                t_anneal=int(gumbel_anneal_epochs),
+            )
+            if mode == "homology_first":
+                soft_train = gumbel_softmax_roles(out["role_logits"], tau=tau, hard=False)
+                soft_log = soft_role_probs(out["role_logits"])
+                hom = compute_l_hom(
+                    soft_train,
+                    groups,
+                    soft=True,
+                    weighted=True,
+                    max_groups=int(hom_max_groups),
+                    subset_seed=int(seed) + int(epoch),
+                    lambda_para=float(lambda_para),
+                    lambda_ortho=float(lambda_ortho),
+                )
+                # Size constraint on softmax (stable) while L_hom uses Gumbel
+                sz = size_loss(soft_log, target_frac)
+                l_hom_soft = hom["l_hom"]
+            else:
+                soft_train = soft_role_probs(out["role_logits"])
+                soft_log = soft_train
+                hom = compute_l_hom(soft_train, groups, soft=True)
+                l_hom_soft = hom["l_hom"]
+                sz = size_loss(soft_train, target_frac)
+
             recon = ClassicVGAE.recon_loss_neg_sample(
                 out["z"], edge_index, edge_weight
             )
             kl = ClassicVGAE.kl_loss(out["mu"], out["logstd"])
-            hom = compute_l_hom(soft, groups, soft=True)
-            l_hom_soft = hom["l_hom"]
-            sz = size_loss(soft, target_frac)
-            loss = (
-                recon
-                + float(beta_kl) * kl
-                + float(lambda_hom) * l_hom_soft
-                + float(lambda_size) * sz
+            composed = compose_objective(
+                recon=recon,
+                kl=kl,
+                l_hom=l_hom_soft,
+                size=sz,
+                loss_mode=mode,
+                epoch=epoch,
+                beta_kl=float(beta_kl),
+                lambda_hom=float(lambda_hom),
+                lambda_size=float(lambda_size),
+                alpha_recon=float(alpha_recon),
+                beta_kl_max=float(beta_kl_max),
+                kl_anneal_epochs=int(kl_anneal_epochs),
+                ema=ema,
             )
+            loss = composed["loss"]
             opt.zero_grad(set_to_none=True)
             loss.backward()
             opt.step()
 
-            # Hard eval
             model.eval()
             with torch.no_grad():
                 out_e = model(x, edge_index, edge_weight)
@@ -283,6 +626,14 @@ def run_vgae_train(
             labels = size_constrained_assign(scores, ratios=ratios, seed=seed + epoch)
             hard = compute_l_hom(labels, groups, soft=False)
             l_hom_hard = float(hard["l_hom"])
+
+            mag_r = abs(float(composed["term_recon"]))
+            mag_k = abs(float(composed["term_kl"]))
+            mag_h = abs(float(composed["term_hom"]))
+            mag_s = abs(float(composed["term_size"]))
+            mag_sum = mag_r + mag_k + mag_h + mag_s + 1e-12
+            hom_share = mag_h / mag_sum
+
             row = {
                 "epoch": epoch,
                 "loss": float(loss.detach().cpu()),
@@ -293,6 +644,13 @@ def run_vgae_train(
                 "l_hom_hard": l_hom_hard,
                 "mean_sd_ortho": float(hard["mean_sd_ortho"]),
                 "mean_sd_para": float(hard["mean_sd_para"]),
+                "recon_norm": composed["recon_norm"],
+                "kl_norm": composed["kl_norm"],
+                "beta_kl": composed["beta_used"],
+                "gumbel_tau": float(tau) if mode == "homology_first" else None,
+                "hom_grad_share": float(hom_share),
+                "ema_recon": composed["ema_recon"],
+                "ema_kl": composed["ema_kl"],
             }
             epoch_rows.append(row)
             _write_epoch_logs(out_dir, epoch_rows)
@@ -301,6 +659,18 @@ def run_vgae_train(
             log_scalar_pair(writer, tb_logger, "train/recon", row["recon"], epoch)
             log_scalar_pair(writer, tb_logger, "train/kl", row["kl"], epoch)
             log_scalar_pair(writer, tb_logger, "train/l_hom_soft", row["l_hom_soft"], epoch)
+            if row["recon_norm"] is not None:
+                log_scalar_pair(
+                    writer, tb_logger, "train/recon_norm", row["recon_norm"], epoch
+                )
+                log_scalar_pair(writer, tb_logger, "train/kl_norm", row["kl_norm"], epoch)
+                log_scalar_pair(
+                    writer, tb_logger, "train/hom_grad_share", row["hom_grad_share"], epoch
+                )
+                log_scalar_pair(writer, tb_logger, "train/beta_kl", row["beta_kl"], epoch)
+                log_scalar_pair(
+                    writer, tb_logger, "train/gumbel_tau", float(row["gumbel_tau"]), epoch
+                )
             log_scalar_pair(writer, tb_logger, "validation/l_hom", l_hom_hard, epoch)
             log_scalar_pair(
                 writer, tb_logger, "validation/mean_sd_ortho", row["mean_sd_ortho"], epoch
@@ -313,7 +683,9 @@ def run_vgae_train(
             if improved:
                 best_l_hom = l_hom_hard
                 best_epoch = epoch
-                best_state = {k: v.detach().cpu().clone() for k, v in model.state_dict().items()}
+                best_state = {
+                    k: v.detach().cpu().clone() for k, v in model.state_dict().items()
+                }
                 torch.save(
                     {"epoch": epoch, "model": best_state, "l_hom": best_l_hom},
                     ckpt_dir / "best.pt",
@@ -332,7 +704,7 @@ def run_vgae_train(
                 f"[vgae] epoch={epoch} loss={row['loss']:.5g} "
                 f"l_hom_hard={l_hom_hard:.5g} "
                 f"sd_o={row['mean_sd_ortho']:.5g} sd_p={row['mean_sd_para']:.5g} "
-                f"best={best_l_hom:.5g}@{best_epoch} stale={stale}",
+                f"best={best_l_hom:.5g}@{best_epoch} stale={stale} mode={mode}",
                 flush=True,
             )
 
@@ -361,11 +733,13 @@ def run_vgae_train(
             "device": device,
             "seed": seed,
             "ratios": list(ratios),
+            "loss_mode": mode,
             "best_epoch": best_epoch,
             "best_l_hom": best_l_hom,
             "final_l_hom": float(hard["l_hom"]),
             "final_mean_sd_ortho": float(hard["mean_sd_ortho"]),
             "final_mean_sd_para": float(hard["mean_sd_para"]),
+            "random_baseline_l_hom": baseline["l_hom"],
             "counts": counts,
             "n_nodes": pack.n_nodes,
             "n_edges": pack.n_edges,
@@ -373,6 +747,10 @@ def run_vgae_train(
             "min_epochs": min_epochs,
             "patience": patience,
             "max_epochs": max_epochs,
+            "lambda_hom": float(lambda_hom),
+            "lambda_size": float(lambda_size),
+            "alpha_recon": float(alpha_recon),
+            "beta_kl_max": float(beta_kl_max),
             "homology_in_encoder": False,
             "split_csv": str(split_csv),
         }

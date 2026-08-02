@@ -162,6 +162,32 @@ def write_homology_sidecar(
     return path
 
 
+def select_groups_epoch_stable(
+    group_index_list: Sequence[np.ndarray],
+    *,
+    max_groups: int | None = 4096,
+    seed: int = 0,
+    min_size: int = 2,
+) -> list[np.ndarray]:
+    """Seeded epoch-stable group subset (additive; does not mutate callers).
+
+    When ``len(groups) <= max_groups`` (or ``max_groups`` is None), returns all
+    eligible groups. Otherwise samples a fixed subset for ``seed``.
+    """
+    groups = [
+        g
+        for g in group_index_list
+        if g is not None and len(g) >= int(min_size)
+    ]
+    if not groups:
+        return []
+    if max_groups is None or len(groups) <= int(max_groups):
+        return list(groups)
+    rng = np.random.default_rng(int(seed))
+    pick = rng.choice(len(groups), size=int(max_groups), replace=False)
+    return [groups[int(i)] for i in np.sort(pick).tolist()]
+
+
 def soft_sd_random(
     soft: torch.Tensor,
     group_index_list: Sequence[np.ndarray],
@@ -173,6 +199,8 @@ def soft_sd_random(
 
     For large panels, samples up to ``max_groups`` groups per call (seeded via
     ``generator`` when provided) so the homology term stays tractable.
+
+    Legacy uniform mean — prefer :func:`soft_sd_random_weighted` for homology-first.
     """
     if soft.ndim != 2 or soft.size(1) != 3:
         raise ValueError(f"soft must be (n,3); got {tuple(soft.shape)}")
@@ -207,19 +235,113 @@ def soft_sd_random(
     return torch.sqrt(torch.sum(d * d, dim=1) + 1e-12).mean()
 
 
+def soft_sd_random_weighted(
+    soft: torch.Tensor,
+    group_index_list: Sequence[np.ndarray],
+    *,
+    max_groups: int | None = 4096,
+    subset_seed: int | None = None,
+    generator: torch.Generator | None = None,
+    weight_power: float = 0.5,
+) -> torch.Tensor:
+    """Size-weighted mean ``sd_random`` with ``w_g = n_g ** weight_power`` (default √n).
+
+    Additive companion to :func:`soft_sd_random`. When ``subset_seed`` is set,
+    uses :func:`select_groups_epoch_stable` instead of per-call ``randperm``.
+    """
+    if soft.ndim != 2 or soft.size(1) != 3:
+        raise ValueError(f"soft must be (n,3); got {tuple(soft.shape)}")
+    if subset_seed is not None:
+        groups = select_groups_epoch_stable(
+            group_index_list, max_groups=max_groups, seed=int(subset_seed)
+        )
+    else:
+        groups = [g for g in group_index_list if g is not None and len(g) >= 2]
+        if max_groups is not None and len(groups) > int(max_groups):
+            idx = torch.randperm(len(groups), generator=generator)[: int(max_groups)]
+            groups = [groups[int(i)] for i in idx.tolist()]
+    if not groups:
+        return soft.new_tensor(0.0)
+
+    mass = soft.sum(dim=0)
+    total = mass.sum().clamp_min(1e-12)
+    fracs = mass / total
+
+    pieces: list[torch.Tensor] = []
+    seg_ids: list[torch.Tensor] = []
+    for gi, idxs in enumerate(groups):
+        idx_t = torch.as_tensor(idxs, device=soft.device, dtype=torch.long)
+        pieces.append(soft.index_select(0, idx_t))
+        seg_ids.append(
+            torch.full((idx_t.numel(),), gi, device=soft.device, dtype=torch.long)
+        )
+    flat = torch.cat(pieces, dim=0)
+    seg = torch.cat(seg_ids, dim=0)
+    counts = torch.zeros((len(groups), 3), device=soft.device, dtype=soft.dtype)
+    counts.index_add_(0, seg, flat)
+    n = counts.sum(dim=1).clamp_min(1e-12)
+    expected = n.unsqueeze(1) * fracs.unsqueeze(0)
+    d = counts - expected
+    sd = torch.sqrt(torch.sum(d * d, dim=1) + 1e-12)
+    w = n.pow(float(weight_power)).clamp_min(1e-12)
+    return (sd * w).sum() / w.sum()
+
+
 def compute_l_hom(
     soft_or_labels,
     groups: HomologyGroups,
     *,
     soft: bool = True,
+    weighted: bool = False,
+    max_groups: int | None = None,
+    subset_seed: int | None = None,
+    lambda_para: float = 1.0,
+    lambda_ortho: float = 1.0,
+    generator: torch.Generator | None = None,
 ) -> dict[str, float | torch.Tensor]:
-    """Return ``L_hom = mean(sd_para) - mean(sd_ortho)`` plus components."""
+    """Return ``L_hom = λ_para·mean(sd_para) − λ_ortho·mean(sd_ortho)`` + components.
+
+    Defaults preserve legacy behaviour (``weighted=False``, ``λ=1``, soft path
+    uses uniform :func:`soft_sd_random` with ``max_groups=4096``).
+    """
+    lp = float(lambda_para)
+    lo = float(lambda_ortho)
     if soft:
         if not isinstance(soft_or_labels, torch.Tensor):
             raise TypeError("soft=True requires a torch.Tensor of role probs")
-        sd_ortho = soft_sd_random(soft_or_labels, groups.ortho_groups)
-        sd_para = soft_sd_random(soft_or_labels, groups.para_groups)
-        l_hom = sd_para - sd_ortho
+        mg = 4096 if max_groups is None else max_groups
+        if weighted:
+            sd_ortho = soft_sd_random_weighted(
+                soft_or_labels,
+                groups.ortho_groups,
+                max_groups=mg,
+                subset_seed=subset_seed,
+                generator=generator,
+            )
+            sd_para = soft_sd_random_weighted(
+                soft_or_labels,
+                groups.para_groups,
+                max_groups=mg,
+                subset_seed=(
+                    None if subset_seed is None else int(subset_seed) + 1_000_003
+                ),
+                generator=generator,
+            )
+        else:
+            # Legacy path — ignore subset_seed (per-call randperm as before)
+            sd_ortho = soft_sd_random(
+                soft_or_labels,
+                groups.ortho_groups,
+                max_groups=mg,
+                generator=generator,
+            )
+            sd_para = soft_sd_random(
+                soft_or_labels,
+                groups.para_groups,
+                max_groups=mg,
+                generator=generator,
+            )
+        l_hom = lp * sd_para - lo * sd_ortho
         return {
             "l_hom": l_hom,
             "mean_sd_ortho": sd_ortho,
@@ -227,15 +349,100 @@ def compute_l_hom(
         }
 
     labels = list(soft_or_labels)
-    max_g = 8192
-    mean_o, _ = sd_random_from_labels(
-        labels, groups.ortho_groups, max_groups=max_g, seed=0
-    )
-    mean_p, _ = sd_random_from_labels(
-        labels, groups.para_groups, max_groups=max_g, seed=1
-    )
+    max_g = 8192 if max_groups is None else int(max_groups)
+    seed_o = 0 if subset_seed is None else int(subset_seed)
+    seed_p = 1 if subset_seed is None else int(subset_seed) + 1_000_003
+    if weighted:
+        mean_o = _hard_sd_random_weighted(
+            labels, groups.ortho_groups, max_groups=max_g, seed=seed_o
+        )
+        mean_p = _hard_sd_random_weighted(
+            labels, groups.para_groups, max_groups=max_g, seed=seed_p
+        )
+    else:
+        mean_o, _ = sd_random_from_labels(
+            labels, groups.ortho_groups, max_groups=max_g, seed=seed_o
+        )
+        mean_p, _ = sd_random_from_labels(
+            labels, groups.para_groups, max_groups=max_g, seed=seed_p
+        )
     return {
-        "l_hom": float(mean_p - mean_o),
+        "l_hom": float(lp * mean_p - lo * mean_o),
         "mean_sd_ortho": float(mean_o),
         "mean_sd_para": float(mean_p),
     }
+
+
+def _hard_sd_random_weighted(
+    labels: Sequence[str],
+    group_indices: Sequence[np.ndarray],
+    *,
+    role_order: tuple[str, str, str] = ("train", "test", "val"),
+    max_groups: int | None = None,
+    seed: int = 42,
+    weight_power: float = 0.5,
+) -> float:
+    """Hard size-weighted mean ``sd_random`` (audit / baselines)."""
+    lab = np.asarray(list(labels), dtype=object)
+    role_to_i = {r: i for i, r in enumerate(role_order)}
+    role_codes = np.full(lab.shape[0], -1, dtype=np.int8)
+    for r, i in role_to_i.items():
+        role_codes[lab == r] = i
+    global_counts = np.bincount(role_codes[role_codes >= 0], minlength=3).astype(
+        np.float64
+    )
+    total = float(global_counts.sum())
+    if total <= 0.0:
+        return 0.0
+    fracs = global_counts / total
+    groups = select_groups_epoch_stable(
+        group_indices, max_groups=max_groups, seed=int(seed)
+    )
+    if not groups:
+        return 0.0
+    vals: list[float] = []
+    weights: list[float] = []
+    for idxs in groups:
+        codes = role_codes[np.asarray(idxs, dtype=np.int64)]
+        codes = codes[codes >= 0]
+        if codes.size == 0:
+            continue
+        c = np.bincount(codes, minlength=3).astype(np.float64)
+        n = float(c.sum())
+        vals.append(_sd_random_np(c, fracs))
+        weights.append(n ** float(weight_power))
+    if not vals:
+        return 0.0
+    w = np.asarray(weights, dtype=np.float64)
+    v = np.asarray(vals, dtype=np.float64)
+    return float((v * w).sum() / w.sum())
+
+
+class EmaTermNorm:
+    """EMA of absolute term magnitudes for recon/KL rebalancing (additive)."""
+
+    def __init__(self, *, decay: float = 0.9, eps: float = 1e-6) -> None:
+        self.decay = float(decay)
+        self.eps = float(eps)
+        self.ema_recon: float | None = None
+        self.ema_kl: float | None = None
+
+    def update(self, recon: float, kl: float) -> tuple[float, float]:
+        ar = abs(float(recon)) + self.eps
+        ak = abs(float(kl)) + self.eps
+        if self.ema_recon is None:
+            self.ema_recon = ar
+            self.ema_kl = ak
+        else:
+            d = self.decay
+            self.ema_recon = d * self.ema_recon + (1.0 - d) * ar
+            self.ema_kl = d * float(self.ema_kl) + (1.0 - d) * ak
+        return float(self.ema_recon), float(self.ema_kl)
+
+    def normalize(
+        self, recon: torch.Tensor, kl: torch.Tensor
+    ) -> tuple[torch.Tensor, torch.Tensor, float, float]:
+        """Return ``(recon/ema, kl/ema, ema_recon, ema_kl)``; updates EMA from detach."""
+        with torch.no_grad():
+            er, ek = self.update(float(recon.detach().cpu()), float(kl.detach().cpu()))
+        return recon / er, kl / ek, er, ek
