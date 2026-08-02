@@ -10,6 +10,7 @@ import pandas as pd
 from src.homology.align_consensus_viz import (
     median_per_position_bin,
     pairwise_correlation_table,
+    plot_halfviolin_similar_lengths,
     similar_length_table,
 )
 
@@ -63,3 +64,25 @@ def test_pairwise_and_lengths(tmp_path: Path) -> None:
     med = median_per_position_bin(df, n_bins=10)
     assert set(med["scope"]) == {"full", "orthologs", "paralogs"}
     assert med["median_rate"].between(0, 1).all()
+
+
+def test_halfviolin_similar_lengths(tmp_path: Path) -> None:
+    metrics = _toy_metrics(tmp_path)
+    frames = [pd.read_csv(p, sep="\t") for p in sorted(metrics.glob("*.pos.tsv.gz"))]
+    df = pd.concat(frames, ignore_index=True)
+    lengths = similar_length_table(df, thresholds=(0.5, 0.9))
+    outdir = tmp_path / "figures"
+    written = plot_halfviolin_similar_lengths(
+        lengths,
+        outdir,
+        metric="similar_length_total",
+        thr_up=0.9,
+        thr_down=0.5,
+        dpi=100,
+        stem="halfviolin_test",
+    )
+    stems = {p.suffix for p in written}
+    assert {".pdf", ".svg", ".png"} <= stems
+    for path in written:
+        assert path.is_file()
+        assert path.stat().st_size > 0

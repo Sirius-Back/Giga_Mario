@@ -115,9 +115,16 @@ def pid_alive(pid: int | None) -> bool:
 
 
 def running_jobs(path: Path | None = None) -> list[QueueJob]:
-    """RUNNING entries whose PID is missing (treat as active) or still alive."""
-    out: list[QueueJob] = []
+    """Alive jobs whose **latest** queue status is RUNNING.
+
+    Later COMPLETED/FAILED entries for the same name supersede earlier RUNNING
+    blocks (needed when one PID trains multiple sequential outs).
+    """
+    latest: dict[str, QueueJob] = {}
     for j in parse_queue(path):
+        latest[j.name] = j
+    out: list[QueueJob] = []
+    for j in latest.values():
         if j.status != "RUNNING":
             continue
         if j.pid is None or pid_alive(j.pid):

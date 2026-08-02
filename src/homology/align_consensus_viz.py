@@ -615,3 +615,189 @@ def plot_consensus_metrics(
         )
     )
     return written
+
+
+# Presentation half-violins: orthologs | paralogs; up=thr_hi, down=thr_lo (no labels).
+SCOPE_COLORS = {
+    "orthologs": "#0072B2",  # Okabe–Ito blue
+    "paralogs": "#D55E00",  # Okabe–Ito vermillion
+}
+HALFVIOLIN_SCOPES = ("orthologs", "paralogs")
+HALFVIOLIN_THR_UP = 0.9
+HALFVIOLIN_THR_DOWN = 0.5
+
+
+def _kde_density(values: np.ndarray, grid: np.ndarray) -> np.ndarray:
+    """Gaussian KDE on ``grid``; delta fallback when variance is ~0."""
+    vals = np.asarray(values, dtype=float)
+    vals = vals[np.isfinite(vals)]
+    if vals.size == 0:
+        return np.zeros_like(grid, dtype=float)
+    if vals.size == 1 or float(np.std(vals)) < 1e-12:
+        # Narrow bump around the constant value.
+        center = float(vals.mean())
+        bw = max(abs(center) * 0.02, 1.0)
+        return np.exp(-0.5 * ((grid - center) / bw) ** 2)
+    from scipy.stats import gaussian_kde
+
+    kde = gaussian_kde(vals)
+    dens = np.asarray(kde(grid), dtype=float)
+    dens[~np.isfinite(dens)] = 0.0
+    return dens
+
+
+def _draw_half_violin(
+    ax,
+    values: np.ndarray,
+    *,
+    center_x: float,
+    side: str,
+    color: str,
+    width: float = 0.38,
+    n_grid: int = 256,
+    alpha: float = 0.85,
+) -> None:
+    """Fill a half-violin: ``side='up'`` uses +y, ``side='down'`` mirrors to −y."""
+    vals = np.asarray(values, dtype=float)
+    vals = vals[np.isfinite(vals)]
+    if vals.size == 0:
+        return
+    y_lo = float(vals.min())
+    y_hi = float(vals.max())
+    pad = max((y_hi - y_lo) * 0.05, 1.0)
+    grid = np.linspace(max(0.0, y_lo - pad), y_hi + pad, n_grid)
+    dens = _kde_density(vals, grid)
+    peak = float(dens.max()) if dens.size else 0.0
+    if peak <= 0.0:
+        return
+    dens = dens / peak * width
+    y_plot = grid if side == "up" else -grid
+    ax.fill_betweenx(
+        y_plot,
+        center_x,
+        center_x + dens,
+        color=color,
+        alpha=alpha,
+        linewidth=0,
+        zorder=2,
+    )
+    ax.plot(center_x + dens, y_plot, color=color, lw=0.9, alpha=min(1.0, alpha + 0.1), zorder=3)
+    # Median tick (no text).
+    med = float(np.median(vals))
+    med_y = med if side == "up" else -med
+    ax.plot(
+        [center_x, center_x + width * 0.55],
+        [med_y, med_y],
+        color=color,
+        lw=1.4,
+        solid_capstyle="butt",
+        zorder=4,
+    )
+
+
+def plot_halfviolin_similar_lengths(
+    length_df: pd.DataFrame,
+    outdir: Path | str,
+    *,
+    metric: str = "similar_length_total",
+    thr_up: float = HALFVIOLIN_THR_UP,
+    thr_down: float = HALFVIOLIN_THR_DOWN,
+    scopes: tuple[str, ...] = HALFVIOLIN_SCOPES,
+    aspect: tuple[float, float] = (9.0, 5.0),
+    dpi: int = 300,
+    stem: str = "Figure_11_halfviolin_ortho_para_thr0p9_up_0p5_down",
+) -> list[Path]:
+    """Orthologs (left) / paralogs (right); thr_up half-violin up, thr_down down.
+
+    Presentation figure: no titles, axis labels, tick labels, or legend.
+    Aspect ratio defaults to 9:5. Uses the same similar-length table as Figure_03/04.
+    """
+    import matplotlib.pyplot as plt
+
+    if metric not in length_df.columns:
+        raise KeyError(f"metric {metric!r} not in columns {list(length_df.columns)}")
+    needed = {"scope", "threshold", metric}
+    missing = needed - set(length_df.columns)
+    if missing:
+        raise ValueError(f"length_df missing columns: {sorted(missing)}")
+
+    outdir = Path(outdir)
+    outdir.mkdir(parents=True, exist_ok=True)
+    # Presentation figure: plain Agg canvas (avoid cnsplots DPI/size side-effects).
+    import matplotlib as mpl
+
+    mpl.rcParams.update(
+        {
+            "figure.dpi": int(dpi),
+            "savefig.dpi": int(dpi),
+            "axes.grid": False,
+            "pdf.fonttype": 42,
+            "ps.fonttype": 42,
+            "svg.fonttype": "none",
+        }
+    )
+
+    fig_w, fig_h = float(aspect[0]), float(aspect[1])
+    if fig_w <= 0 or fig_h <= 0:
+        raise ValueError(f"aspect must be positive, got {aspect}")
+    fig, ax = plt.subplots(figsize=(fig_w, fig_h), dpi=int(dpi))
+    fig.patch.set_facecolor("white")
+    ax.set_facecolor("white")
+    fig.subplots_adjust(left=0.03, right=0.99, bottom=0.04, top=0.98)
+
+    # Tighter x spacing: orthologs left, paralogs right.
+    centers = {scope: 0.55 * float(i) for i, scope in enumerate(scopes)}
+    ymax = 0.0
+    for scope in scopes:
+        if scope not in SCOPE_COLORS:
+            raise KeyError(f"No color for scope {scope!r}; known={sorted(SCOPE_COLORS)}")
+        color = SCOPE_COLORS[scope]
+        cx = centers[scope]
+        for thr, side in ((thr_up, "up"), (thr_down, "down")):
+            sub = length_df[
+                (length_df["scope"] == scope)
+                & (np.isclose(length_df["threshold"].astype(float), thr))
+            ]
+            vals = sub[metric].to_numpy(dtype=float)
+            if vals.size == 0:
+                raise ValueError(f"No rows for scope={scope!r} threshold={thr}")
+            finite = vals[np.isfinite(vals)]
+            if finite.size:
+                ymax = max(ymax, float(finite.max()))
+            _draw_half_violin(ax, vals, center_x=cx, side=side, color=color, width=0.42)
+
+    # Baseline between up / down halves.
+    ax.axhline(0.0, color="#333333", lw=0.9, zorder=1)
+    pad_y = max(ymax * 0.06, 1.0)
+    ax.set_ylim(-(ymax + pad_y), ymax + pad_y)
+    x_right = centers[scopes[-1]] + 0.55
+    ax.set_xlim(-0.15, x_right)
+
+    # Strip all chrome for slide overlays.
+    ax.set_xticks([])
+    ax.set_yticks([])
+    ax.set_xlabel("")
+    ax.set_ylabel("")
+    ax.set_title("")
+    for spine in ax.spines.values():
+        spine.set_visible(False)
+    if ax.get_legend() is not None:
+        ax.get_legend().remove()
+
+    out_stem = outdir / stem
+    out_stem.parent.mkdir(parents=True, exist_ok=True)
+    written: list[Path] = []
+    for ext in ("pdf", "svg", "png"):
+        path = out_stem.with_suffix(f".{ext}")
+        save_kw: dict = {
+            "facecolor": "white",
+            "edgecolor": "none",
+            "bbox_inches": None,
+            "pad_inches": 0,
+        }
+        if ext == "png":
+            save_kw["dpi"] = int(dpi)
+        fig.savefig(path, **save_kw)
+        written.append(path)
+    plt.close(fig)
+    return written
