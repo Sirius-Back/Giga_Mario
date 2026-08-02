@@ -45,3 +45,22 @@ def test_rsa_self():
     t = transform_for_rdm(x, stats, "centered_cosine")
     d = pairwise_distance_matrix(t, metric="centered_cosine")
     assert rsa_spearman(d, d) == 1.0 or abs(rsa_spearman(d, d) - 1.0) < 1e-9
+
+
+def test_filter_loo_store_keys():
+    from src.embed.pairwise import filter_loo_store_keys
+
+    keys = [
+        "run2_legnet_random",
+        "run5_legnet_hashfrag",
+        "run31_legnet_pangenome_k7_w0_100_loo5/fold0",
+        "run31_legnet_pangenome_k7_w0_100_loo5/fold1",
+        "run31_legnet_pangenome_k7_w0_100_loo5/fold4",
+    ]
+    assert filter_loo_store_keys(keys, None) == keys
+    kept = filter_loo_store_keys(keys, 0)
+    assert kept == [
+        "run2_legnet_random",
+        "run5_legnet_hashfrag",
+        "run31_legnet_pangenome_k7_w0_100_loo5/fold0",
+    ]

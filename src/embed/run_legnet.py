@@ -344,6 +344,18 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         default=None,
         help="Cap discovered runs (debug)",
     )
+    p.add_argument(
+        "--run-keys",
+        type=str,
+        default=None,
+        help="Comma-separated LegNetRun.key filter (e.g. run5_legnet_hashfrag)",
+    )
+    p.add_argument(
+        "--loo-fold",
+        type=int,
+        default=None,
+        help="If set, keep only this LOO fold index (non-LOO always kept)",
+    )
     return p.parse_args(argv)
 
 
@@ -358,7 +370,13 @@ def main(argv: list[str] | None = None) -> int:
         if k not in LAYER_DIMS:
             raise SystemExit(f"unknown layer {k!r}")
 
-    runs = discover_legnet_runs(args.runs_root)
+    runs = discover_legnet_runs(args.runs_root, loo_fold=args.loo_fold)
+    if args.run_keys:
+        want = {s.strip() for s in args.run_keys.split(",") if s.strip()}
+        runs = [r for r in runs if r.key in want]
+        missing = want - {r.key for r in runs}
+        if missing:
+            raise SystemExit(f"run-keys not found after discover: {sorted(missing)}")
     if args.max_runs is not None:
         runs = runs[: int(args.max_runs)]
     print(f"Discovered {len(runs)} LegNet units under {args.runs_root}", flush=True)

@@ -69,3 +69,9 @@ def test_discover_skips_bad_and_finds_loo(tmp_path: Path):
     assert "run31_legnet_pangenome_k7_w0_100_loo5/fold0" in keys
     assert "run31_legnet_pangenome_k7_w0_100_loo5/fold1" in keys
     assert not any("BAD" in k for k in keys)
+
+    fold0 = discover_legnet_runs(root, loo_fold=0)
+    keys0 = {r.key for r in fold0}
+    assert "run2_legnet_random" in keys0
+    assert "run31_legnet_pangenome_k7_w0_100_loo5/fold0" in keys0
+    assert "run31_legnet_pangenome_k7_w0_100_loo5/fold1" not in keys0

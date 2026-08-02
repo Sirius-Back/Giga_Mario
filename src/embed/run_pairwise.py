@@ -42,9 +42,22 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--max-n", type=int, default=8192)
     p.add_argument("--rdm-n", type=int, default=2048)
     p.add_argument("--seed", type=int, default=42)
+    p.add_argument(
+        "--loo-fold",
+        type=int,
+        default=0,
+        help="Keep only this LOO fold index (default 0). Use --all-loo-folds "
+        "to include every fold.",
+    )
+    p.add_argument(
+        "--all-loo-folds",
+        action="store_true",
+        help="Include all LOO folds (overrides --loo-fold).",
+    )
     args = p.parse_args(argv)
 
     layers = tuple(s.strip() for s in args.layers.split(",") if s.strip())
+    loo_fold = None if args.all_loo_folds else int(args.loo_fold)
     run_pairwise_compare(
         args.embed_root,
         args.out,
@@ -53,6 +66,7 @@ def main(argv: list[str] | None = None) -> int:
         max_n=int(args.max_n),
         rdm_n=int(args.rdm_n),
         seed=int(args.seed),
+        loo_fold=loo_fold,
     )
     return 0
 

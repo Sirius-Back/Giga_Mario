@@ -8,7 +8,6 @@ from pathlib import Path
 
 _BAD_RE = re.compile(r"_BAD_", re.IGNORECASE)
 _FOLD_RE = re.compile(r"^fold(\d+)$")
-_KEY_FOLD_RE = re.compile(r"/fold(\d+)$")
 
 
 @dataclass(frozen=True)

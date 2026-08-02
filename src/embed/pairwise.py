@@ -12,6 +12,7 @@ Does **not** compute L(τ) leakage curves.
 from __future__ import annotations
 
 import json
+import re
 from itertools import combinations
 from pathlib import Path
 from typing import Any, Iterable
@@ -187,12 +188,15 @@ def matched_mean_distances(
     }
 
 
+_STORE_FOLD_RE = re.compile(r"/fold(\d+)$")
+
+
 def discover_stores(root: Path) -> list[Path]:
     root = Path(root)
     return sorted(
         p.parent
         for p in root.glob("**/manifest.json")
-        if p.parent.name != "leakage"
+        if p.parent.name != "leakage" and p.parent.name != "pairwise"
     )
 
 
@@ -201,6 +205,23 @@ def store_key(store_dir: Path, root: Path) -> str:
         return str(store_dir.relative_to(root))
     except ValueError:
         return store_dir.name
+
+
+def filter_loo_store_keys(
+    keys: list[str], loo_fold: int | None
+) -> list[str]:
+    """Keep only ``…/fold{loo_fold}`` for LOO stores; pass non-LOO through.
+
+    ``loo_fold=None`` keeps every fold. Publication default is ``0``.
+    """
+    if loo_fold is None:
+        return list(keys)
+    out: list[str] = []
+    for k in keys:
+        m = _STORE_FOLD_RE.search(k)
+        if m is None or int(m.group(1)) == loo_fold:
+            out.append(k)
+    return out
 
 
 def _id_index(st: EmbedStore) -> dict[str, int]:
@@ -342,11 +363,15 @@ def run_pairwise_compare(
     max_n: int = 8192,
     rdm_n: int = 2048,
     seed: int = 42,
+    loo_fold: int | None = 0,
 ) -> Path:
     """Compare all store pairs; write TSV + JSON + heatmaps.
 
     ``role`` defaults to ``all`` because different splits have disjoint test
     sets — a global test∩test intersection is empty.
+
+    ``loo_fold`` (default 0) keeps a single LOO fold per LOO run so heatmaps
+    are not dominated by repeated r31 fold axes; ``None`` keeps all folds.
     """
     import matplotlib
 
@@ -363,10 +388,18 @@ def run_pairwise_compare(
     if len(store_dirs) < 2:
         raise RuntimeError(f"need ≥2 stores under {embed_root}")
 
+    all_keys = [store_key(d, embed_root) for d in store_dirs]
+    keys = filter_loo_store_keys(sorted(all_keys), loo_fold)
+    keep = set(keys)
+    store_dirs = [d for d in store_dirs if store_key(d, embed_root) in keep]
     stores = {
         store_key(d, embed_root): load_store(d, layers=layers) for d in store_dirs
     }
     keys = sorted(stores)
+    if len(keys) < 2:
+        raise RuntimeError(
+            f"need ≥2 stores after loo_fold={loo_fold!r} under {embed_root}"
+        )
     all_rows: list[dict[str, Any]] = []
 
     # Precompute train stats per (run, layer)
@@ -460,6 +493,7 @@ def run_pairwise_compare(
                 "max_n": max_n,
                 "rdm_n": rdm_n,
                 "seed": seed,
+                "loo_fold": loo_fold,
                 "layers": list(layers),
                 "runs": keys,
                 "n_pairs": len(all_rows),
