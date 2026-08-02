@@ -62,6 +62,22 @@ HOMOLOGY_FIRST_DEFAULTS: dict[str, Any] = {
     "hom_max_groups": 4096,
 }
 
+# loss_mode → sd aggregation (additive; legacy/homology_first unchanged)
+LOSS_MODE_HOM_AGG: dict[str, str] = {
+    "homology_first": "weighted",
+    "homology_robust": "robust",
+    "homology_log_balance": "log_balance",
+}
+HOMOLOGY_TRAIN_MODES = frozenset(LOSS_MODE_HOM_AGG.keys())
+
+
+def _is_homology_train_mode(mode: str) -> bool:
+    return str(mode).lower().strip() in HOMOLOGY_TRAIN_MODES
+
+
+def _hom_agg_for_mode(mode: str) -> str | None:
+    return LOSS_MODE_HOM_AGG.get(str(mode).lower().strip())
+
 
 def _gpu_used_bytes(gpu_idx: int) -> int:
     free, total = torch.cuda.mem_get_info(int(gpu_idx))
@@ -353,10 +369,13 @@ def compose_objective(
             "term_size": float(lambda_size) * float(size.detach().cpu()),
         }
 
-    if mode != "homology_first":
-        raise ValueError(f"unknown loss_mode={loss_mode!r}; use legacy|homology_first")
+    if not _is_homology_train_mode(mode):
+        raise ValueError(
+            f"unknown loss_mode={loss_mode!r}; "
+            "use legacy|homology_first|homology_robust|homology_log_balance"
+        )
     if ema is None:
-        raise ValueError("homology_first requires an EmaTermNorm instance")
+        raise ValueError(f"{mode} requires an EmaTermNorm instance")
     recon_n, kl_n, er, ek = ema.normalize(recon, kl)
     beta_t = kl_beta_schedule(
         int(epoch), beta_max=float(beta_kl_max), t_anneal=int(kl_anneal_epochs)
@@ -412,6 +431,7 @@ def run_vgae_train(
     ema_decay: float | None = None,
     hom_max_groups: int | None = None,
     max_gpu_used_mib: float = 512.0,
+    hom_agg: str | None = None,
 ) -> dict[str, Any]:
     """Train classic VGAE and write ``split.csv`` + logs under ``out_dir``."""
     out_dir = Path(out_dir)
@@ -426,8 +446,13 @@ def run_vgae_train(
     np.random.seed(int(seed))
 
     mode = str(loss_mode).lower().strip()
+    train_agg = (
+        str(hom_agg).lower().strip()
+        if hom_agg is not None
+        else (_hom_agg_for_mode(mode) or "mean")
+    )
     hf = HOMOLOGY_FIRST_DEFAULTS
-    if mode == "homology_first":
+    if _is_homology_train_mode(mode):
         if alpha_recon is None:
             alpha_recon = float(hf["alpha_recon"])
         if beta_kl_max is None:

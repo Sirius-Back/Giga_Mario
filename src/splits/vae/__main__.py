@@ -26,6 +26,24 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--max-epochs", type=int, default=200)
     p.add_argument("--wait-poll-sec", type=float, default=600.0)
     p.add_argument("--peak-ram-gib", type=float, default=8.0)
+    p.add_argument(
+        "--project-dim",
+        type=int,
+        default=None,
+        help="Optional seeded projection of k-mer dims (e.g. 2048 for k=7)",
+    )
+    p.add_argument("--project-seed", type=int, default=42)
+    p.add_argument(
+        "--keep-memmap",
+        action="store_true",
+        help="Keep full feature matrix as disk memmap (required for k=7 16384-d)",
+    )
+    p.add_argument(
+        "--batch-size",
+        type=int,
+        default=None,
+        help="Microbatch size for GPU train (e.g. 2048 for full 16384-d)",
+    )
     p.add_argument("--skip-train-viz", action="store_true")
     p.add_argument(
         "--source-label",
@@ -38,6 +56,13 @@ def main(argv: list[str] | None = None) -> int:
     device = args.device
     if device == "auto":
         device = None
+
+    # k>=7 dense panels need more host RAM for pack/project unless already packed
+    peak = float(args.peak_ram_gib)
+    if args.k >= 7 and peak < 16.0:
+        peak = 16.0
+    if args.keep_memmap and peak < 12.0:
+        peak = 12.0
 
     from src.splits.vae.train import run_vae_train
 
@@ -53,8 +78,12 @@ def main(argv: list[str] | None = None) -> int:
         patience=args.patience,
         max_epochs=args.max_epochs,
         wait_poll_sec=args.wait_poll_sec,
-        peak_ram_gib=args.peak_ram_gib,
+        peak_ram_gib=peak,
         source_label=args.source_label,
+        project_dim=args.project_dim,
+        project_seed=args.project_seed,
+        keep_memmap=bool(args.keep_memmap),
+        batch_size=args.batch_size,
     )
     import json
 
@@ -72,7 +101,7 @@ def main(argv: list[str] | None = None) -> int:
                     "-o",
                     str(fig_dir),
                     "--model",
-                    "mlp_vae_k4",
+                    f"mlp_vae_k{args.k}",
                 ]
             )
             if int(code or 0) != 0:

@@ -9,6 +9,7 @@ from typing import Any
 
 import numpy as np
 import torch
+import torch.nn as nn
 
 from src.pipeline.job_queue import (
     CLASS_CPU_RAM_HEAVY,
@@ -37,6 +38,7 @@ from src.splits.vgae.homology_loss import (
 from src.splits.vgae.model import (
     gumbel_softmax_roles,
     gumbel_tau_schedule,
+    kl_beta_schedule,
     soft_role_probs,
 )
 from src.splits.vgae.train import (
@@ -213,37 +215,55 @@ def run_vae_train(
     alpha_recon: float | None = None,
     beta_kl_max: float | None = None,
     source_label: str | None = None,
+    project_dim: int | None = None,
+    project_seed: int = 42,
+    keep_memmap: bool = False,
+    batch_size: int | None = None,
 ) -> dict[str, Any]:
-    """Train MLP-VAE with homology_first (legacy logged); write ``split.csv``."""
+    """Train MLP-VAE with homology_first (legacy logged); write ``split.csv``.
+
+    For full k=7 16384-d: ``keep_memmap=True``, ``project_dim=None``,
+    ``batch_size`` (e.g. 2048) on GPU — X stays memory-mapped on disk.
+    """
     out_dir = Path(out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
     pack_dir = out_dir / "pack"
 
+    pack_kw = dict(
+        k=k,
+        source_label=source_label,
+        project_dim=project_dim,
+        project_seed=int(project_seed),
+        keep_memmap=bool(keep_memmap),
+    )
+
     if (pack_dir / "feature_meta.json").is_file():
         pack = load_packed_features(pack_dir)
     elif isinstance(pack, PackedFeatures):
-        # Re-pack into out_dir if needed
         if pack.pack_dir.resolve() != pack_dir.resolve():
             src = features_path or pack.meta.get("source_features")
             if not src:
                 raise ValueError("PackedFeatures has no source_features; pass features_path")
-            pack = pack_feature_table(
-                Path(src), pack_dir, k=k, source_label=source_label
-            )
+            pack = pack_feature_table(Path(src), pack_dir, **pack_kw)
     elif features_path is not None:
-        pack = pack_feature_table(
-            Path(features_path), pack_dir, k=k, source_label=source_label
-        )
+        pack = pack_feature_table(Path(features_path), pack_dir, **pack_kw)
     else:
-        pack = pack_feature_table(
-            Path(pack), pack_dir, k=k, source_label=source_label
-        )
+        pack = pack_feature_table(Path(pack), pack_dir, **pack_kw)
 
     assert_no_homology_features(pack.feature_names)
-    if pack.x.shape[1] != 4**int(k):
+    native_dim = 4 ** int(k)
+    proj = pack.meta.get("feature_projection") or {}
+    if pack.x.shape[1] != native_dim and not proj.get("applied"):
         raise ValueError(
-            f"expected {4**int(k)} features for k={k}; got {pack.x.shape[1]}"
+            f"expected {native_dim} features for k={k} (or projected pack); "
+            f"got {pack.x.shape[1]}"
         )
+    if project_dim is not None and pack.x.shape[1] not in (native_dim, int(project_dim)):
+        # Allow reuse of already-projected pack
+        if not proj.get("applied"):
+            raise ValueError(
+                f"project_dim={project_dim} but pack has {pack.x.shape[1]} features"
+            )
 
     torch.manual_seed(int(seed))
     np.random.seed(int(seed))
@@ -305,9 +325,18 @@ def run_vae_train(
         )
 
         dev = torch.device(device_s)
-        x = torch.as_tensor(pack.x, dtype=torch.float32, device=dev)
+        n = int(pack.n_nodes)
+        in_dim = int(pack.x.shape[1])
+        use_batches = batch_size is not None and int(batch_size) > 0 and int(batch_size) < n
+        bs = int(batch_size) if use_batches else n
+        x_np = pack.x  # may be memmap
+        # Full-tensor path only when it fits (small packs)
+        x_full: torch.Tensor | None = None
+        if not use_batches:
+            x_full = torch.as_tensor(np.asarray(x_np, dtype=np.float32), device=dev)
+
         model = MlpVAE(
-            x.size(1),
+            in_dim,
             hidden_dim=hidden_dim,
             latent_dim=latent_dim,
             n_roles=3,
@@ -325,6 +354,25 @@ def run_vae_train(
         log_scalar_pair(
             writer, tb_logger, "baseline/random_l_hom", baseline["l_hom"], 0
         )
+        print(
+            f"[vae] n={n} in_dim={in_dim} batch_size={bs if use_batches else 'full'} "
+            f"device={device_s} storage={pack.meta.get('storage')}",
+            flush=True,
+        )
+
+        def _batch_indices() -> list[np.ndarray]:
+            if not use_batches:
+                return [np.arange(n, dtype=np.int64)]
+            idxs = []
+            for i0 in range(0, n, bs):
+                idxs.append(np.arange(i0, min(n, i0 + bs), dtype=np.int64))
+            return idxs
+
+        def _x_batch(idx: np.ndarray) -> torch.Tensor:
+            if x_full is not None:
+                return x_full.index_select(0, torch.as_tensor(idx, device=dev))
+            # memmap / numpy → GPU microbatch
+            return torch.as_tensor(np.asarray(x_np[idx], dtype=np.float32), device=dev)
 
         best_l_hom = float("inf")
         best_state: dict[str, Any] | None = None
@@ -334,18 +382,71 @@ def run_vae_train(
 
         for epoch in range(1, int(max_epochs) + 1):
             model.train()
-            out = model(x)
             tau = gumbel_tau_schedule(
                 epoch,
                 tau_start=gumbel_tau_start,
                 tau_end=gumbel_tau_end,
                 t_anneal=gumbel_anneal_epochs,
             )
-            soft_gs = gumbel_softmax_roles(out["role_logits"], tau=tau, hard=False)
-            soft_sm = soft_role_probs(out["role_logits"])
-            recon = MlpVAE.recon_loss_mse(x, out["x_hat"])
-            kl = MlpVAE.kl_loss(out["mu"], out["logstd"])
+            batches = _batch_indices()
+            opt.zero_grad(set_to_none=True)
+            beta_t = kl_beta_schedule(
+                int(epoch), beta_max=float(beta_kl_max), t_anneal=int(kl_anneal_epochs)
+            )
 
+            # Phase 1: EMA-scaled recon+KL microbatches (grad accumulate)
+            recon_acc = 0.0
+            kl_acc = 0.0
+            n_seen = 0
+            for idx in batches:
+                xb = _x_batch(idx)
+                out_b = model(xb)
+                recon_b = MlpVAE.recon_loss_mse(xb, out_b["x_hat"])
+                kl_b = MlpVAE.kl_loss(out_b["mu"], out_b["logstd"])
+                w = float(len(idx)) / float(n)
+                er = (
+                    float(ema.ema_recon)
+                    if ema.ema_recon is not None
+                    else max(float(recon_b.detach().cpu()), 1e-6)
+                )
+                ek = (
+                    float(ema.ema_kl)
+                    if ema.ema_kl is not None
+                    else max(float(kl_b.detach().cpu()), 1e-6)
+                )
+                (
+                    (float(alpha_recon) * recon_b / er + float(beta_t) * kl_b / ek) * w
+                ).backward()
+                recon_acc += float(recon_b.detach().cpu()) * len(idx)
+                kl_acc += float(kl_b.detach().cpu()) * len(idx)
+                n_seen += len(idx)
+            recon_mean = recon_acc / max(n_seen, 1)
+            kl_mean = kl_acc / max(n_seen, 1)
+            recon_t = torch.tensor(recon_mean, device=dev, dtype=torch.float32)
+            kl_t = torch.tensor(kl_mean, device=dev, dtype=torch.float32)
+
+            # Phase 2: role logits via activation checkpointing.
+            # Pass CPU tensors into checkpoint so saved inputs live in host RAM
+            # (full panel ≈ n×d×4), while VRAM peak stays ≈ 1 microbatch.
+            logit_parts: list[torch.Tensor] = []
+
+            def _role_logits_from_cpu(
+                x_cpu: torch.Tensor, _model: nn.Module = model
+            ) -> torch.Tensor:
+                return _model(x_cpu.to(dev, non_blocking=True))["role_logits"]
+
+            for idx in batches:
+                x_cpu = torch.as_tensor(np.asarray(x_np[idx], dtype=np.float32))
+                if use_batches:
+                    logits_b = torch.utils.checkpoint.checkpoint(
+                        _role_logits_from_cpu, x_cpu, use_reentrant=False
+                    )
+                else:
+                    logits_b = _role_logits_from_cpu(x_cpu)
+                logit_parts.append(logits_b)
+            role_logits = torch.cat(logit_parts, dim=0)
+            soft_gs = gumbel_softmax_roles(role_logits, tau=tau, hard=False)
+            soft_sm = soft_role_probs(role_logits)
             hom = compute_l_hom(
                 soft_gs,
                 groups,
@@ -358,8 +459,8 @@ def run_vae_train(
             )
             sz = size_loss(soft_sm, target_frac)
             composed = compose_objective(
-                recon=recon,
-                kl=kl,
+                recon=recon_t,
+                kl=kl_t,
                 l_hom=hom["l_hom"],
                 size=sz,
                 loss_mode="homology_first",
@@ -372,26 +473,31 @@ def run_vae_train(
                 kl_anneal_epochs=kl_anneal_epochs,
                 ema=ema,
             )
-            loss = composed["loss"]
+            (float(lambda_hom) * hom["l_hom"] + float(lambda_size) * sz).backward()
+            opt.step()
 
-            # Legacy (eval-only, no grad into this branch beyond shared graph)
+            loss = composed["loss"]
             with torch.no_grad():
                 hom_leg = compute_l_hom(soft_sm.detach(), groups, soft=True)
                 loss_legacy = (
-                    recon.detach()
-                    + kl.detach()
+                    recon_t.detach()
+                    + kl_t.detach()
                     + hom_leg["l_hom"]
                     + sz.detach()
                 )
-
-            opt.zero_grad(set_to_none=True)
-            loss.backward()
-            opt.step()
+                recon = recon_t
+                kl = kl_t
 
             model.eval()
             with torch.no_grad():
-                out_e = model(x)
-                scores = soft_role_probs(out_e["role_logits"]).cpu().numpy()
+                score_parts: list[np.ndarray] = []
+                for idx in batches:
+                    xb = _x_batch(idx)
+                    out_e = model(xb)
+                    score_parts.append(
+                        soft_role_probs(out_e["role_logits"]).cpu().numpy()
+                    )
+                scores = np.concatenate(score_parts, axis=0)
             labels = size_constrained_assign(scores, ratios=ratios, seed=seed + epoch)
             hard = compute_l_hom(labels, groups, soft=False)
             l_hom_hard = float(hard["l_hom"])
@@ -495,9 +601,15 @@ def run_vae_train(
             model.load_state_dict(best_state)
         model.eval()
         with torch.no_grad():
-            out_f = model(x)
-            scores = soft_role_probs(out_f["role_logits"]).cpu().numpy()
-            z = out_f["z"].cpu().numpy()
+            score_parts_f: list[np.ndarray] = []
+            z_parts: list[np.ndarray] = []
+            for idx in _batch_indices():
+                xb = _x_batch(idx)
+                out_f = model(xb)
+                score_parts_f.append(soft_role_probs(out_f["role_logits"]).cpu().numpy())
+                z_parts.append(out_f["z"].cpu().numpy())
+            scores = np.concatenate(score_parts_f, axis=0)
+            z = np.concatenate(z_parts, axis=0)
         labels = size_constrained_assign(scores, ratios=ratios, seed=seed)
         hard = compute_l_hom(labels, groups, soft=False)
         rows = assignment_rows(pack.ids, labels, fold_prefix="vae")
@@ -510,6 +622,9 @@ def run_vae_train(
             "ratios": list(ratios),
             "loss_mode": "homology_first",
             "k": int(k),
+            "batch_size": int(bs) if use_batches else None,
+            "keep_memmap": bool(keep_memmap) or pack.meta.get("storage") == "memmap",
+            "project_dim": project_dim,
             "best_epoch": best_epoch,
             "best_l_hom": best_l_hom,
             "final_l_hom": float(hard["l_hom"]),

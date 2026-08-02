@@ -37,10 +37,19 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--lambda-ortho", type=float, default=None)
     p.add_argument("--alpha-recon", type=float, default=None)
     p.add_argument("--beta-kl-max", type=float, default=None)
+    p.add_argument(
+        "--project-dim",
+        type=int,
+        default=None,
+        help="Optional seeded projection dim for compositional features "
+        "(omit for full 1+4**k spectrum; required for Stage1 k≥7 on GPU)",
+    )
     p.add_argument("--skip-train-viz", action="store_true")
     args = p.parse_args(argv)
 
     train_extra: dict = {"loss_mode": args.loss_mode}
+    if args.project_dim is not None:
+        train_extra["project_dim"] = int(args.project_dim)
     if args.lambda_hom is not None:
         train_extra["lambda_hom"] = float(args.lambda_hom)
     if args.lambda_size is not None:
