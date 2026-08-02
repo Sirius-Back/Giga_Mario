@@ -326,6 +326,11 @@ mag/orthoparagroups_aligned_smoke/
 !/VGAE/*.sh
 !/VGAE/README.md
 
+# VAE local pack/train scratch (mirrors VGAE policy)
+/VAE/**
+!/VAE/*.sh
+!/VAE/README.md
+
 .sudo_as_admin_successful
 
 # --- Exceptions: track tiny pipeline pytest fixtures ---
