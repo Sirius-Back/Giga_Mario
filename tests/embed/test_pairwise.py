@@ -64,3 +64,40 @@ def test_filter_loo_store_keys():
         "run5_legnet_hashfrag",
         "run31_legnet_pangenome_k7_w0_100_loo5/fold0",
     ]
+
+
+def test_short_run_label():
+    from src.embed.pairwise import short_run_label
+
+    assert short_run_label("run5_legnet_hashfrag") == "HASHFRAG"
+    assert short_run_label("run11_legnet_kmer_k4") == "KMER K4"
+    assert (
+        short_run_label("run31_legnet_pangenome_k7_w0_100_loo5/fold0")
+        == "PG K7 W0 100 LOO5"
+    )
+    assert short_run_label("r2_random") == "RANDOM"
+
+
+def test_plot_lower_triangle_hypotenuse(tmp_path):
+    from src.embed.pairwise import plot_lower_triangle_hypotenuse
+
+    mat = np.array(
+        [
+            [1.0, 0.9, 0.8],
+            [0.9, 1.0, 0.7],
+            [0.8, 0.7, 1.0],
+        ]
+    )
+    pdf = tmp_path / "t.pdf"
+    svg = tmp_path / "t.svg"
+    plot_lower_triangle_hypotenuse(
+        mat,
+        ["a", "b", "c"],
+        title="test",
+        out_pdf=pdf,
+        out_svg=svg,
+        cmap="viridis",
+        label_fontsize=10,
+    )
+    assert pdf.is_file() and pdf.stat().st_size > 500
+    assert svg.is_file() and svg.stat().st_size > 500

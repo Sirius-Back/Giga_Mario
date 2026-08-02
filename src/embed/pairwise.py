@@ -34,6 +34,33 @@ from src.pipeline.mem_guard import ensure_allocation_fits
 
 DEFAULT_LAYERS = ("pooled", "stage1_2", "stage0", "head_h")
 RDM_METRICS = ("centered_cosine", "corr_distance", "mahalanobis")
+HEATMAP_SCORES = (
+    "cka_linear",
+    "rsa_centered_cosine",
+    "rsa_corr_distance",
+    "rsa_mahalanobis",
+    "procrustes_disparity",
+    "mean_centered_cosine_dist",
+    "mean_mahalanobis",
+)
+
+_RUN_PREFIX_RE = re.compile(r"^run\d+_legnet_")
+_R_PREFIX_RE = re.compile(r"^r\d+_")
+_FOLD_SUFFIX_RE = re.compile(r"/fold\d+$")
+
+
+def short_run_label(key: str) -> str:
+    """Drop run prefixes / LOO fold; underscores → spaces; uppercase.
+
+    ``pangenome`` is abbreviated to ``PG``.
+    """
+    s = str(key)
+    s = _RUN_PREFIX_RE.sub("", s)
+    s = _R_PREFIX_RE.sub("", s)
+    s = _FOLD_SUFFIX_RE.sub("", s)
+    s = re.sub(r"pangenome", "PG", s, flags=re.IGNORECASE)
+    s = s.replace("_", " ").strip()
+    return s.upper()
 
 
 def _upper_tri(dist: np.ndarray) -> np.ndarray:
@@ -224,6 +251,172 @@ def filter_loo_store_keys(
     return out
 
 
+def plot_lower_triangle_hypotenuse(
+    mat: np.ndarray,
+    labels: list[str],
+    *,
+    title: str,
+    out_pdf: Path,
+    out_svg: Path,
+    cmap: str,
+    label_fontsize: float = 20.0,
+) -> None:
+    """Strict lower-triangle heatmap rotated with open hypotenuse at the bottom.
+
+    Matrix coords ``(col=j, row=i)`` are rotated −45°:
+    ``x'=(j+i)/√2``, ``y'=(-j+i)/√2``. The diagonal (constant self-scores) is
+    omitted so the bottom edge is open.
+
+    Labels are placed on the **two legs only**, baselines perpendicular to each
+    cathetus.
+    """
+    import matplotlib
+
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+    from matplotlib.colors import Normalize
+    from mpl_toolkits.axes_grid1 import make_axes_locatable
+
+    mat = np.asarray(mat, dtype=np.float64)
+    n = mat.shape[0]
+    if mat.shape != (n, n) or len(labels) != n:
+        raise ValueError("mat must be square and match labels length")
+
+    # Cell corners in (x=col, y=row); strict lower triangle (no diagonal)
+    xs = np.arange(n + 1, dtype=np.float64)
+    ys = np.arange(n + 1, dtype=np.float64)
+    X, Y = np.meshgrid(xs, ys)
+    inv_sqrt2 = 1.0 / np.sqrt(2.0)
+    sqrt2 = np.sqrt(2.0)
+    Xr = (X + Y) * inv_sqrt2
+    Yr = (-X + Y) * inv_sqrt2
+
+    # Mask upper triangle AND diagonal (self-comparisons are constant)
+    C = np.ma.array(mat, mask=np.triu(np.ones((n, n), dtype=bool), k=0))
+    finite = C.compressed()
+    if finite.size == 0:
+        raise RuntimeError(f"no finite values for {title}")
+    vmin = float(np.min(finite))
+    vmax = float(np.max(finite))
+    if abs(vmax - vmin) < 1e-12:
+        vmax = vmin + 1e-6
+
+    max_lab = max((len(s) for s in labels), default=1)
+    # Outward offset from each leg; grow with label length / font
+    pad = 0.35 + 0.018 * max_lab + 0.015 * label_fontsize
+
+    width = max(14.0, 0.95 * n + 7.0)
+    height = max(9.0, 0.6 * n + 5.5)
+    fig, ax = plt.subplots(figsize=(width, height))
+    mesh = ax.pcolormesh(
+        Xr,
+        Yr,
+        C,
+        cmap=cmap,
+        norm=Normalize(vmin=vmin, vmax=vmax),
+        shading="flat",
+        edgecolors="none",
+        linewidth=0.0,
+    )
+    ax.set_aspect("equal")
+    ax.axis("off")
+    ax.set_title(title, fontsize=max(14.0, label_fontsize + 2), pad=14)
+
+    # Unit outward normals after −45° rotation:
+    # left edge direction (1,1) @45° → outward (−1,1); text ⊥ edge → rotation=-45°
+    # right edge direction (1,−1) @-45° → outward (1,1); text ⊥ edge → rotation=+45°
+    n_left = np.array([-inv_sqrt2, inv_sqrt2])
+    n_right = np.array([inv_sqrt2, inv_sqrt2])
+
+    for k, lab in enumerate(labels):
+        # --- left leg (column j=0, row k) ---
+        lx = (k + 0.5) * inv_sqrt2
+        ly = (k + 0.5) * inv_sqrt2
+        ax.text(
+            lx + n_left[0] * pad,
+            ly + n_left[1] * pad,
+            lab,
+            ha="right",
+            va="center",
+            rotation=-45,
+            rotation_mode="anchor",
+            fontsize=label_fontsize,
+            clip_on=False,
+        )
+
+        # --- right leg (row i=n edge, column k) ---
+        rx = (n + k + 0.5) * inv_sqrt2
+        ry = (n - k - 0.5) * inv_sqrt2
+        ax.text(
+            rx + n_right[0] * pad,
+            ry + n_right[1] * pad,
+            lab,
+            ha="left",
+            va="center",
+            rotation=45,
+            rotation_mode="anchor",
+            fontsize=label_fontsize,
+            clip_on=False,
+        )
+
+    # Margins for leg labels (no hypotenuse text)
+    x_max = n * sqrt2
+    y_max = n * inv_sqrt2
+    margin = pad + 0.7 + 0.05 * max_lab
+    ax.set_xlim(-margin, x_max + margin)
+    ax.set_ylim(-0.35, y_max + margin)
+
+    divider = make_axes_locatable(ax)
+    cax = divider.append_axes("right", size="4.0%", pad=0.65)
+    cb = fig.colorbar(mesh, cax=cax)
+    cb.ax.tick_params(labelsize=max(11.0, label_fontsize - 1))
+    cb.outline.set_linewidth(1.0)
+
+    fig.savefig(out_pdf, bbox_inches="tight", pad_inches=0.25)
+    fig.savefig(out_svg, bbox_inches="tight", pad_inches=0.25)
+    plt.close(fig)
+
+
+def write_heatmaps_from_matrices(
+    out_dir: Path,
+    keys: list[str],
+    *,
+    layers: Iterable[str],
+    scores: Iterable[str] = HEATMAP_SCORES,
+    label_fontsize: float = 20.0,
+) -> list[Path]:
+    """Rebuild publication triangle heatmaps from ``matrix_{layer}_{score}.npy``."""
+    out_dir = Path(out_dir)
+    labels = [short_run_label(k) for k in keys]
+    written: list[Path] = []
+    for layer in layers:
+        for score in scores:
+            path = out_dir / f"matrix_{layer}_{score}.npy"
+            if not path.is_file():
+                print(f"[replot] skip missing {path}", flush=True)
+                continue
+            mat = np.load(path)
+            cmap = (
+                "viridis"
+                if ("rsa" in score or score == "cka_linear")
+                else "magma"
+            )
+            pdf = out_dir / f"heatmap_{layer}_{score}.pdf"
+            svg = out_dir / f"heatmap_{layer}_{score}.svg"
+            plot_lower_triangle_hypotenuse(
+                mat,
+                labels,
+                title=f"{score} — {layer}",
+                out_pdf=pdf,
+                out_svg=svg,
+                cmap=cmap,
+                label_fontsize=label_fontsize,
+            )
+            written.extend([pdf, svg])
+            print(f"[replot] {pdf.name}", flush=True)
+    return written
+
+
 def _id_index(st: EmbedStore) -> dict[str, int]:
     return {str(i): j for j, i in enumerate(st.ids)}
 
@@ -373,11 +566,6 @@ def run_pairwise_compare(
     ``loo_fold`` (default 0) keeps a single LOO fold per LOO run so heatmaps
     are not dominated by repeated r31 fold axes; ``None`` keeps all folds.
     """
-    import matplotlib
-
-    matplotlib.use("Agg")
-    import matplotlib.pyplot as plt
-
     embed_root = Path(embed_root)
     out_dir = Path(out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -446,36 +634,29 @@ def run_pairwise_compare(
                 flush=True,
             )
 
-        # Heatmaps for key scores
-        for score in (
-            "cka_linear",
-            "rsa_centered_cosine",
-            "rsa_corr_distance",
-            "rsa_mahalanobis",
-            "procrustes_disparity",
-            "mean_centered_cosine_dist",
-            "mean_mahalanobis",
-        ):
+        # Heatmaps for key scores (lower triangle on hypotenuse; short labels)
+        labels = [short_run_label(k) for k in keys]
+        for score in HEATMAP_SCORES:
             mat = np.full((len(keys), len(keys)), np.nan, dtype=np.float64)
             for i, ki in enumerate(keys):
                 mat[i, i] = 1.0 if not score.startswith(("procrustes", "mean_")) else 0.0
             for r in layer_rows:
                 i, j = keys.index(r["run_a"]), keys.index(r["run_b"])
                 mat[i, j] = mat[j, i] = r[score]
-            fig, ax = plt.subplots(figsize=(8.5, 7.0))
-            im = ax.imshow(mat, cmap="viridis" if "rsa" in score or score == "cka_linear" else "magma")
-            ax.set_xticks(range(len(keys)))
-            ax.set_yticks(range(len(keys)))
-            short = [k.replace("run", "r").replace("_legnet_", "_")[:28] for k in keys]
-            ax.set_xticklabels(short, rotation=90, fontsize=6)
-            ax.set_yticklabels(short, fontsize=6)
-            ax.set_title(f"{score} — {layer}")
-            fig.colorbar(im, ax=ax, fraction=0.046)
-            fig.tight_layout()
-            fig.savefig(out_dir / f"heatmap_{layer}_{score}.pdf", bbox_inches="tight")
-            fig.savefig(out_dir / f"heatmap_{layer}_{score}.svg", bbox_inches="tight")
-            plt.close(fig)
             np.save(out_dir / f"matrix_{layer}_{score}.npy", mat)
+            cmap = (
+                "viridis"
+                if ("rsa" in score or score == "cka_linear")
+                else "magma"
+            )
+            plot_lower_triangle_hypotenuse(
+                mat,
+                labels,
+                title=f"{score} — {layer}",
+                out_pdf=out_dir / f"heatmap_{layer}_{score}.pdf",
+                out_svg=out_dir / f"heatmap_{layer}_{score}.svg",
+                cmap=cmap,
+            )
 
     # Write TSV
     tsv = out_dir / "pairwise_compare.tsv"
