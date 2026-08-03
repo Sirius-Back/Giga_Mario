@@ -1,3 +1,5 @@
+<img src="mario.png" align="right" width="120" alt="GigaMario logo"/>
+
 # GigaMario
 
 Toolkit for preparing genomic intervals, linking prediction targets, building leakage-aware train/val/test partitions, and training DNA foundation models (Caduceus, LegNet, …).
