@@ -44,7 +44,7 @@ HEATMAP_SCORES = (
     "mean_mahalanobis",
 )
 
-_RUN_PREFIX_RE = re.compile(r"^run\d+_legnet_")
+_RUN_PREFIX_RE = re.compile(r"^run\d+_(?:legnet|caduceus)_")
 _R_PREFIX_RE = re.compile(r"^r\d+_")
 _FOLD_SUFFIX_RE = re.compile(r"/fold\d+$")
 

@@ -98,6 +98,47 @@ def write_manifest(
     return path
 
 
+def write_caduceus_manifest(
+    out_dir: Path,
+    *,
+    run_key: str,
+    run_name: str,
+    fold: int | None,
+    model_dir: Path,
+    split_csv: Path,
+    splits_dir: Path,
+    layers: dict[str, int],
+    n_by_role: dict[str, int],
+    extra: dict[str, Any] | None = None,
+) -> Path:
+    out_dir = Path(out_dir)
+    payload: dict[str, Any] = {
+        "model": "caduceus",
+        "run_key": run_key,
+        "run_name": run_name,
+        "fold": fold,
+        "model_dir": str(model_dir),
+        "split_csv": str(split_csv),
+        "splits_dir": str(splits_dir),
+        "layers": {
+            k: {"dim": int(d), "path": f"layer_{k}.npy"} for k, d in layers.items()
+        },
+        "n_by_role": {r: int(n_by_role.get(r, 0)) for r in ROLE_NAMES},
+        "role_codes": {
+            "train": ROLE_TRAIN,
+            "test": ROLE_TEST,
+            "val": ROLE_VAL,
+        },
+        "generated_at": datetime.now(timezone.utc).isoformat(),
+        "rcps_strand_averaged": True,
+    }
+    if extra:
+        payload.update(extra)
+    path = out_dir / "manifest.json"
+    path.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
+    return path
+
+
 def load_store(out_dir: Path, layers: Iterable[str] | None = None) -> EmbedStore:
     out_dir = Path(out_dir)
     ids = np.load(out_dir / "ids.npy", allow_pickle=True)

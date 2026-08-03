@@ -1,7 +1,7 @@
-"""LegNet (phase-1) layer embeddings + within-model split leakage L(τ).
+"""Layer embeddings + geometry compare (LegNet phase-1, Caduceus phase-2).
 
-Caduceus extract is out of scope; see ``src.embed.protocol`` for the shared
-embedding-extractor contract used by a future Caduceus backend.
+Caduceus: ``python -m src.embed.run_caduceus`` → ``results/embed_caduceus/``.
+Shared contract: ``src.embed.protocol.EmbeddingExtractor``.
 """
 
 from __future__ import annotations

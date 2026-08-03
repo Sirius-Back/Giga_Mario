@@ -5,9 +5,17 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Protocol, TypeVar
 
 _BAD_RE = re.compile(r"_BAD_", re.IGNORECASE)
 _FOLD_RE = re.compile(r"^fold(\d+)$")
+
+
+class _HasFold(Protocol):
+    fold: int | None
+
+
+_T = TypeVar("_T", bound=_HasFold)
 
 
 @dataclass(frozen=True)
@@ -77,9 +85,7 @@ def _try_unit(
     )
 
 
-def filter_loo_runs(
-    runs: list[LegNetRun], loo_fold: int | None
-) -> list[LegNetRun]:
+def filter_loo_runs(runs: list[_T], loo_fold: int | None) -> list[_T]:
     """Keep only ``fold==loo_fold`` for LOO units; pass through non-LOO.
 
     ``loo_fold=None`` keeps every fold (debug / full LOO tables).
@@ -87,7 +93,7 @@ def filter_loo_runs(
     """
     if loo_fold is None:
         return list(runs)
-    out: list[LegNetRun] = []
+    out: list[_T] = []
     for r in runs:
         if r.fold is None or r.fold == loo_fold:
             out.append(r)
