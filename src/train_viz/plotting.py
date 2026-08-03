@@ -131,26 +131,27 @@ def save_cns_figure(stem: Path, dpi: int) -> list[Path]:
     stem.parent.mkdir(parents=True, exist_ok=True)
     written: list[Path] = []
     fig = plt.gcf()
+    # Opaque white canvas (SVG otherwise ships transparent — bad for slides/print).
+    fig.patch.set_facecolor("white")
+    for ax in fig.axes:
+        ax.set_facecolor("white")
     extras = [obj for obj in fig.legends] if getattr(fig, "legends", None) else []
+    save_kw = dict(
+        bbox_inches="tight",
+        pad_inches=0.15,
+        bbox_extra_artists=extras or None,
+        facecolor="white",
+        edgecolor="none",
+        transparent=False,
+    )
     for ext in ("pdf", "svg", "png"):
         path = stem.with_suffix(f".{ext}")
         if ext == "png":
-            plt.savefig(
-                path,
-                dpi=dpi,
-                bbox_inches="tight",
-                pad_inches=0.15,
-                bbox_extra_artists=extras or None,
-            )
+            plt.savefig(path, dpi=dpi, **save_kw)
         else:
             # Prefer matplotlib save so figure legends outside axes are kept.
             try:
-                fig.savefig(
-                    path,
-                    bbox_inches="tight",
-                    pad_inches=0.15,
-                    bbox_extra_artists=extras or None,
-                )
+                fig.savefig(path, **save_kw)
             except Exception:
                 cns.savefig(path)
         written.append(path)

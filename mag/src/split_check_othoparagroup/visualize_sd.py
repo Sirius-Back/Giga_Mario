@@ -11,15 +11,18 @@ import numpy as np
 import pandas as pd
 
 OKABE = [
-    "#E69F00",
-    "#56B4E9",
-    "#009E73",
-    "#F0E442",
-    "#0072B2",
-    "#D55E00",
-    "#CC79A7",
-    "#000000",
-    "#999999",
+    "#E69F00",  # gc
+    "#56B4E9",  # hashfrag
+    "#009E73",  # kmer
+    "#F0E442",  # mmseqs
+    "#0072B2",  # blastp
+    "#D55E00",  # pangenome
+    "#CC79A7",  # paralogs_only
+    "#000000",  # random
+    "#882255",  # loco
+    "#44AA99",  # vgae
+    "#AA4499",  # gcn
+    "#999999",  # other
 ]
 FAM_DOMAIN = [
     "gc",
@@ -30,8 +33,16 @@ FAM_DOMAIN = [
     "pangenome",
     "paralogs_only",
     "random",
+    "loco",
+    "vgae",
+    "gcn",
     "other",
 ]
+# Prefer runs_unif-native outdirs over older runs/-sourced aliases
+SUPERSEDED_OUTDIRS = {
+    "caduceus_run16_hashfrag_caduceus",  # superseded by caduceus_run16_caduceus_hashfrag
+    "legnet_run5_hashfrag",  # superseded by legnet_run5_legnet_hashfrag
+}
 ROW_PX = 28
 HEADER_PX = 20
 AXIS_PX = 30
@@ -47,6 +58,8 @@ def _parse_outdir_name(name: str) -> tuple[str, str]:
 
 
 def _is_legacy_dir(name: str) -> bool:
+    if name in SUPERSEDED_OUTDIRS:
+        return True
     return any(m in name for m in LEGACY_DIR_MARKERS)
 
 
@@ -92,9 +105,15 @@ def _strategy_family(run_short: str) -> str:
         return "mmseqs"
     if "hashfrag" in s:
         return "hashfrag"
+    if "gcn" in s:
+        return "gcn"
+    if "vgae" in s:
+        return "vgae"
+    if re.search(r"(?:^|_)loco(?:_|$)", s):
+        return "loco"
     if "pangenome" in s:
         return "pangenome"
-    if "kmer" in s or re.search(r"_k\d+", s):
+    if "kmer" in s or re.search(r"(?:^|_)k\d+(?:_|$)", s):
         return "kmer"
     if "gc_" in s or "gc-" in s or "kmeans" in s:
         return "gc"
@@ -111,6 +130,9 @@ def _strategy_params(run_short: str) -> tuple[str, str]:
         "blastp": r"^blastp_?",
         "mmseqs": r"^mmseqs_?",
         "hashfrag": r"^hashfrag_?",
+        "gcn": r"^gcn_?",
+        "vgae": r"^vgae_?",
+        "loco": r"^loco_?",
         "pangenome": r"^pangenome_?",
         "kmer": r"^kmer_?",
         "gc": r"^gc_?",
@@ -748,7 +770,7 @@ def plot_ks_heatmaps(df: pd.DataFrame, out_root: Path) -> list[Path]:
         )
         # labels only if not too many cells
         layers = heat
-        if n <= 16:
+        if n <= 14:
             layers = heat + (
                 alt.Chart(long)
                 .mark_text(size=7)

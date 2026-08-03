@@ -350,7 +350,7 @@ def plot(
         x + w / 2, sp, yerr=sep, fmt="none", ecolor=COLOR_ANNOT, elinewidth=0.9, capsize=2, zorder=4
     )
     ax_a.set_xticks(x)
-    ax_a.set_xticklabels(labels, rotation=60, ha="right", fontsize=8)
+    ax_a.set_xticklabels(labels, rotation=90, ha="center", va="top", fontsize=8)
     ax_a.set_ylabel(L["ylabel_sd"], fontsize=11)
     ax_a.set_title(L["A_title"], fontsize=12, loc="left", pad=6)
     ax_a.legend(fontsize=9, frameon=True, fancybox=False, edgecolor="#CCCCCC")
@@ -371,7 +371,7 @@ def plot(
         zorder=3,
     )
     ax_b.set_xticks(x)
-    ax_b.set_xticklabels(labels, rotation=60, ha="right", fontsize=8)
+    ax_b.set_xticklabels(labels, rotation=90, ha="center", va="top", fontsize=8)
     ax_b.set_ylabel(L["ylabel_lhom"], fontsize=11)
     ax_b.set_title(L["B_title"], fontsize=12, loc="left", pad=6)
     ax_b.text(

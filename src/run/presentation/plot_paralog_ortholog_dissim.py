@@ -162,7 +162,7 @@ def plot(
     ax.axhline(0.0, color=COLOR_ZERO, ls="--", lw=1.2, zorder=2)
 
     ax.set_xticks(x)
-    ax.set_xticklabels(methods, rotation=55, ha="right", fontsize=9.5)
+    ax.set_xticklabels(methods, rotation=90, ha="center", va="top", fontsize=9.5)
     ax.set_ylabel(L["ylabel"], fontsize=13)
     ax.set_xlabel(L["xlabel"], fontsize=13)
     ax.set_title(L["title"], fontsize=13.5, pad=10)
