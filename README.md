@@ -2,7 +2,7 @@
 
 # GigaMario
 
-Toolkit for preparing genomic intervals, linking prediction targets, building leakage-aware train/val/test partitions, and training DNA foundation models (Caduceus, LegNet, …).
+Toolkit for preparing genomic intervals, linking prediction targets, building leakage-aware train/val/test partitions, and training DNA models (Caduceus, LegNet, …).
 
 | Doc | Role |
 |-----|------|
